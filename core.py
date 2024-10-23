@@ -1,5 +1,6 @@
 import os
 import aiosqlite
+import traceback
 
 from aiogram import Bot
 from typing import Union
@@ -24,6 +25,17 @@ async def execute(sql: str, params: tuple = None) -> tuple[tuple[Union[str, int]
     return result
 
 
+def security(fun):
+    async def new_fun(event):
+        try:
+            await fun(event)
+        except Exception as e:
+            exception = "".join(traceback.format_exception(e))
+            await SystemBot.send_system_message(SystemBot.admin, f"Возникла ошибка!\n{exception}")
+
+    return new_fun
+
+
 class Data:
     version = "2.1"
     BOT_API_KEY = os.environ['SYSTEM_BOT_API_KEY']
@@ -33,9 +45,10 @@ class Data:
 
 class SystemBot:
     id = 7025564473
+    admin = 5128609241
     username = "SystemMaksimBot"
     bot = Bot(Data.BOT_API_KEY)
 
     @staticmethod
-    async def send_system_message(chat_id: int, text: str, **kwargs):
-        await SystemBot.bot.send_message(chat_id, text, **kwargs)
+    async def send_system_message(chat_id: int, message: str, **kwargs):
+        await SystemBot.bot.send_message(chat_id, str(message), **kwargs)

@@ -16,19 +16,24 @@ def main(account_run: Union[int, None] = None):
     accounts = Account.get_accounts()
     for account in accounts:
         telegram_client = TelegramClient(
-            session=account.get_session_path(),
-            api_id=core.Data.APPLICATION_ID,
-            api_hash=core.Data.APPLICATION_HASH,
-            system_version="4.16.30-vxCUSTOM",
-            app_version=core.Data.version
+            account.get_session_path(),
+            core.Data.APPLICATION_ID,
+            core.Data.APPLICATION_HASH,
+            device_model=account.device_model,
+            system_version="Windows 10 x64",
+            app_version="%s x64" % core.Data.version,
+            lang_code="ru",
+            system_lang_code="ru"
         )
 
-        if account_run is not None and account.id != account_run:
+        if account.id != account_run or account.my_messages == 0:
             continue
         start = admin_start if account.id == 5128609241 else account_start
 
         print("Вход %s" % account.name)
-        telegram_client.start(phone=lambda: account.phone, password=lambda: account.password)
+        telegram_client.connect()
+        if not telegram_client.is_user_authorized():
+            telegram_client.start(phone=lambda: account.phone, password=lambda: account.password)
         print("Запуск %s (v%s)" % (account.name, core.Data.version))
         start(main_loop, account, telegram_client)
 

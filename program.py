@@ -1,13 +1,16 @@
+import emoji
+import string
+import asyncio
 import datetime
 
 from typing import Union
 from accounts import Account
-from core import execute, SystemBot, Data
 from telethon.tl.patched import Message
 from telethon.sync import TelegramClient, events
+from core import execute, SystemBot, Data, security
 from telethon.errors import ChatForwardsRestrictedError
 from telethon.errors.rpcerrorlist import MessageNotModifiedError
-from telethon.tl.functions.messages import GetCustomEmojiDocumentsRequest
+from telethon.tl.functions.messages import GetCustomEmojiDocumentsRequest, GetMessagesRequest
 from telethon.tl.types import (
     User,
     PeerUser,
@@ -15,6 +18,7 @@ from telethon.tl.types import (
     PhotoSize,
     PeerChannel,
     ReactionEmoji,
+    InputMessageID,
     MessageMediaGeo,
     UserStatusOnline,
     MessageMediaDice,
@@ -27,6 +31,9 @@ from telethon.tl.types import (
     MessageMediaDocument,
     DocumentAttributeAudio,
     DocumentAttributeVideo,
+    UpdateReadChannelInbox,
+    UpdateReadHistoryInbox,
+    MessageEntityCustomEmoji,
     DocumentAttributeSticker,
     DocumentAttributeFilename,
     DocumentAttributeAnimated,
@@ -46,16 +53,21 @@ class Program:
         self.status_users: dict[int, bool] = {user: None for user in self.account.status_users}  # {id: True} -> id в сети
 
         @client.on(events.NewMessage(func=lambda event: event.is_private or event.chat_id in account.add_chats))
+        @security
         async def new_message(event: events.newmessage.NewMessage.Event):
             if await self.check_chat(event):
                 await self.new_message(event)
+                if not isinstance(self.account.answering_machine, bool) and event.is_private:
+                    await self.answering_machine(event)
 
         @client.on(events.MessageEdited(func=lambda event: event.is_private or event.chat_id in account.add_chats))
+        @security
         async def message_edited(event: events.messageedited.MessageEdited.Event):
             if await self.check_chat(event):
                 await self.message_edited(event)
 
         @client.on(events.MessageDeleted())
+        @security
         async def message_delete(event: events.messagedeleted.MessageDeleted.Event):
             if event.is_private is False:
                 if event.chat_id not in self.account.add_chats:
@@ -63,11 +75,13 @@ class Program:
             await self.message_delete(event)
 
         @client.on(events.MessageRead(func=lambda event: event.is_private or event.chat_id in account.add_chats, inbox=False))
+        @security
         async def message_read_outbox(event: events.messageread.MessageRead.Event):
             if await self.check_chat(event):
                 await self.message_read(event, me=False)
 
         @client.on(events.MessageRead(func=lambda event: event.is_private or event.chat_id in account.add_chats, inbox=True))
+        @security
         async def message_read_inbox(event: events.messageread.MessageRead.Event):
             if await self.check_chat(event):
                 await self.message_read(event, me=True)
@@ -76,8 +90,14 @@ class Program:
             chats=account.status_users,
             func=lambda event: isinstance(event.status, (UserStatusOnline, UserStatusOffline)))
         )
+        @security
         async def user_update(event: events.userupdate.UserUpdate.Event):
             await self.user_update(event)
+
+        @client.on(events.NewMessage(chats=[SystemBot.id], outgoing=True))
+        @security
+        async def system_bot(event: events.newmessage.NewMessage.Event):
+            await self.system_bot(event)
 
     # Проверяет: нужно ли взаимодействовать с действием (сообщение, изменение...) данного чата
     async def check_chat(self, event) -> bool:
@@ -90,6 +110,10 @@ class Program:
     async def chat_name(self, chat_id: int, /, my_name: str = "Избранное", unknown: str = "Неизвестный пользователь", is_hashtag: bool = False) -> str:
         def get_hashtag(first_name: str, last_name: str = ""):
             text = f"{first_name} {last_name}" if last_name else first_name
+            if is_hashtag:
+                for letter in string.punctuation:
+                    text = text.replace(letter, "")
+
             return text.replace(" ", "_") if is_hashtag else text
 
         if chat_id == self.id:
@@ -117,18 +141,20 @@ class Program:
             return peer.channel_id
         return 0
 
+    # Считает длину сообщения
+    @staticmethod
+    def get_length_message(message: str) -> int:
+        return message.__len__() + emoji.emoji_list(message).__len__()
+
     async def execute(self, sql: str, params: tuple = ()) -> tuple[tuple[Union[str, int]]]:
         return await execute(sql.replace("<table>", f"'{self.id}_messages'"), params)
 
     async def new_message(self, event: events.newmessage.NewMessage.Event):
         message: Message = event.message
+
         if message.text == f"остановить_программу()":
             await self.client.send_message(event.chat_id, "Программа завершила выполнение!")
             await self.client.disconnect()
-            return
-
-        if message.text == "1" and message.chat_id == self.id:
-            await self.client.send_message(event.chat_id, "Работает!")
             return
 
         name = await self.chat_name(event.chat_id, is_hashtag=True)
@@ -214,6 +240,8 @@ class Program:
                 media += "#Кубик "
             elif isinstance(message.media, MessageMediaGeoLive):
                 media += "#Геолокация "
+        if message.from_id == 777000:
+            return
         try:
             send_message = await self.client.forward_messages(self.account.my_messages, message)
         except ChatForwardsRestrictedError:
@@ -240,11 +268,12 @@ class Program:
         return False
 
     # Получение реакций сообщения в формате str
-    async def get_reactions(self, event: events.messageedited.MessageEdited.Event) -> str:
+    async def get_reactions(self, event: events.messageedited.MessageEdited.Event, /, is_premium: bool = False) -> tuple[str, list]:
         message: Message = event.message
         if not message.reactions:
-            return ""
+            return "", []
         reactions = "Изменены реакции:\n"
+        entities = []
         if message.reactions.recent_reactions:  # Реакции и их "владельцы" (например, в личном чате)
             for reaction in message.reactions.recent_reactions:
                 user_id = self.get_id(reaction.peer_id)
@@ -255,7 +284,12 @@ class Program:
                     document_id = reaction.reaction.document_id
                     document = (await self.client(GetCustomEmojiDocumentsRequest([document_id])))[0].to_dict()
                     emoticon = document['attributes'][1]['alt']
-                    reactions += f"{peer}: premium'{emoticon}'\n"
+                    if is_premium:
+                        reactions += f"{peer}: {emoticon}\n"
+                        offset = self.get_length_message(reactions[:-len(emoticon) - 1])
+                        entities.append(MessageEntityCustomEmoji(document_id=document_id, length=2, offset=offset))
+                    else:
+                        reactions += f"{peer}: premium'{emoticon}'\n"
         elif message.reactions.results:  # Реакции и их количество (например, в канале)
             for reaction in message.reactions.results:
                 count = reaction.count
@@ -271,10 +305,15 @@ class Program:
                     document_id = reaction.reaction.document_id
                     document = (await self.client(GetCustomEmojiDocumentsRequest([document_id])))[0].to_dict()
                     emoticon = document['attributes'][1]['alt']
-                    reactions += f"premium'{emoticon}': {count} {word_reactions}\n"
+                    if is_premium:
+                        offset = self.get_length_message(reactions)
+                        reactions += f"{emoticon}: {count} {word_reactions}\n"
+                        entities.append(MessageEntityCustomEmoji(document_id=document_id, length=2, offset=offset))
+                    else:
+                        reactions += f"premium'{emoticon}': {count} {word_reactions}\n"
         else:
-            return ""
-        return reactions
+            return "", []
+        return reactions, entities
 
     # Взаимодействие с изменением сообщения
     async def message_edited(self, event: events.messageedited.MessageEdited.Event):
@@ -287,12 +326,15 @@ class Program:
         if not await self.check_reactions(event):  # Если изменено содержание сообщения (текст или медиа)
             await self.client.send_message(self.account.my_messages, message, comment_to=id)
         else:  # Изменение реакций
-            reactions = await self.get_reactions(event)
+            is_premium = (await self.client.get_me()).premium
+            reactions, entities = await self.get_reactions(event, is_premium=is_premium)
+            reactions_str, _ = await self.get_reactions(event)
             await self.execute(f"UPDATE <table> SET reactions=? WHERE chat_id=? AND message_id=?",
-                               (reactions, message.chat_id, message.id))
+                               (reactions_str, message.chat_id, message.id))
 
             reactions = reactions if reactions else "Реакции убраны"
-            await self.client.send_message(self.account.my_messages, reactions, comment_to=id)
+            await self.client.send_message(self.account.my_messages, reactions, formatting_entities=entities,
+                                           comment_to=id)
 
     # Взаимодействие с удалением сообщения
     async def message_delete(self, event: events.messagedeleted.MessageDeleted.Event):
@@ -303,14 +345,12 @@ class Program:
             if is_private:
                 message: tuple[tuple] = await self.execute("SELECT chat_id, forward_message_id "
                                                            f"FROM <table> WHERE message_id=?", (id,))
+                if not message: continue
+                chat_id, forward_message_id = message[0]
             else:
                 message: tuple = await self.execute(f"SELECT forward_message_id FROM <table> "
                                                     "WHERE chat_id=? AND message_id=?", (chat_id, id))
-            if not message:
-                continue
-            if is_private:
-                chat_id, forward_message_id = message[0]
-            else:
+                if not message: continue
                 forward_message_id = message[0][0]
             await self.execute(f"DELETE FROM <table> WHERE message_id=?", (id,))
             await self.client.send_message(self.account.my_messages, "Сообщение удалено",
@@ -318,24 +358,50 @@ class Program:
             if chat_id != self.id:
                 link_to_message = f"t.me/c/{str(self.account.my_messages)[4:]}/{forward_message_id}"  # Сис. канал
                 chat_name = await self.chat_name(chat_id, "Я")
-                await SystemBot.send_system_message(
-                    self.id, f"{chat_name} удалил(а) <a href='{link_to_message}'>сообщение</a>", parse_mode="HTML")
+                if is_private:
+                    await SystemBot.send_system_message(
+                        self.id, f"{chat_name} удалил(а) <a href='{link_to_message}'>сообщение</a>", parse_mode="HTML")
+                elif event.is_group or event.is_channel:
+                    await SystemBot.send_system_message(
+                        self.id, f"Кто-то из {chat_name} удалил(а) <a href='{link_to_message}'>сообщение</a>",
+                        parse_mode="HTML")
                 await self.client.pin_message(self.account.my_messages, forward_message_id)
 
     # Взаимодействие с прочтением сообщений
     async def message_read(self, event: events.messageread.MessageRead.Event, /, me: bool):
+        if not event.is_private:
+            me and await self.message_read_group(event)
+            return
         if me:  # Прочитано аккаунтом
             read_user = "Я"
         else:  # Прочитано другим пользователем
             read_user = await self.chat_name(self.get_id(event.original_update.peer))
         message_id = event.max_id
-        await self.execute(f"UPDATE <table> SET read=? WHERE message_id=?", (1, message_id))
+        chat_id = (await event.get_chat()).id
+        # await self.execute(f"UPDATE <table> SET read=? WHERE message_id<=?", (1, message_id))
         forward_message_id = await self.execute(f"SELECT forward_message_id FROM <table> "
-                                                f"WHERE message_id=?", (message_id,))
+                                                f"WHERE message_id=? AND chat_id=?", (message_id, chat_id))
         if not forward_message_id:
             return
         forward_message_id = int(forward_message_id[0][0])
         await self.client.send_message(self.account.my_messages, f"{read_user} прочитал(а) сообщение",
+                                       comment_to=forward_message_id)
+
+    # Взаимодействие с прочтением сообщения из группы
+    async def message_read_group(self, event: events.messageread.MessageRead.Event):
+        if isinstance(event.original_update, UpdateReadChannelInbox):  # МегаГруппа
+            group_id = int(f"-100{event.original_update.channel_id}")
+        elif isinstance(event.original_update, UpdateReadHistoryInbox):  # Группа
+            group_id = -self.get_id(event.original_update.peer)
+        else:
+            return
+        message_id = event.max_id
+        forward_message_id = await self.execute(f"SELECT forward_message_id FROM <table> "
+                                                f"WHERE message_id=? AND chat_id=?", (message_id, group_id))
+        if not forward_message_id:
+            return
+        forward_message_id = int(forward_message_id[0][0])
+        await self.client.send_message(self.account.my_messages, f"Я прочитал(а) сообщение",
                                        comment_to=forward_message_id)
 
     async def user_update(self, event: events.userupdate.UserUpdate.Event):
@@ -366,9 +432,37 @@ class Program:
         await self.client.send_message(self.account.my_messages,
                                         f"{name} {type_status}\n{id}#{name} #{type_status} #Статус")
 
+    # Обработка сообщений системному боту от аккаунта
+    async def system_bot(self, event: events.newmessage.NewMessage.Event):
+        message: Message = event.message
+        if message.text.startswith("/start"):
+            send = "<a href='tg://message?slug=ADmr7VSSZWFi'>напишите</a>"
+            await SystemBot.send_system_message(self.id, f"Программа работает штатно! Если возникли проблемы, {send} "
+                                                         "админу программы")
+        elif message.text == "/answering_machine":
+            self.account.answering_machine = True
+            await SystemBot.send_system_message(self.id, "Отправьте сообщение, которым я отвечу собеседнику, "
+                                                         "например: \"Я сейчас не могу ответить\"")
+        elif self.account.answering_machine is True:
+            self.account.answering_machine = message.id
+            await SystemBot.send_system_message(self.id, "Отлично! Если кто-то напишет сообщение, пока вы не отключите "
+                                                         "автоответчик, я отправлю от Вашего имени ответ")
+        elif message.text.startswith("/answering_machine_stop"):
+            self.account.answering_machine = False
+            await SystemBot.send_system_message(self.id, "Автоответчик выключен!")
+        else:
+            await SystemBot.send_system_message(self.id, "Такой команды нет!")
+
+    async def answering_machine(self, event: events.newmessage.NewMessage.Event):
+        message: Message = event.message
+        await asyncio.sleep(1)
+        copy_message_id = self.account.answering_machine
+        copy_message = (await self.client(GetMessagesRequest(id=[InputMessageID(copy_message_id)]))).messages[0]
+        await self.client.send_message(message.chat_id, copy_message)
+
     async def run_until_disconnected(self):
         await self.execute(
             f"CREATE TABLE IF NOT EXISTS <table> "
             f"(chat_id INTEGER, message_id INTEGER, forward_message_id INTEGER, read INTEGER, reactions TEXT)")
-        await SystemBot.send_system_message(5128609241, f"SavingMessages v{self.__version__} для {self.name} запущен")
+        await SystemBot.send_system_message(SystemBot.admin, f"SavingMessages v{self.__version__} для {self.name} запущен")
         await self.client.run_until_disconnected()
