@@ -33,10 +33,15 @@ async def main():
         account.get_session_path(),
         Data.APPLICATION_ID,
         Data.APPLICATION_HASH,
-        system_version="4.16.30-vxCUSTOM",
-        app_version=Data.version
+        device_model=account.device_model,
+        system_version="Windows 10 x64",
+        app_version="%s x64" % Data.version,
+        lang_code="ru",
+        system_lang_code="ru"
     )
-    client.start(phone=account.phone, password=account.password)
+    await client.connect()
+    if not await client.is_user_authorized():
+        client.start(phone=account.phone, password=account.password)
 
     my_messages = await client(CreateChannelRequest("Мои сообщения", "Мои сообщения", megagroup=False))
     my_messages_id = my_messages.updates[1].channel_id
