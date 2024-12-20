@@ -1,11 +1,10 @@
-import asyncio
-
-from accounts import Account
+from typing import Union
 from telethon import functions
 from datetime import timedelta
-from core import Data, SystemBot
+from core import MaksogramBot, channel
 from telethon.sync import TelegramClient
-from telethon.tl.functions.messages import StartBotRequest, UpdateDialogFilterRequest
+from telethon.tl.types.contacts import ResolvedPeer
+from telethon.tl.functions.messages import UpdateDialogFilterRequest
 
 from telethon.tl.types import (
     InputChannel,
@@ -18,80 +17,93 @@ from telethon.tl.types import (
 )
 from telethon.tl.functions.channels import (
     EditPhotoRequest,
+    JoinChannelRequest,
     CreateChannelRequest,
-    UpdateUsernameRequest,
     SetDiscussionGroupRequest,
 )
 
 
-async def main():
-    account = Account.get_accounts()[int(input("ID пользователя: "))]
-    username_channel_status = input("Username канала для статуса: ")
-    title_channel_status = input("Название канала для статуса: ")
-    print()
-    client = TelegramClient(
-        account.get_session_path(),
-        Data.APPLICATION_ID,
-        Data.APPLICATION_HASH,
-        device_model=account.device_model,
-        system_version="Windows 10 x64",
-        app_version="%s x64" % Data.version,
-        lang_code="ru",
-        system_lang_code="ru"
-    )
-    await client.connect()
-    if not await client.is_user_authorized():
-        client.start(phone=account.phone, password=account.password)
-
-    my_messages = await client(CreateChannelRequest("Мои сообщения", "Мои сообщения", megagroup=False))
-    my_messages_id = my_messages.updates[1].channel_id
-    my_messages_access_hash = my_messages_id.chats[0].access_hash
-    input_my_messages = InputChannel(my_messages_id, my_messages_access_hash)
-    input_peer_my_messages = InputPeerChannel(my_messages_id, my_messages_access_hash)
-    await client(EditPhotoRequest(input_my_messages, InputChatUploadedPhoto(await client.upload_file("resources/my_messages.jpg"))))
-    await client.edit_folder(input_peer_my_messages, 1)
-    print("Канал \"Мои сообщения\" создан")
-
-    message_changes = await client(CreateChannelRequest("Изменение сообщения", "Все изменения сообщений аккаунта", megagroup=True))
-    message_changes_id = message_changes.updates[1].channel_id
-    message_changes_access_hash = message_changes.chats[0].access_hash
-    input_message_changes = InputChannel(message_changes_id, message_changes_access_hash)
-    input_peer_message_changes = InputPeerChannel(message_changes_id, message_changes_access_hash)
-    await client(EditPhotoRequest(input_message_changes, InputChatUploadedPhoto(await client.upload_file("resources/edit_message.jpg"))))
-    await client(functions.account.UpdateNotifySettingsRequest(InputNotifyPeer(input_peer_message_changes), InputPeerNotifySettings(show_previews=False, mute_until=timedelta(days=365))))
-    await client.edit_folder(input_peer_message_changes, 1)
-    print("Группа \"Изменение сообщения\" создана")
-
-    await client(SetDiscussionGroupRequest(input_message_changes, input_message_changes))
-    print("Группа теперь стала комментариями к каналу\n")
-
-    channel_status = await client(CreateChannelRequest(title_channel_status, "В сети я или нет...", megagroup=False))
-    channel_status_id = channel_status.updates[1].channel_id
-    channel_status_access_hash = channel_status.chats[0].access_hash
-    input_status_channel = InputChannel(channel_status_id, channel_status_access_hash)
-    input_peer_status_channel = InputPeerChannel(channel_status_id, channel_status_access_hash)
-    await client(UpdateUsernameRequest(input_status_channel, username_channel_status))
-    await client(EditPhotoRequest(input_status_channel, InputChatUploadedPhoto(await client.upload_file("resources/status_channel.jpg"))))
-    message_status_id = (await client.send_message(input_peer_status_channel, "в сети")).id
-    await client.edit_folder(input_peer_status_channel, 1)
-    print(f"Канал \"{username_channel_status}\" создан")
-
-    await client(StartBotRequest(SystemBot.username, SystemBot.username, 'start'))
-    bot = await client(functions.contacts.ResolveUsernameRequest("SystemMaksimBot"))
-    bot = InputPeerUser(SystemBot.id, bot.users[0].access_hash)
-    await client.edit_folder(bot, 1)
-    print("Системный бот запущен")
-
-    await client(UpdateDialogFilterRequest(42, DialogFilter(42, "Программа", [input_peer_my_messages, input_peer_status_channel, bot], [], [])))
-    print("Папка создана")
-
-    print("my_messages_id:", my_messages_id)
-    print("message_changes_id:", message_changes_id)
-    print("message_status_id:", message_status_id)
-    print("channel_status_id:", channel_status_id)
-
-    print("Все!")
+class CreateChatsError(Exception):
+    pass
 
 
-if __name__ == '__main__':
-    asyncio.run(main())
+async def create_chats(client: TelegramClient) -> dict[str, Union[str, Exception]]:
+    try:
+        # Создание канала "Мои сообщения"
+        my_messages = await client(CreateChannelRequest("Мои сообщения", "Мои сообщения", megagroup=False))
+        my_messages_id = my_messages.updates[1].channel_id
+        my_messages_access_hash = my_messages.chats[0].access_hash
+        input_my_messages = InputChannel(my_messages_id, my_messages_access_hash)
+        input_peer_my_messages = InputPeerChannel(my_messages_id, my_messages_access_hash)
+        await client(EditPhotoRequest(input_my_messages, InputChatUploadedPhoto(await client.upload_file("resources/my_messages.jpg"))))
+        await client.delete_messages(input_peer_my_messages, 2)  # Удаляем сообщение об изменении фото канала
+        await client.edit_folder(input_peer_my_messages, 1)  # Кидаем в архив
+    except Exception as e:
+        return {
+            'result': 'error',
+            'error': e,
+            'message': 'При попытке создать и настроить канал "Мои сообщения" произошла ошибка'
+        }
+
+    try:
+        # Создание супергруппы "Изменение сообщения"
+        message_changes = await client(CreateChannelRequest("Изменение сообщения", "Все изменения сообщений аккаунта", megagroup=True))
+        message_changes_id = message_changes.updates[1].channel_id
+        message_changes_access_hash = message_changes.chats[0].access_hash
+        input_message_changes = InputChannel(message_changes_id, message_changes_access_hash)
+        input_peer_message_changes = InputPeerChannel(message_changes_id, message_changes_access_hash)
+        await client(EditPhotoRequest(input_message_changes, InputChatUploadedPhoto(await client.upload_file("resources/edit_message.jpg"))))
+        await client(functions.account.UpdateNotifySettingsRequest(InputNotifyPeer(input_peer_message_changes), InputPeerNotifySettings(show_previews=False, mute_until=timedelta(days=1000))))
+        await client.delete_messages(input_peer_message_changes, 2)  # Удаляем сообщение об изменении фото группы
+        await client.edit_folder(input_peer_message_changes, 1)  # Кидаем в архив
+        # Добавляем к каналу "Мои сообщения" группу для комментариев
+        await client(SetDiscussionGroupRequest(input_my_messages, input_message_changes))
+    except Exception as e:
+        return {
+            'result': 'error',
+            'error': e,
+            'message': 'При попытке создания и настройки группы "Изменение сообщения" произошла ошибка'
+        }
+
+    try:
+        # Работаем с ботом "MaksogramBot"
+        bot = await client(functions.contacts.ResolveUsernameRequest(MaksogramBot.username))
+        bot = InputPeerUser(MaksogramBot.id, bot.users[0].access_hash)
+        await client.edit_folder(bot, 1)  # Кидаем в архив
+    except Exception as e:
+        return {
+            'result': 'error',
+            'error': e,
+            'message': 'При попытке настроить системного бота произошла ошибка'
+        }
+
+    try:
+        # Присоединяемся к каналу tgmaksim.ru
+        admin_channel: ResolvedPeer = await client(functions.contacts.ResolveUsernameRequest(channel.replace('@', '')))
+        input_admin_channel: InputChannel = InputChannel(admin_channel.peer.channel_id, admin_channel.chats[0].access_hash)
+        input_peer_admin_channel: InputPeerChannel = InputPeerChannel(admin_channel.peer.channel_id, admin_channel.chats[0].access_hash)
+        await client(JoinChannelRequest(input_admin_channel))
+        await client.edit_folder(input_peer_admin_channel, 1)  # Кидаем в архив
+    except Exception as e:
+        return {
+            'result': 'error',
+            'error': e,
+            'message': 'При попытке подписаться на канал @MaksimMyBots произошла ошибка'
+        }
+
+    try:
+        # Создаем папку с чатами "Maksogram" и добавляем канал "Мои сообщения" и системного бота "Maksogram"
+        await client(UpdateDialogFilterRequest(
+            42, DialogFilter(42, "Maksogram", [input_peer_my_messages, input_peer_admin_channel, bot], [], [])))
+    except Exception as e:
+        return {
+            'result': 'error',
+            'error': e,
+            'message': 'При попытке создать и настроить папку произошла ошибка'
+        }
+
+    return {
+        'result': 'ok',
+        'my_messages': -10**12-my_messages_id,  # -100<id>
+        'message_changes': -10**12-message_changes_id  # -100<id>
+    }
