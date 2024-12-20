@@ -17,6 +17,7 @@ from aiogram import Bot
 from typing import Union
 from telethon.sync import TelegramClient
 from datetime import datetime, timedelta
+from aiogram.types import LinkPreviewOptions
 from sys_keys import TOKEN, sessions_path, BOT_ID, USERNAME_BOT
 
 
@@ -103,6 +104,10 @@ def omsk_time(t: datetime):
 
 async def get_users() -> set:
     return set(map(lambda x: int(x[0]), await db.execute("SELECT id FROM users")))
+
+
+def preview_options(path="", site="https://tgmaksim.ru/проекты/maksogram"):
+    return LinkPreviewOptions(prefer_large_media=True, url=f"{site}/{path}")
 
 
 def get_telegram_client(phone_number: str):

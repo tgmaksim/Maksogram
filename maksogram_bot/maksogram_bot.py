@@ -25,6 +25,7 @@ from core import (
     zip_int_data,
     resources_path,
     unzip_int_data,
+    preview_options,
     get_telegram_client,
 )
 
@@ -240,7 +241,8 @@ async def _confirm_sending_payment(callback_query: CallbackQuery):
 async def _version(message: Message):
     if await new_message(message): return
     version = Variables.version
-    await message.answer(f"Версия: {version}\n<a href='{SITE}/{version}'>Обновление</a> 👇", parse_mode=html)
+    await message.answer(f"Версия: {version}\n<a href='{SITE}/{version}'>Обновление</a> 👇",
+                         parse_mode=html, link_preview_options=preview_options(version))
 
 
 @dp.callback_query(F.data == 'subscribe')
@@ -265,7 +267,7 @@ async def _start(message: Message, state: FSMContext):
     markup = IMarkup(inline_keyboard=[[IButton(text="Мои функции", callback_data="help")]])
     await message.answer(f"Привет, {await username_acquaintance(message, 'first_name')}\n"
                          f"[tgmaksim.ru]({SITE})",
-                         parse_mode=markdown, reply_markup=markup)
+                         parse_mode=markdown, reply_markup=markup, link_preview_options=preview_options())
     if message.text.startswith('/start r'):
         friend_id = unzip_int_data(message.text.replace('/start r', ''))
         await bot.send_message(friend_id, "По вашей реферальной ссылке зарегистрировался новый пользователь. Если он "
@@ -304,7 +306,7 @@ async def help(message: Message):
                          "/conditions - условия пользования\n"
                          "/memo - памятка по работе\n"
                          "/friends - реферальная программа\n"
-                         f"<a href='{SITE}'>tgmaksim.ru</a>", parse_mode=html)
+                         f"<a href='{SITE}'>tgmaksim.ru</a>", parse_mode=html, link_preview_options=preview_options())
 
 
 @dp.message(Command('conditions'))
@@ -575,7 +577,7 @@ async def _login_with_password(message: Message, state: FSMContext):
     if message.text == "Отмена":
         await state.clear()
         return await message.answer(f"Зайдите на наш [сайт]({SITE}) и убедитесь, что исходный код всего проекта открыт. "
-                                    "Ждем вас в ближайшее время...")
+                                    "Ждем вас в ближайшее время...", link_preview_options=preview_options())
     if message.content_type != "text":
         return await message.answer("Отправьте ваш облачный пароль (текст)")
     data = await state.get_data()
