@@ -3,22 +3,22 @@ import string
 import asyncio
 
 from typing import Union
+from . accounts import accounts
 from telethon.tl.patched import Message
-from . accounts import Account, accounts
 from datetime import timedelta, datetime
 from telethon import TelegramClient, events
 from telethon.events.common import EventCommon
 from telethon.errors import ChatForwardsRestrictedError
 from core import MaksogramBot, Variables, security, time_now
-from telethon.errors.rpcerrorlist import MsgIdInvalidError, AuthKeyInvalidError, BroadcastPublicVotersForbiddenError
-from telethon.tl.functions.messages import GetCustomEmojiDocumentsRequest, GetMessagesRequest, GetDiscussionMessageRequest
+from telethon.tl.functions.account import UpdateStatusRequest
+from telethon.tl.functions.messages import GetCustomEmojiDocumentsRequest, GetDiscussionMessageRequest
+from telethon.errors.rpcerrorlist import MsgIdInvalidError, AuthKeyInvalidError, BroadcastPublicVotersForbiddenError, AuthKeyUnregisteredError
 from telethon.tl.types import (
     User,
     PeerUser,
     PeerChat,
     PeerChannel,
     ReactionEmoji,
-    InputMessageID,
     MessageMediaGeo,
     UserStatusOnline,
     MessageMediaDice,
@@ -31,11 +31,20 @@ from telethon.tl.types import (
     MessageMediaDocument,
     DocumentAttributeAudio,
     DocumentAttributeVideo,
-    MessageEntityCustomEmoji,
     DocumentAttributeSticker,
     DocumentAttributeFilename,
     DocumentAttributeAnimated,
     DocumentAttributeCustomEmoji,
+)
+from telethon.tl.types import (
+    MessageEntityBold,
+    MessageEntityItalic,
+    MessageEntityStrike,
+    MessageEntitySpoiler,
+    MessageEntityTextUrl,
+    MessageEntityUnderline,
+    MessageEntityBlockquote,
+    MessageEntityCustomEmoji,
 )
 
 
@@ -62,12 +71,9 @@ class Program:
         if difference < LastEvent.seconds:
             await asyncio.sleep(LastEvent.seconds - difference)
 
-    @property
-    def account(self) -> Account:
-        return accounts[self.id]
-
     def __init__(self, client: TelegramClient, account_id: int):
         self.id = account_id
+        self.account = accounts[self.id]
         self.name = self.account.name
         self.client = client
         self.last_event = LastEvent()
@@ -80,10 +86,11 @@ class Program:
             if await self.secondary_checking_event(event):
                 await self.sleep()
                 await self.new_message(event)
-                if not isinstance(self.account.answering_machine, bool) and event.is_private:
+                await self.client(UpdateStatusRequest(offline=True))
+                if self.account.answering_machine.main and event.is_private:
                     auto_message = await self.answering_machine(event)
                     new_event = events.newmessage.NewMessage.Event(auto_message)
-                    await self.new_message(new_event)
+                    await self.new_message(new_event, auto_answer=True)
 
         @client.on(events.MessageEdited(func=self.initial_checking_event))
         @security()
@@ -91,6 +98,7 @@ class Program:
             if await self.secondary_checking_event(event):
                 await self.sleep()
                 await self.message_edited(event)
+                await self.client(UpdateStatusRequest(offline=True))
 
         @client.on(events.MessageDeleted())
         @security()
@@ -100,18 +108,21 @@ class Program:
                     return
             await self.sleep()
             await self.message_delete(event)
+            await self.client(UpdateStatusRequest(offline=True))
 
         @client.on(events.MessageRead(func=self.initial_checking_event, inbox=False))
         @security()
         async def message_read_outbox(event: events.messageread.MessageRead.Event):
             if await self.secondary_checking_event(event):
                 await self.message_read(event, me=False)
+                await self.client(UpdateStatusRequest(offline=True))
 
         @client.on(events.MessageRead(func=self.initial_checking_event, inbox=True))
         @security()
         async def message_read_inbox(event: events.messageread.MessageRead.Event):
             if await self.secondary_checking_event(event):
                 await self.message_read(event, me=True)
+                await self.client(UpdateStatusRequest(offline=True))
 
         @client.on(events.UserUpdate(
             chats=self.account.status_users,
@@ -170,7 +181,7 @@ class Program:
         return name
 
     # Получает id пользователя или группы
-    def get_id(self, peer: Union[PeerUser, PeerChat, PeerChannel, None]) -> int:
+    async def get_id(self, peer: Union[PeerUser, PeerChat, PeerChannel, None]) -> int:
         if peer is None:
             return self.id
         if isinstance(peer, PeerUser):
@@ -179,6 +190,7 @@ class Program:
             return peer.chat_id
         if isinstance(peer, PeerChannel):
             return peer.channel_id
+        await MaksogramBot.send_system_message(f"⚠️ Ошибка ⚠️\n\nТип peer - {peer.__class__.__name__} ({self.id})")
         raise TypeError("peer isn't instance PeerUser, PeerChat, PeerChannel or NoneType")
 
     # Считает длину сообщения
@@ -189,9 +201,9 @@ class Program:
     async def is_premium(self) -> bool:
         return (await self.client.get_me()).premium
 
-    async def new_message(self, event: events.newmessage.NewMessage.Event):
+    async def new_message(self, event: events.newmessage.NewMessage.Event, auto_answer: bool = False):
         message: Message = event.message
-        if self.get_id(message.from_id) == 777000:
+        if await self.get_id(message.from_id) == 777000:
             return
 
         try:
@@ -205,7 +217,8 @@ class Program:
         chat_prefix = 'u' if event.is_private else 'c'
         chat_id = f"#{chat_prefix}{str(message.chat_id).replace('-', '_')} " if name != "Избранное" else ""
         name = f"#{name} "
-        type_message = "#Исходящее " if self.get_id(message.from_id) == self.id else "#Входящее "
+        type_message = "#Исходящее " if await self.get_id(message.from_id) == self.id else "#Входящее "
+        auto_answer = "#Автоответ " if auto_answer else ""
         media = ""
         if not message.media:
             media += "#Текст "
@@ -269,15 +282,15 @@ class Program:
                 media += "#Геолокация "
         if not event.is_private:
             is_read = 0
-        elif self.get_id(message.from_id) == self.id and message.chat_id == self.id:
+        elif await self.get_id(message.from_id) == self.id and message.chat_id == self.id:
             is_read = 1
-        elif self.get_id(message.from_id) == self.id:
+        elif await self.get_id(message.from_id) == self.id:
             is_read = -1
         else:
             is_read = -2
         await self.account.insert_new_message(message.chat_id, message.id, saved_message.id, is_read)
         system_message = await self.client.send_message(
-            self.account.my_messages, f"{title}{chat_id}{name}{media}{type_message}",
+            self.account.my_messages, f"{title}{chat_id}{name}{media}{type_message}{auto_answer}",
             reply_to=saved_message.id)
         system_message_id = (await self.client(GetDiscussionMessageRequest(self.account.my_messages, system_message.id))).messages[0].id
         await self.client.delete_messages(self.account.message_changes, system_message_id)
@@ -304,7 +317,7 @@ class Program:
         entities = []
         if message.reactions.recent_reactions:  # Реакции и их "владельцы" (например, в личном чате)
             for reaction in message.reactions.recent_reactions:
-                user_id = self.get_id(reaction.peer_id)
+                user_id = await self.get_id(reaction.peer_id)
                 peer = await self.chat_name(user_id, 'Я')
                 if isinstance(reaction.reaction, ReactionEmoji):
                     reactions += f"{peer}: {reaction.reaction.emoticon}\n"
@@ -446,7 +459,7 @@ class Program:
         if me:  # Прочитано аккаунтом
             read_user = "Я"
         else:  # Прочитано другим пользователем
-            read_user = await self.chat_name(self.get_id(event.original_update.peer))
+            read_user = await self.chat_name(await self.get_id(event.original_update.peer))
         max_id = event.max_id
         chat_id = (await event.get_chat()).id
         saved_message_ids = await self.account.get_read_messages(chat_id, max_id, -2 if me else -1)
@@ -468,47 +481,46 @@ class Program:
         self.status_users[event.chat_id] = status
         user = await self.chat_name(event.chat_id, my_name="Я")
         status_str = "в сети" if status else "вышел(а) из сети"
-        await MaksogramBot.send_message(self.id, f"{user} {status_str}\n<a href='t.me/{MaksogramBot.username}?"
+        await MaksogramBot.send_message(self.id, f"{user} {status_str}\n<a href='tg://resolve?domain={MaksogramBot.username}&"
                                                  f"start=du{event.chat_id}'>Отключить для него</a>",
                                         parse_mode="HTML", disable_web_page_preview=True)
 
     # Обработка сообщений системному боту от аккаунта
     async def system_bot(self, event: events.newmessage.NewMessage.Event):
-        message: Message = event.message
-        if message.text.startswith("/check"):
-            send = "<a href='tg://message?slug=ADmr7VSSZWFi'>напишите</a>"
-            await MaksogramBot.send_message(self.id, f"Программа работает штатно! Если возникли проблемы, {send} "
-                                                     "админу программы", parse_mode="html")
-        elif message.text.startswith("/stop_prog"):
-            await MaksogramBot.send_message(self.id, "Программа завершила выполнение!\n/start_prog - запустить заново")
-            await asyncio.sleep(1)
-            await self.account.off()
-            await self.client.disconnect()
-        elif message.text == "/am":
-            self.account.answering_machine = True
-            await MaksogramBot.send_message(self.id, "Отправьте сообщение, которым я отвечу собеседнику, "
-                                                     "например: \"Я сейчас не могу ответить\"")
-        elif self.account.answering_machine is True:
-            self.account.answering_machine = message.id
-            await MaksogramBot.send_message(self.id, "Отлично! Если кто-то напишет сообщение, пока вы не отключите "
-                                                     "автоответчик, я отправлю от Вашего имени ответ")
-        elif message.text.startswith("/am_stop"):
-            self.account.answering_machine = False
-            await MaksogramBot.send_message(self.id, "Автоответчик выключен!")
+        pass
 
     async def answering_machine(self, event: events.newmessage.NewMessage.Event):
         message: Message = event.message
-        await asyncio.sleep(0.3)
-        copy_message_id = self.account.answering_machine
-        copy_message = (await self.client(GetMessagesRequest(id=[InputMessageID(copy_message_id)]))).messages[0]
-        await self.client.send_message(message.chat_id, copy_message)
+        answer = self.account.answering_machine.variants[self.account.answering_machine.main]
+        if not answer: return
+        entities = []
+        for entity in answer.entities:
+            match entity.type:
+                case "bold":
+                    entities.append(MessageEntityBold(entity.offset, entity.length))
+                case "italic":
+                    entities.append(MessageEntityItalic(entity.offset, entity.length))
+                case "underline":
+                    entities.append(MessageEntityUnderline(entity.offset, entity.length))
+                case "strikethrough":
+                    entities.append(MessageEntityStrike(entity.offset, entity.length))
+                case "spoiler":
+                    entities.append(MessageEntitySpoiler(entity.offset, entity.length))
+                case "blockquote":
+                    entities.append(MessageEntityBlockquote(entity.offset, entity.length))
+                case "text_link":
+                    entities.append(MessageEntityTextUrl(entity.offset, entity.length, url=entity.url))
+                case "custom_emoji":
+                    entities.append(
+                        MessageEntityCustomEmoji(entity.offset, entity.length, document_id=int(entity.custom_emoji_id)))
+        return await self.client.send_message(message.chat_id, answer.text, formatting_entities=entities)
 
     async def run_until_disconnected(self):
         await self.account.create_table()
         await MaksogramBot.send_system_message(f"SavingMessages v{self.__version__} для {self.name} запущен")
         try:
             await self.client.run_until_disconnected()
-        except AuthKeyInvalidError:
-            await self.account.off()
+        except (AuthKeyInvalidError, AuthKeyUnregisteredError):
             await MaksogramBot.send_message(self.id, "Вы удалили сессию, она была необходима для работы программы!")
             await MaksogramBot.send_system_message(f"Удалена сессия у пользователя {self.name}")
+            await self.account.off()

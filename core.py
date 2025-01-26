@@ -1,9 +1,9 @@
 OWNER = 5128609241
+support = "tgmaksim_ru_company"
 SITE = "https://tgmaksim.ru/проекты/maksogram"
 subscribe = "https://t.me/+F5YW1gV3gdhjNjVi"
 channel = "@tgmaksim_ru"
 
-markdown = "Markdown"
 html = "HTML"
 
 import os
@@ -15,10 +15,10 @@ import traceback
 
 from aiogram import Bot
 from typing import Union
-from telethon.sync import TelegramClient
+from telethon import TelegramClient
 from datetime import datetime, timedelta
 from aiogram.types import LinkPreviewOptions
-from sys_keys import TOKEN, sessions_path, BOT_ID, USERNAME_BOT
+from sys_keys import sessions_path, TOKEN, BOT_ID, USERNAME_BOT
 
 
 def resources_path(path: str) -> str:
@@ -110,7 +110,7 @@ def preview_options(path="", site="https://tgmaksim.ru/проекты/maksogram"
     return LinkPreviewOptions(prefer_large_media=True, url=f"{site}/{path}")
 
 
-def get_telegram_client(phone_number: str):
+def new_telegram_client(phone_number: str) -> TelegramClient:
     return TelegramClient(
         sessions_path(phone_number),
         Variables.TelegramApplicationId,

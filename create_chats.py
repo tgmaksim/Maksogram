@@ -78,7 +78,7 @@ async def create_chats(client: TelegramClient) -> dict[str, Union[str, Exception
         }
 
     try:
-        # Присоединяемся к каналу tgmaksim.ru
+        # Присоединяемся к каналу tgmaksim.ru и добавляем в папку
         admin_channel: ResolvedPeer = await client(functions.contacts.ResolveUsernameRequest(channel.replace('@', '')))
         input_admin_channel: InputChannel = InputChannel(admin_channel.peer.channel_id, admin_channel.chats[0].access_hash)
         input_peer_admin_channel: InputPeerChannel = InputPeerChannel(admin_channel.peer.channel_id, admin_channel.chats[0].access_hash)
@@ -88,7 +88,7 @@ async def create_chats(client: TelegramClient) -> dict[str, Union[str, Exception
         return {
             'result': 'error',
             'error': e,
-            'message': 'При попытке подписаться на канал @MaksimMyBots произошла ошибка'
+            'message': f'При попытке подписаться на канал {channel} произошла ошибка'
         }
 
     try:
