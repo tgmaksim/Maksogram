@@ -71,9 +71,9 @@ class UserState(StatesGroup):
     send_phone_number = State('send_phone_number')
     send_code = State('send_code')
     send_password = State('send_password')
-    send_user = State('send_user')
     relogin = State('relogin')
     relogin_with_password = State('relogin_with_password')
+    status_user = State('status_user')
     answering_machine = State('answering_machine')
     answering_machine_edit = State('answering_machine_edit')
 
@@ -328,14 +328,6 @@ async def _start(message: Message, state: FSMContext):
         await bot.send_message(friend_id, "По вашей реферальной ссылке зарегистрировался новый пользователь. Если он "
                                           "оплатит подписку, то вы получите скидку 20% (действует только при оплате по СБП)")
         await bot.send_message(OWNER, f"Регистрация по реферальной ссылке #r{friend_id}")
-    elif message.text.startswith('/start du'):
-        user_id = int(message.text.replace('/start du', ''))
-        request = await accounts[message.chat.id].remove_status_user(user_id)
-        match request:
-            case 1:
-                await message.answer("Такого пользователя нет в отслеживаемых")
-            case _:
-                await message.answer("Пользователь удален из отслеживаемых #s")
     else:
         markup = IMarkup(inline_keyboard=[[IButton(text="🚀 Мои функции", callback_data="help")],
                                           [IButton(text="⚙️ Меню и настройки", callback_data="settings")]])
@@ -390,7 +382,7 @@ def settings(user_id: int) -> dict[str, Any]:
     else:
         markup = IMarkup(inline_keyboard=[[IButton(text="🔴 Выключить Maksogram", callback_data="off")],
                                           [IButton(text="⏳ Отложенное сообщение", callback_data="delayed_message")],
-                                          [IButton(text="🌐 Друг в сети", callback_data="update_friend_status"),
+                                          [IButton(text="🌐 Друг в сети", callback_data="status_users"),
                                            IButton(text="🤖 Автоответчик", callback_data="answering_machine"),
                                            ],  # IButton(text="📸 Аватарка", callback_data="update_profile_avatar")
                                           [IButton(text="ℹ️ Узнать все возможности", url=SITE)]])
@@ -421,45 +413,137 @@ async def _delayed_message(callback_query: CallbackQuery):
     await callback_query.answer("Функция в разработке", True)
 
 
-@dp.callback_query(F.data == "update_friend_status")
-@security('state')
-async def _update_friend_status(callback_query: CallbackQuery, state: FSMContext):
+@dp.callback_query(F.data == "status_users")
+@security()
+async def _status_users(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
+    await callback_query.message.edit_text(**status_users(callback_query.message.chat.id))
+
+
+def status_users(account_id: int) -> dict[str, Any]:
+    account = accounts[account_id]
+    buttons = []
+    for user in account.status_users:
+        buttons.append([IButton(text=f"🌐 {user.name}", callback_data=f"status_user_menu{user.id}")])
+    buttons.append([IButton(text="➕ Добавить нового пользователя", callback_data="new_status_user")])
+    buttons.append([IButton(text="◀️  Назад", callback_data="settings")])
+    return {"text": "🌐 <b>Друг в сети</b>\nЯ уведомлю вас, если пользователь будет онлайн/офлайн. Не работает, если собеседник "
+                    "скрыл время последнего захода...", "reply_markup": IMarkup(inline_keyboard=buttons), "parse_mode": html}
+
+
+@dp.callback_query(F.data.startswith("status_user_menu"))
+@security()
+async def _status_user_menu(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    user_id = int(callback_query.data.replace("status_user_menu", ""))
+    await callback_query.message.edit_text(**status_user(callback_query.message.chat.id, user_id))
+
+
+def status_user(account_id: int, user_id: int) -> dict[str, Any]:
+    def status(parameter: bool):
+        return "🟢" if parameter else "🔴"
+
+    user = accounts[account_id].status_users[user_id]
+    if user is None:
+        return status_users(account_id)
+    markup = IMarkup(inline_keyboard=[
+        [IButton(text=f"{status(user.online)} Появление в сети", callback_data=f"status_user_online{user_id}")],
+        [IButton(text=f"{status(user.offline)} Выход из сети", callback_data=f"status_user_offline{user_id}")],
+        [IButton(text=f"{status(user.reading)} Чтение моего сообщения", callback_data=f"status_user_reading{user_id}")],
+        [IButton(text="🚫 Удалить пользователя", callback_data=f"status_user_del{user_id}")],
+        [IButton(text="◀️  Назад", callback_data="status_users")]])
+    return {"text": "🌐 <b>Друг в сети</b>\nО каких событиях уведомлять?", "parse_mode": html, "reply_markup": markup}
+
+
+@dp.callback_query(F.data.startswith("status_user_online"))
+@security()
+async def _status_user_online(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    user_id = int(callback_query.data.replace("status_user_online", ""))
+    account = accounts[callback_query.message.chat.id]
+    user = account.status_users[user_id]
+    if user is None:
+        return await callback_query.message.edit_text(**status_users(callback_query.message.chat.id))
+    user.online = not user.online
+    await db.execute("UPDATE accounts SET status_users=? WHERE id=?", (account.status_users.json(), account.id))
+    await callback_query.message.edit_text(**status_user(callback_query.message.chat.id, user_id))
+
+
+@dp.callback_query(F.data.startswith("status_user_offline"))
+@security()
+async def _status_user_offline(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    user_id = int(callback_query.data.replace("status_user_offline", ""))
+    account = accounts[callback_query.message.chat.id]
+    user = account.status_users[user_id]
+    if user is None:
+        return await callback_query.message.edit_text(**status_users(callback_query.message.chat.id))
+    user.offline = not user.offline
+    await db.execute("UPDATE accounts SET status_users=? WHERE id=?", (account.status_users.json(), account.id))
+    await callback_query.message.edit_text(**status_user(callback_query.message.chat.id, user_id))
+
+
+@dp.callback_query(F.data.startswith("status_user_reading"))
+@security()
+async def _status_user_reading(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    user_id = int(callback_query.data.replace("status_user_reading", ""))
+    account = accounts[callback_query.message.chat.id]
+    user = account.status_users[user_id]
+    if user is None:
+        return await callback_query.message.edit_text(**status_users(callback_query.message.chat.id))
+    user.reading = not user.reading
+    await db.execute("UPDATE accounts SET status_users=? WHERE id=?", (account.status_users.json(), account.id))
+    await callback_query.message.edit_text(**status_user(callback_query.message.chat.id, user_id))
+
+
+@dp.callback_query(F.data == "new_status_user")
+@security('state')
+async def _new_status_user(callback_query: CallbackQuery, state: FSMContext):
+    if await new_callback_query(callback_query): return
+    account = accounts[callback_query.message.chat.id]
+    if len(account.status_users) >= 2:
+        return await callback_query.answer("У вас максимальное количество!", True)
+    await state.set_state(UserState.status_user)
     request_users = KeyboardButtonRequestUsers(request_id=1, user_is_bot=False)
     markup = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Выбрать", request_users=request_users)],
                                            [KeyboardButton(text="Отмена")]], resize_keyboard=True)
-    message_id = (await callback_query.message.answer(
-        "🌐 <b>Друг в сети</b>\nДанная функция позволяет следить за статусом вашего знакомого. Если она включена, "
-        "то я напишу, когда пользователь появится в сети или выйдет из нее. Не работает, если собеседник "
-        "скрыл для вас время последнего захода...\nОтправьте нужного человека", reply_markup=markup, parse_mode=html)).message_id
-    await state.set_state(UserState.send_user)
+    message_id = (await callback_query.message.answer("Отправьте пользователя для отслеживания", reply_markup=markup)).message_id
     await state.update_data(message_id=message_id)
     await callback_query.message.delete()
 
 
-@dp.message(UserState.send_user)
+@dp.message(UserState.status_user)
 @security('state')
-async def _send_user(message: Message, state: FSMContext):
+async def _status_user(message: Message, state: FSMContext):
     if await new_message(message): return
     message_id = (await state.get_data())['message_id']
     await state.clear()
-    if message.text == "Отмена":
-        await message.answer(**settings(message.chat.id))
-        return await bot.delete_messages(chat_id=message.chat.id, message_ids=[message.message_id, message_id])
-    if message.content_type != 'users_shared':
-        return await message.answer("Вы не отправили пользователя! Отправьте или нажмите Отмена")
-    user_id = message.users_shared.user_ids[0]
-    request = await accounts[message.chat.id].add_status_users(user_id)
-    match request:
-        case 1:
-            await message.answer("Себя нельзя!", reply_markup=ReplyKeyboardRemove())
-        case 2:
-            await message.answer(f"Уже есть! Для удаления <a href='tg://resolve?domain={MaksogramBot.username}&start=du{user_id}'>"
-                                 "нажмите</a>", reply_markup=ReplyKeyboardRemove(), parse_mode=html, disable_web_page_preview=True)
-        case _:
-            await message.answer("Пользователь добавлен! Теперь если пользователь изменит статус, то я оповещу об этом\n"
-                                 f"<a href='tg://resolve?domain={MaksogramBot.username}&start=du{user_id}'>Отключить для него</a> #s",
-                                 parse_mode=html, disable_web_page_preview=True, reply_markup=ReplyKeyboardRemove())
+    if message.content_type == "users_shared":
+        user_id = message.users_shared.user_ids[0]
+        account = accounts[message.chat.id]
+        first_name = (await account.telegram_client.get_entity(user_id)).first_name
+        account.status_users.append(user_id, (first_name[:30] + "...") if len(first_name) > 30 else first_name)
+        account.telegram_client.list_event_handlers()[5][1].chats = set(account.status_users.list())
+        await db.execute("UPDATE accounts SET status_users=? WHERE id=?", (account.status_users.json(), account.id))
+        await message.answer(**status_user(message.chat.id, user_id))
+    else:
+        await message.answer(**status_users(message.chat.id))
+    await bot.delete_messages(chat_id=message.chat.id, message_ids=[message.message_id, message_id])
+
+
+@dp.callback_query(F.data.startswith("status_user_del"))
+@security()
+async def _status_user_del(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    user_id = int(callback_query.data.replace("status_user_del", ""))
+    account = accounts[callback_query.message.chat.id]
+    if account.status_users[user_id] is not None:
+        account.status_users.delete(user_id)
+        account.telegram_client.list_event_handlers()[5][1].chats = set(account.status_users.list())
+        await db.execute("UPDATE accounts SET status_users=? WHERE id=?",
+                         (account.status_users.json(), callback_query.message.chat.id))
+    await callback_query.message.edit_text(**status_users(callback_query.message.chat.id))
 
 
 @dp.callback_query(F.data == "answering_machine")
@@ -476,7 +560,7 @@ def answering_machine(user_id: int) -> dict[str, Any]:
         text = (answer.text[:30] + "...") if len(answer.text) > 30 else answer.text
         indicator = "🟢" if main == answer.id else ""
         buttons.append([IButton(text=f"{indicator} {text}", callback_data=f"answering_machine_menu{answer.id}")])
-    buttons.append([IButton(text="Создать новый ответ", callback_data="new_answering_machine")])
+    buttons.append([IButton(text="➕ Создать новый ответ", callback_data="new_answering_machine")])
     buttons.append([IButton(text="◀️  Назад", callback_data="settings")])
     markup = IMarkup(inline_keyboard=buttons)
     return {"text": "🤖 <b>Автоответчик</b>\nЗдесь хранятся все ваши автоматические ответы. Вы можете включить нужный, "
@@ -504,10 +588,12 @@ async def _answering_machine(message: Message, state: FSMContext):
     message_id = (await state.get_data())['message_id']
     await state.clear()
     if message.text != "Отмена":
-        accounts[message.chat.id].answering_machine.append(message.text, message.entities or [])
+        answer_id = accounts[message.chat.id].answering_machine.append(message.text, message.entities or [])
         await db.execute("UPDATE accounts SET answering_machine=? WHERE id=?",
                          (accounts[message.chat.id].answering_machine.json(), message.chat.id))
-    await message.answer(**answering_machine(message.chat.id))
+        await message.answer(**auto_answer(message.chat.id, answer_id))
+    else:
+        await message.answer(**answering_machine(message.chat.id))
     await bot.delete_messages(chat_id=message.chat.id, message_ids=[message.message_id, message_id])
 
 
@@ -544,7 +630,7 @@ async def _answering_machine_del(callback_query: CallbackQuery):
     if account.answering_machine[answer_id] is not None:
         account.answering_machine.delete(answer_id)
         await db.execute("UPDATE accounts SET answering_machine=? WHERE id=?",
-                         (accounts[callback_query.message.chat.id].answering_machine.json(), callback_query.message.chat.id))
+                         (account.answering_machine.json(), callback_query.message.chat.id))
     await callback_query.message.edit_text(**answering_machine(callback_query.message.chat.id))
 
 
@@ -873,11 +959,11 @@ async def start_program(user_id: int, username: str, phone_number: str, telegram
         raise CreateChatsError(request['message'], f"Произошла ошибка {request['error'].__class__.__name__}: {request['error']}")
     name = ('@' + username) if username else user_id
     next_payment = {'next_payment': (time_now() + timedelta(days=7)).strftime("%Y/%m/%d"), 'user': 'user', 'fee': Variables.fee}
-    await db.execute("INSERT INTO accounts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    await db.execute("INSERT INTO accounts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                      (name, user_id, phone_number, request['my_messages'], request['message_changes'], '[]', '[]',
-                      '[]', 1, json_encode(next_payment), 1))
-    account = Account(name, user_id, phone_number, request['my_messages'], request['message_changes'], [], [], [],
-                      '1', next_payment, '1')
+                      '{}', 1, json_encode(next_payment), 1, '{"main": 0, "variants": {}}'))
+    account = Account(name, user_id, phone_number, request['my_messages'], request['message_changes'], [], [], {},
+                      '1', next_payment, '1', {"main": 0, "variants": {}}, telegram_client=telegram_client)
     asyncio.get_running_loop().create_task(program.Program(telegram_client, account.id).run_until_disconnected())
 
 

@@ -17,8 +17,8 @@ from aiogram import Bot
 from typing import Union
 from telethon import TelegramClient
 from datetime import datetime, timedelta
-from aiogram.types import LinkPreviewOptions
 from sys_keys import sessions_path, TOKEN, BOT_ID, USERNAME_BOT
+from aiogram.types import LinkPreviewOptions, InlineKeyboardMarkup, InlineKeyboardButton
 
 
 def resources_path(path: str) -> str:
@@ -138,6 +138,9 @@ class MaksogramBot:
     id = BOT_ID
     username = USERNAME_BOT
     bot = Bot(TOKEN)
+
+    IMarkup = InlineKeyboardMarkup
+    IButton = InlineKeyboardButton
 
     @staticmethod
     async def send_message(chat_id: int, message: str, **kwargs):

@@ -87,7 +87,7 @@ class Program:
                 await self.sleep()
                 await self.new_message(event)
                 await self.client(UpdateStatusRequest(offline=True))
-                if self.account.answering_machine.main and event.is_private:
+                if self.account.answering_machine.main and event.is_private and event.message.from_id.user_id != self.id:
                     auto_message = await self.answering_machine(event)
                     new_event = events.newmessage.NewMessage.Event(auto_message)
                     await self.new_message(new_event, auto_answer=True)
@@ -125,7 +125,7 @@ class Program:
                 await self.client(UpdateStatusRequest(offline=True))
 
         @client.on(events.UserUpdate(
-            chats=self.account.status_users,
+            chats=self.account.status_users.list(),
             func=lambda event: isinstance(event.status, (UserStatusOnline, UserStatusOffline)))
         )
         @security()
@@ -138,11 +138,6 @@ class Program:
         async def system_bot(event: events.newmessage.NewMessage.Event):
             await self.system_bot(event)
 
-        @client.on(events.NewMessage(chats=[MaksogramBot.id], incoming=True, pattern=r'[\d\D]*#s'))
-        @security()
-        async def synchronize_status_users(_):
-            client.list_event_handlers()[5][1].chats = set(self.account.status_users)
-
     def initial_checking_event(self, event: EventCommon) -> bool:
         return event.is_private and event.chat_id not in self.account.removed_chats or event.chat_id in self.account.added_chats
 
@@ -153,7 +148,7 @@ class Program:
             except ValueError:
                 return False
             else:
-                return not entity.bot
+                return not entity.bot and entity.id != 777000
         return True
 
     # Получает название чата (имя контакта или название группы)
@@ -203,8 +198,6 @@ class Program:
 
     async def new_message(self, event: events.newmessage.NewMessage.Event, auto_answer: bool = False):
         message: Message = event.message
-        if await self.get_id(message.from_id) == 777000:
-            return
 
         try:
             saved_message = await self.client.forward_messages(self.account.my_messages, message)
@@ -462,6 +455,9 @@ class Program:
             read_user = await self.chat_name(await self.get_id(event.original_update.peer))
         max_id = event.max_id
         chat_id = (await event.get_chat()).id
+        if self.account.status_users[chat_id] and self.account.status_users[chat_id].reading and not me:
+            await MaksogramBot.send_message(self.id, f"{read_user} прочитал сообщение", reply_markup=MaksogramBot.IMarkup(
+                inline_keyboard=[[MaksogramBot.IButton(text="Настройки", callback_data=f"status_user_menu{event.chat_id}")]]))
         saved_message_ids = await self.account.get_read_messages(chat_id, max_id, -2 if me else -1)
         if saved_message_ids is None:
             return
@@ -477,13 +473,14 @@ class Program:
         status = isinstance(event.status, UserStatusOnline)
         if self.status_users.get(event.chat_id) == status:
             return
-
         self.status_users[event.chat_id] = status
-        user = await self.chat_name(event.chat_id, my_name="Я")
-        status_str = "в сети" if status else "вышел(а) из сети"
-        await MaksogramBot.send_message(self.id, f"{user} {status_str}\n<a href='tg://resolve?domain={MaksogramBot.username}&"
-                                                 f"start=du{event.chat_id}'>Отключить для него</a>",
-                                        parse_mode="HTML", disable_web_page_preview=True)
+        online = self.account.status_users[event.chat_id].online and status is True
+        offline = self.account.status_users[event.chat_id].offline and status is False
+        if online or offline:
+            user = await self.chat_name(event.chat_id, my_name="Я")
+            status_str = "в сети" if status else "вышел(а) из сети"
+            await MaksogramBot.send_message(self.id, f"{user} {status_str}", reply_markup=MaksogramBot.IMarkup(
+                inline_keyboard=[[MaksogramBot.IButton(text="Настройки", callback_data=f"status_user_menu{event.chat_id}")]]))
 
     # Обработка сообщений системному боту от аккаунта
     async def system_bot(self, event: events.newmessage.NewMessage.Event):

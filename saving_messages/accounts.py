@@ -26,11 +26,13 @@ class Account:
             message_changes: Union[int, str],
             added_chats: list[Union[int, str], ...],
             removed_chats: list[Union[int, str], ...],
-            status_users: list[Union[int, str], ...],
+            status_users: dict[str, dict[str, Union[str, int]]],
             is_started: str,
             payment: dict[str, str],
             is_paid: str,
             answering_machine: dict[str, Union[int, dict[int, dict[str, Union[str, list[dict]]]]]],
+
+            telegram_client: Union[TelegramClient, None] = None
     ):
         self.name: str = name
         self.id: int = int(id)
@@ -39,13 +41,13 @@ class Account:
         self.message_changes: int = int(message_changes)
         self.added_chats: list[int] = list(map(int, added_chats))
         self.removed_chats: list[int] = list(map(int, removed_chats))
-        self.status_users: list[int] = list(map(int, status_users))
+        self.status_users: StatusUsers = StatusUsers(status_users)
         self.is_started: bool = bool(int(is_started))
         self.payment: Payment = Payment(datetime.strptime(payment['next_payment'], "%Y/%m/%d") if payment['next_payment'] else None, payment['user'], int(payment['fee']))
         self.is_paid: bool = bool(int(is_paid))
         self.answering_machine: AnsweringMachine = AnsweringMachine(answering_machine['main'], answering_machine['variants'])
 
-        self.telegram_client: TelegramClient = new_telegram_client(phone_number)
+        self.telegram_client: TelegramClient = telegram_client or new_telegram_client(phone_number)
 
         accounts[self.id] = self
 
@@ -122,22 +124,6 @@ class Account:
         else:
             raise UserIsNotAuthorized()
 
-    async def remove_status_user(self, user_id: int) -> int:
-        try:
-            self.status_users.remove(user_id)
-        except ValueError:
-            return 1
-        else:
-            await db.execute("UPDATE accounts SET status_users=? WHERE id=?", (json_encode(self.status_users), self.id))
-
-    async def add_status_users(self, user_id: int) -> int:
-        if user_id == self.id:
-            return 1
-        if user_id in self.status_users:
-            return 2
-        self.status_users.append(user_id)
-        await db.execute("UPDATE accounts SET status_users=? WHERE id=?", (json_encode(self.status_users), self.id))
-
     async def set_status_payment(self, is_paid: bool, next_payment: Union[datetime, timedelta, None] = None):
         await db.execute("UPDATE accounts SET is_paid=? WHERE id=?", (int(is_paid), self.id))
         self.is_paid = is_paid
@@ -162,6 +148,54 @@ class Payment:
         }
 
 
+class StatusUsers:
+    class User:
+        def __init__(self, id: int, name: str, online: int = 0, offline: int = 0, reading: int = 0):
+            self.id = id
+            self.name = name
+            self.online = bool(online)
+            self.offline = bool(offline)
+            self.reading = bool(reading)
+
+        def dict(self) -> dict:
+            return dict(name=self.name, online=int(self.online), offline=int(self.offline), reading=int(self.reading))
+
+    def __init__(self, users: dict[str, dict[str, Union[str, int]]]):
+        self.users = {int(id): self.User(id=int(id), **users[id]) for id in users}
+
+    def append(self, user_id: int, name: str):
+        self.users[user_id] = self.User(user_id, name)
+
+    def delete(self, user_id: int):
+        del self.users[user_id]
+
+    def json(self) -> str:
+        return json_encode({id: self.users[id].dict() for id in self.users})
+
+    def list(self) -> list[int, ...]:
+        return [user for user in self.users]
+
+    def __getitem__(self, item: int) -> Union[User, None]:
+        try:
+            return self.users[item]
+        except KeyError:
+            return
+
+    def __iter__(self) -> 'StatusUsers':
+        self.iter = self.users.__iter__()
+        return self
+
+    def __next__(self) -> User:
+        try:
+            return self.users[self.iter.__next__()]
+        except (KeyError, IndexError) as e:
+            del self.iter
+            raise e
+
+    def __len__(self) -> int:
+        return self.users.__len__()
+
+
 class AnsweringMachine:
     class Answer:
         def __init__(self, id: int, text: str, entities: Iterable[dict[str, Union[int, str, None]]]):
@@ -170,7 +204,7 @@ class AnsweringMachine:
             self.entities = [MessageEntity(**entity) for entity in entities]
 
         def dict(self) -> dict[str, Union[str, list[dict]]]:
-            return {"text": self.text, "entities": [entity.model_dump() for entity in self.entities]}
+            return dict(text=self.text, entities=[entity.model_dump() for entity in self.entities])
 
     def __init__(self, main: int, variants: dict[int, dict[str, Union[str, list[dict]]]]):
         self.main: int = main
@@ -179,6 +213,7 @@ class AnsweringMachine:
     def append(self, text: str, entities: list[MessageEntity]):
         id = int(time.time()) - 1737828000  # 1737828000 - 2025/01/26 00:00 (день активного обновления автоответчика)
         self.variants[id] = self.Answer(id, text, map(lambda x: x.model_dump(), entities))
+        return id
 
     def delete(self, answer_id: int):
         if self.main == answer_id:
@@ -200,11 +235,10 @@ class AnsweringMachine:
 
     def __next__(self) -> Answer:
         try:
-            next_id_answer: int = self.iter.__next__()
+            return self.variants[self.iter.__next__()]
         except (StopIteration, IndexError) as e:
             del self.iter
             raise e
-        return self.variants[next_id_answer]
 
     def __len__(self) -> int:
         return self.variants.__len__()
