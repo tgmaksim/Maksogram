@@ -106,7 +106,7 @@ async def get_users() -> set:
     return set(map(lambda x: int(x[0]), await db.execute("SELECT id FROM users")))
 
 
-def preview_options(path="", site="https://tgmaksim.ru/проекты/maksogram"):
+def preview_options(path="", site=SITE):
     return LinkPreviewOptions(prefer_large_media=True, url=f"{site}/{path}")
 
 
@@ -124,7 +124,7 @@ def new_telegram_client(phone_number: str) -> TelegramClient:
 
 
 class Variables:
-    version = "2.2"
+    version = "2.3"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])

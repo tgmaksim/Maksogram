@@ -7,6 +7,7 @@ from sys_keys import sessions_path
 from telethon import TelegramClient
 from aiogram.types import MessageEntity
 from datetime import datetime, timedelta
+from telethon.tl.functions.photos import GetUserPhotosRequest
 from core import time_now, new_telegram_client, json_decode, json_encode, resources_path, db
 
 accounts: dict[int, 'Account'] = {}
@@ -30,7 +31,8 @@ class Account:
             is_started: str,
             payment: dict[str, str],
             is_paid: str,
-            answering_machine: dict[str, Union[int, dict[int, dict[str, Union[str, list[dict]]]]]],
+            answering_machine: dict[str, Union[int, dict[str, dict[str, Union[str, list[dict]]]], list[int]]],
+            avatars: dict[str, dict[str, str]],
 
             telegram_client: Union[TelegramClient, None] = None
     ):
@@ -45,9 +47,12 @@ class Account:
         self.is_started: bool = bool(int(is_started))
         self.payment: Payment = Payment(datetime.strptime(payment['next_payment'], "%Y/%m/%d") if payment['next_payment'] else None, payment['user'], int(payment['fee']))
         self.is_paid: bool = bool(int(is_paid))
-        self.answering_machine: AnsweringMachine = AnsweringMachine(answering_machine['main'], answering_machine['variants'])
+        self.answering_machine: AnsweringMachine = AnsweringMachine(answering_machine['main'], answering_machine['variants'],
+                                                                    answering_machine['sending'])
+        self.avatars: Avatars = Avatars(avatars)
 
         self.telegram_client: TelegramClient = telegram_client or new_telegram_client(phone_number)
+        self.checking_new_avatar: Union[asyncio.Task, None] = None
 
         accounts[self.id] = self
 
@@ -56,9 +61,9 @@ class Account:
         with connect(resources_path("db.sqlite3")) as conn:
             cur = conn.cursor()
             cur.execute("SELECT name, id, phone_number, my_messages, message_changes, added_chats, removed_chats, "
-                        "status_users, is_started, payment, is_paid, answering_machine FROM accounts")
+                        "status_users, is_started, payment, is_paid, answering_machine, avatars FROM accounts")
         return [Account(d0, d1, d2, d3, d4, json_decode(d5), json_decode(d6), json_decode(d7), d8, json_decode(d9), d10,
-                        json_decode(d11)) for d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11 in cur.fetchall()]
+                        json_decode(d11), json_decode(d12)) for d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12 in cur.fetchall()]
 
     def get_session_path(self) -> str:
         return sessions_path(self.phone_number)
@@ -111,6 +116,7 @@ class Account:
         await db.execute("UPDATE accounts SET is_started=? WHERE id=?", (0, self.id))
         self.is_started = False
         telegram_client, self.telegram_client = self.telegram_client, new_telegram_client(self.phone_number)
+        self.checking_new_avatar.cancel()
         if telegram_client.is_connected():
             await telegram_client.disconnect()
 
@@ -133,6 +139,9 @@ class Account:
             self.payment.next_payment = next_payment
             await self.execute("UPDATE accounts SET payment=? WHERE id=?", (json_encode(self.payment.dict()), self.id))
 
+    async def count_avatars(self, user_id: int) -> int:
+        return len((await self.telegram_client(GetUserPhotosRequest(user_id, 0, 0, 128))).photos)
+
 
 class Payment:
     def __init__(self, net_payment: datetime, user: str, fee: int):
@@ -146,6 +155,52 @@ class Payment:
             'user': self.user,
             'fee': self.fee
         }
+
+
+class Avatars:
+    class User:
+        def __init__(self, id: int, name: str, count: int):
+            self.id = id
+            self.name = name
+            self.count = count
+
+        def dict(self) -> dict:
+            return dict(name=self.name, count=self.count)
+
+    def __init__(self, avatars: dict[str, dict[str, Union[int, str]]]):
+        self.avatars: dict[int, Avatars.User] = {int(id): self.User(id=int(id), **avatars[id]) for id in avatars}
+
+    def append(self, id: int, name: str, count: int):
+        self.avatars[id] = self.User(id, name, count)
+
+    def delete(self, id: int):
+        try:
+            del self.avatars[id]
+        except KeyError:
+            pass
+
+    def json(self) -> str:
+        return json_encode({id: self.avatars[id].dict() for id in self.avatars})
+
+    def __getitem__(self, item: int):
+        try:
+            return self.avatars[item]
+        except KeyError:
+            return None
+
+    def __iter__(self):
+        self.iter = self.avatars.__iter__()
+        return self
+
+    def __next__(self) -> User:
+        try:
+            return self.avatars[self.iter.__next__()]
+        except (StopIteration, KeyError) as e:
+            del self.iter
+            raise e
+
+    def __len__(self) -> int:
+        return self.avatars.__len__()
 
 
 class StatusUsers:
@@ -167,7 +222,10 @@ class StatusUsers:
         self.users[user_id] = self.User(user_id, name)
 
     def delete(self, user_id: int):
-        del self.users[user_id]
+        try:
+            del self.users[user_id]
+        except KeyError:
+            pass
 
     def json(self) -> str:
         return json_encode({id: self.users[id].dict() for id in self.users})
@@ -188,7 +246,7 @@ class StatusUsers:
     def __next__(self) -> User:
         try:
             return self.users[self.iter.__next__()]
-        except (KeyError, IndexError) as e:
+        except (StopIteration, KeyError) as e:
             del self.iter
             raise e
 
@@ -206,9 +264,10 @@ class AnsweringMachine:
         def dict(self) -> dict[str, Union[str, list[dict]]]:
             return dict(text=self.text, entities=[entity.model_dump() for entity in self.entities])
 
-    def __init__(self, main: int, variants: dict[int, dict[str, Union[str, list[dict]]]]):
+    def __init__(self, main: int, variants: dict[str, dict[str, Union[str, list[dict]]]], sending: list[int]):
         self.main: int = main
         self.variants: dict[int, AnsweringMachine.Answer] = {int(id): self.Answer(id=int(id), **variants[id]) for id in variants}
+        self.sending: set[int] = set(sending)
 
     def append(self, text: str, entities: list[MessageEntity]):
         id = int(time.time()) - 1737828000  # 1737828000 - 2025/01/26 00:00 (день активного обновления автоответчика)
@@ -218,10 +277,21 @@ class AnsweringMachine:
     def delete(self, answer_id: int):
         if self.main == answer_id:
             self.main = 0
-        del self.variants[answer_id]
+            self.clear_sending()
+        try:
+            del self.variants[answer_id]
+        except KeyError:
+            pass
+
+    def done(self, user_id: int):
+        self.sending.add(user_id)
+
+    def clear_sending(self):
+        self.sending.clear()
 
     def json(self) -> str:
-        return json_encode({"main": self.main, "variants": {id: self.variants[id].dict() for id in self.variants}})
+        return json_encode({"main": self.main, "sending": list(self.sending),
+                            "variants": {id: self.variants[id].dict() for id in self.variants}})
 
     def __getitem__(self, item: int) -> Union[Answer, None]:
         try:
@@ -236,7 +306,7 @@ class AnsweringMachine:
     def __next__(self) -> Answer:
         try:
             return self.variants[self.iter.__next__()]
-        except (StopIteration, IndexError) as e:
+        except (StopIteration, KeyError) as e:
             del self.iter
             raise e
 

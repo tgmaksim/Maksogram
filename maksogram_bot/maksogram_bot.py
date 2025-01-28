@@ -76,6 +76,7 @@ class UserState(StatesGroup):
     status_user = State('status_user')
     answering_machine = State('answering_machine')
     answering_machine_edit = State('answering_machine_edit')
+    avatar = State('avatar')
 
 
 # Метод для добавления и изменения "знакомых"
@@ -378,14 +379,13 @@ def settings(user_id: int) -> dict[str, Any]:
                                           [IButton(text="ℹ️ Узнать все возможности", url=SITE)]])
     elif status is False:
         markup = IMarkup(inline_keyboard=[[IButton(text="🟢 Включить Maksogram", callback_data="on")],
-                                          [IButton(text="ℹ️ Памятка по всем функциям", url=SITE)]])
+                                          [IButton(text="ℹ️ Памятка по функциям", url=SITE)]])
     else:
         markup = IMarkup(inline_keyboard=[[IButton(text="🔴 Выключить Maksogram", callback_data="off")],
-                                          [IButton(text="⏳ Отложенное сообщение", callback_data="delayed_message")],
                                           [IButton(text="🌐 Друг в сети", callback_data="status_users"),
-                                           IButton(text="🤖 Автоответчик", callback_data="answering_machine"),
-                                           ],  # IButton(text="📸 Аватарка", callback_data="update_profile_avatar")
-                                          [IButton(text="ℹ️ Узнать все возможности", url=SITE)]])
+                                           IButton(text="🤖 Автоответчик", callback_data="answering_machine")],
+                                          [IButton(text="📸 Новая аватарка", callback_data="avatars")],
+                                          [IButton(text="ℹ️ Памятка по функциям", url=SITE)]])
     return {"text": "⚙️ Maksogram — настройки ⚙️", "reply_markup": markup}
 
 
@@ -406,11 +406,87 @@ async def _friends(message: Message):
         "Также в нем есть множество других полезных функций", parse_mode=html, reply_markup=markup, disable_web_page_preview=True)
 
 
-@dp.callback_query(F.data == "delayed_message")
+@dp.callback_query(F.data == "avatars")
 @security()
-async def _delayed_message(callback_query: CallbackQuery):
+async def _avatars(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
-    await callback_query.answer("Функция в разработке", True)
+    await callback_query.message.edit_text(**avatars(callback_query.message.chat.id))
+
+
+def avatars(user_id: int) -> dict[str, Any]:
+    buttons = []
+    for user in accounts[user_id].avatars:
+        buttons.append([IButton(text=f"📸 {user.name}", callback_data=f"avatar_menu{user.id}")])
+    buttons.append([IButton(text="➕ Добавить пользователя", callback_data="new_avatar")])
+    buttons.append([IButton(text="◀️  Назад", callback_data="settings")])
+    return {"text": "📸 <b>Новая аватарка</b>\nКогда кто-то из выбранных пользователей изменит или добавит аватарку, я сообщу вам",
+            "parse_mode": html, "reply_markup": IMarkup(inline_keyboard=buttons)}
+
+
+@dp.callback_query(F.data.startswith("new_avatar"))
+@security('state')
+async def _new_avatar(callback_query: CallbackQuery, state: FSMContext):
+    if await new_callback_query(callback_query): return
+    account = accounts[callback_query.message.chat.id]
+    if len(account.avatars) >= 2:
+        return await callback_query.answer("У вас максимальное количество \"новых аватарок\"")
+    await state.set_state(UserState.avatar)
+    request_users = KeyboardButtonRequestUsers(request_id=1, user_is_bot=False)
+    markup = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Выбрать", request_users=request_users)],
+                                           [KeyboardButton(text="Отмена")]], resize_keyboard=True)
+    message_id = (await callback_query.message.answer("Отправьте пользователя для отслеживания", reply_markup=markup)).message_id
+    await state.update_data(message_id=message_id)
+    await callback_query.message.delete()
+
+
+@dp.message(UserState.avatar)
+@security('state')
+async def _avatar(message: Message, state: FSMContext):
+    if await new_message(message): return
+    message_id = (await state.get_data())['message_id']
+    await state.clear()
+    if message.content_type == "users_shared":
+        user_id = message.users_shared.user_ids[0]
+        if user_id != message.chat.id:
+            account = accounts[message.chat.id]
+            user = await account.telegram_client.get_entity(user_id)
+            name = user.first_name + (f" {user.last_name}" if user.last_name else "")
+            account.avatars.append(user_id, (name[:30] + "...") if len(name) > 30 else name, await account.count_avatars(user_id))
+            await db.execute("UPDATE accounts SET avatars=? WHERE id=?", (account.avatars.json(), account.id))
+            await message.answer(**avatar(message.chat.id, user_id))
+    else:
+        await message.answer(**avatars(message.chat.id))
+    await bot.delete_messages(chat_id=message.chat.id, message_ids=[message.message_id, message_id])
+
+
+def avatar(account_id: int, user_id: int) -> dict[str, Any]:
+    user = accounts[account_id].avatars[user_id]
+    if user is None:
+        return avatars(account_id)
+    markup = IMarkup(inline_keyboard=[
+        [IButton(text="🔴 Выключить", callback_data=f"avatar_del{user_id}")],
+        [IButton(text="◀️  Назад", callback_data="avatars")]])
+    return {"text": f"📸 <b>Новая аватарка</b>\nКогда <b>{user.name}</b> изменит или добавит аватарку, я сообщу вам\n",
+            "parse_mode": html, "reply_markup": markup}
+
+
+@dp.callback_query(F.data.startswith("avatar_del"))
+@security()
+async def _avatar_del(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    user_id = int(callback_query.data.replace("avatar_del", ""))
+    account = accounts[callback_query.message.chat.id]
+    account.avatars.delete(user_id)
+    await db.execute("UPDATE accounts SET avatars=? WHERE id=?", (account.avatars.json(), account.id))
+    await callback_query.message.edit_text(**avatars(callback_query.message.chat.id))
+
+
+@dp.callback_query(F.data.startswith("avatar_menu"))
+@security()
+async def _avatar_menu(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    user_id = int(callback_query.data.replace("avatar_menu", ""))
+    await callback_query.message.edit_text(**avatar(callback_query.message.chat.id, user_id))
 
 
 @dp.callback_query(F.data == "status_users")
@@ -452,7 +528,8 @@ def status_user(account_id: int, user_id: int) -> dict[str, Any]:
         [IButton(text=f"{status(user.reading)} Чтение моего сообщения", callback_data=f"status_user_reading{user_id}")],
         [IButton(text="🚫 Удалить пользователя", callback_data=f"status_user_del{user_id}")],
         [IButton(text="◀️  Назад", callback_data="status_users")]])
-    return {"text": "🌐 <b>Друг в сети</b>\nО каких событиях уведомлять?", "parse_mode": html, "reply_markup": markup}
+    return {"text": f"🌐 <b>Друг в сети</b>\nКогда <b>{user.name}</b> выйдет/зайдет в сеть или прочитает сообщение, я сообщу",
+            "parse_mode": html, "reply_markup": markup}
 
 
 @dp.callback_query(F.data.startswith("status_user_online"))
@@ -522,8 +599,9 @@ async def _status_user(message: Message, state: FSMContext):
     if message.content_type == "users_shared":
         user_id = message.users_shared.user_ids[0]
         account = accounts[message.chat.id]
-        first_name = (await account.telegram_client.get_entity(user_id)).first_name
-        account.status_users.append(user_id, (first_name[:30] + "...") if len(first_name) > 30 else first_name)
+        user = await account.telegram_client.get_entity(user_id)
+        name = user.first_name + (f" {user.last_name}" if user.last_name else "")
+        account.status_users.append(user_id, (name[:30] + "...") if len(name) > 30 else name)
         account.telegram_client.list_event_handlers()[5][1].chats = set(account.status_users.list())
         await db.execute("UPDATE accounts SET status_users=? WHERE id=?", (account.status_users.json(), account.id))
         await message.answer(**status_user(message.chat.id, user_id))
@@ -538,11 +616,10 @@ async def _status_user_del(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     user_id = int(callback_query.data.replace("status_user_del", ""))
     account = accounts[callback_query.message.chat.id]
-    if account.status_users[user_id] is not None:
-        account.status_users.delete(user_id)
-        account.telegram_client.list_event_handlers()[5][1].chats = set(account.status_users.list())
-        await db.execute("UPDATE accounts SET status_users=? WHERE id=?",
-                         (account.status_users.json(), callback_query.message.chat.id))
+    account.status_users.delete(user_id)
+    account.telegram_client.list_event_handlers()[5][1].chats = set(account.status_users.list())
+    await db.execute("UPDATE accounts SET status_users=? WHERE id=?",
+                     (account.status_users.json(), callback_query.message.chat.id))
     await callback_query.message.edit_text(**status_users(callback_query.message.chat.id))
 
 
@@ -587,7 +664,13 @@ async def _answering_machine(message: Message, state: FSMContext):
     if await new_message(message): return
     message_id = (await state.get_data())['message_id']
     await state.clear()
-    if message.text != "Отмена":
+    if message.content_type != "text":
+        await message.answer("<b>Ваше сообщение не является текстом</b>", parse_mode=html,
+                             reply_markup=answering_machine(message.chat.id)['reply_markup'])
+    elif len(message.text) > 512:
+        await message.answer("<b>Ваше сообщение слишком длинное</b>", parse_mode=html,
+                             reply_markup=answering_machine(message.chat.id)['reply_markup'])
+    elif message.text != "Отмена":
         answer_id = accounts[message.chat.id].answering_machine.append(message.text, message.entities or [])
         await db.execute("UPDATE accounts SET answering_machine=? WHERE id=?",
                          (accounts[message.chat.id].answering_machine.json(), message.chat.id))
@@ -627,10 +710,9 @@ async def _answering_machine_del(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     answer_id = int(callback_query.data.replace("answering_machine_del", ""))
     account = accounts[callback_query.message.chat.id]
-    if account.answering_machine[answer_id] is not None:
-        account.answering_machine.delete(answer_id)
-        await db.execute("UPDATE accounts SET answering_machine=? WHERE id=?",
-                         (account.answering_machine.json(), callback_query.message.chat.id))
+    account.answering_machine.delete(answer_id)
+    await db.execute("UPDATE accounts SET answering_machine=? WHERE id=?",
+                     (account.answering_machine.json(), callback_query.message.chat.id))
     await callback_query.message.edit_text(**answering_machine(callback_query.message.chat.id))
 
 
@@ -644,6 +726,7 @@ async def _answering_machine_on(callback_query: CallbackQuery):
         await callback_query.answer("Автоответ был удалено ранее!", True)
         await callback_query.message.edit_text(**answering_machine(callback_query.message.chat.id))
     account.answering_machine.main = answer_id
+    account.answering_machine.clear_sending()
     await db.execute("UPDATE accounts SET answering_machine=? WHERE id=?",
                      (accounts[callback_query.message.chat.id].answering_machine.json(), callback_query.message.chat.id))
     await callback_query.message.edit_text(**auto_answer(callback_query.message.chat.id, answer_id))
@@ -659,6 +742,7 @@ async def _answering_machine_off(callback_query: CallbackQuery):
         await callback_query.answer("Автоответ был удалено ранее!", True)
         await callback_query.message.edit_text(**answering_machine(callback_query.message.chat.id))
     account.answering_machine.main = 0
+    account.answering_machine.clear_sending()
     await db.execute("UPDATE accounts SET answering_machine=? WHERE id=?",
                      (accounts[callback_query.message.chat.id].answering_machine.json(), callback_query.message.chat.id))
     await callback_query.message.edit_text(**auto_answer(callback_query.message.chat.id, answer_id))
@@ -693,12 +777,18 @@ async def _answering_machine_edit(message: Message, state: FSMContext):
     answer = account.answering_machine[answer_id]
     if answer is None:
         await message.answer(**answering_machine(message.chat.id))
+    if message.content_type != "text":
+        await message.answer("<b>Ваше сообщение не является текстом</b>", parse_mode=html,
+                             reply_markup=answering_machine(message.chat.id)['reply_markup'])
+    elif len(message.text) > 512:
+        await message.answer("<b>Ваше сообщение слишком длинное</b>", parse_mode=html,
+                             reply_markup=answering_machine(message.chat.id)['reply_markup'])
+    elif message.text != "Отмена":
+        answer.text = message.text
+        answer.entities = message.entities or []
+        await db.execute("UPDATE accounts SET answering_machine=? WHERE id=?",
+                         (accounts[message.chat.id].answering_machine.json(), message.chat.id))
     else:
-        if message.text != "Отмена":
-            answer.text = message.text
-            answer.entities = message.entities or []
-            await db.execute("UPDATE accounts SET answering_machine=? WHERE id=?",
-                             (accounts[message.chat.id].answering_machine.json(), message.chat.id))
         await message.answer(**auto_answer(message.chat.id, answer_id))
     await bot.delete_messages(chat_id=message.chat.id, message_ids=[message_id, message.message_id])
 
@@ -959,11 +1049,11 @@ async def start_program(user_id: int, username: str, phone_number: str, telegram
         raise CreateChatsError(request['message'], f"Произошла ошибка {request['error'].__class__.__name__}: {request['error']}")
     name = ('@' + username) if username else user_id
     next_payment = {'next_payment': (time_now() + timedelta(days=7)).strftime("%Y/%m/%d"), 'user': 'user', 'fee': Variables.fee}
-    await db.execute("INSERT INTO accounts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    await db.execute("INSERT INTO accounts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                      (name, user_id, phone_number, request['my_messages'], request['message_changes'], '[]', '[]',
-                      '{}', 1, json_encode(next_payment), 1, '{"main": 0, "variants": {}}'))
+                      '{}', 1, json_encode(next_payment), 1, '{"main": 0, "variants": {}}', '{}'))
     account = Account(name, user_id, phone_number, request['my_messages'], request['message_changes'], [], [], {},
-                      '1', next_payment, '1', {"main": 0, "variants": {}}, telegram_client=telegram_client)
+                      '1', next_payment, '1', {"main": 0, "variants": {}}, {}, telegram_client=telegram_client)
     asyncio.get_running_loop().create_task(program.Program(telegram_client, account.id).run_until_disconnected())
 
 

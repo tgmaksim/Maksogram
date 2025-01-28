@@ -87,7 +87,8 @@ class Program:
                 await self.sleep()
                 await self.new_message(event)
                 await self.client(UpdateStatusRequest(offline=True))
-                if self.account.answering_machine.main and event.is_private and event.message.from_id.user_id != self.id:
+                if self.account.answering_machine.main and event.is_private and event.message.from_id.user_id != self.id \
+                        and event.chat_id not in self.account.answering_machine.sending:
                     auto_message = await self.answering_machine(event)
                     new_event = events.newmessage.NewMessage.Event(auto_message)
                     await self.new_message(new_event, auto_answer=True)
@@ -456,7 +457,8 @@ class Program:
         max_id = event.max_id
         chat_id = (await event.get_chat()).id
         if self.account.status_users[chat_id] and self.account.status_users[chat_id].reading and not me:
-            await MaksogramBot.send_message(self.id, f"{read_user} прочитал сообщение", reply_markup=MaksogramBot.IMarkup(
+            self.account.status_users[chat_id].reading = False
+            await MaksogramBot.send_message(self.id, f"🌐 {read_user} прочитал сообщение", reply_markup=MaksogramBot.IMarkup(
                 inline_keyboard=[[MaksogramBot.IButton(text="Настройки", callback_data=f"status_user_menu{event.chat_id}")]]))
         saved_message_ids = await self.account.get_read_messages(chat_id, max_id, -2 if me else -1)
         if saved_message_ids is None:
@@ -479,7 +481,7 @@ class Program:
         if online or offline:
             user = await self.chat_name(event.chat_id, my_name="Я")
             status_str = "в сети" if status else "вышел(а) из сети"
-            await MaksogramBot.send_message(self.id, f"{user} {status_str}", reply_markup=MaksogramBot.IMarkup(
+            await MaksogramBot.send_message(self.id, f"🌐 {user} {status_str}", reply_markup=MaksogramBot.IMarkup(
                 inline_keyboard=[[MaksogramBot.IButton(text="Настройки", callback_data=f"status_user_menu{event.chat_id}")]]))
 
     # Обработка сообщений системному боту от аккаунта
@@ -490,6 +492,7 @@ class Program:
         message: Message = event.message
         answer = self.account.answering_machine.variants[self.account.answering_machine.main]
         if not answer: return
+        self.account.answering_machine.done(message.chat_id)
         entities = []
         for entity in answer.entities:
             match entity.type:
@@ -512,9 +515,30 @@ class Program:
                         MessageEntityCustomEmoji(entity.offset, entity.length, document_id=int(entity.custom_emoji_id)))
         return await self.client.send_message(message.chat_id, answer.text, formatting_entities=entities)
 
+    async def new_avatar(self):
+        while self.account.is_started:
+            for user in self.account.avatars:
+                count_avatars = await self.account.count_avatars(user.id)
+                if user.count > count_avatars:
+                    await MaksogramBot.send_message(
+                        self.id, f"📸 <b><a href='tg://user?id={user.id}'>{user.name}</a></b> удалил(а) аватарку",
+                        reply_markup=MaksogramBot.IMarkup(
+                            inline_keyboard=[[MaksogramBot.IButton(text="🔴 Выключить", callback_data=f"avatar_del{user.id}")]]),
+                        parse_mode="html")
+                elif user.count < count_avatars:
+                    await MaksogramBot.send_message(
+                        self.id, f"📸 <b><a href='tg://user?id={user.id}'>{user.name}</a></b> добавил(а) аватарку",
+                        reply_markup=MaksogramBot.IMarkup(
+                            inline_keyboard=[[MaksogramBot.IButton(text="🔴 Выключить", callback_data=f"avatar_del{user.id}")]]),
+                        parse_mode="html")
+                user.count = count_avatars
+            await self.account.execute("UPDATE accounts SET avatars=? WHERE id=?", (self.account.avatars.json(), self.id))
+            await asyncio.sleep(5*60)
+
     async def run_until_disconnected(self):
         await self.account.create_table()
         await MaksogramBot.send_system_message(f"SavingMessages v{self.__version__} для {self.name} запущен")
+        self.account.checking_new_avatar = asyncio.create_task(self.new_avatar())
         try:
             await self.client.run_until_disconnected()
         except (AuthKeyInvalidError, AuthKeyUnregisteredError):
