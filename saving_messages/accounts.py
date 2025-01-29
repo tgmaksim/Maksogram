@@ -33,6 +33,7 @@ class Account:
             is_paid: str,
             answering_machine: dict[str, Union[int, dict[str, dict[str, Union[str, list[dict]]]], list[int]]],
             avatars: dict[str, dict[str, str]],
+            modules: dict[str, int],
 
             telegram_client: Union[TelegramClient, None] = None
     ):
@@ -50,6 +51,7 @@ class Account:
         self.answering_machine: AnsweringMachine = AnsweringMachine(answering_machine['main'], answering_machine['variants'],
                                                                     answering_machine['sending'])
         self.avatars: Avatars = Avatars(avatars)
+        self.modules: Modules = Modules(**modules)
 
         self.telegram_client: TelegramClient = telegram_client or new_telegram_client(phone_number)
         self.checking_new_avatar: Union[asyncio.Task, None] = None
@@ -61,9 +63,10 @@ class Account:
         with connect(resources_path("db.sqlite3")) as conn:
             cur = conn.cursor()
             cur.execute("SELECT name, id, phone_number, my_messages, message_changes, added_chats, removed_chats, "
-                        "status_users, is_started, payment, is_paid, answering_machine, avatars FROM accounts")
+                        "status_users, is_started, payment, is_paid, answering_machine, avatars, modules FROM accounts")
         return [Account(d0, d1, d2, d3, d4, json_decode(d5), json_decode(d6), json_decode(d7), d8, json_decode(d9), d10,
-                        json_decode(d11), json_decode(d12)) for d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12 in cur.fetchall()]
+                        json_decode(d11), json_decode(d12), json_decode(d13))
+                for d0, d1, d2, d3, d4, d5, d6, d7, d8, d9, d10, d11, d12, d13 in cur.fetchall()]
 
     def get_session_path(self) -> str:
         return sessions_path(self.phone_number)
@@ -155,6 +158,17 @@ class Payment:
             'user': self.user,
             'fee': self.fee
         }
+
+
+class Modules:
+    def __init__(self, calculator: int):
+        self.calculator: bool = bool(calculator)
+
+    def __getitem__(self, item: str) -> bool:
+        return self.__getattribute__(item)
+
+    def json(self) -> str:
+        return json_encode(dict(calculator=int(self.calculator)))
 
 
 class Avatars:

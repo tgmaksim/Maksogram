@@ -2,6 +2,8 @@ import emoji
 import string
 import asyncio
 
+from modules.calculator import main as calculator
+
 from typing import Union
 from . accounts import accounts
 from telethon.tl.patched import Message
@@ -200,6 +202,15 @@ class Program:
     async def new_message(self, event: events.newmessage.NewMessage.Event, auto_answer: bool = False):
         message: Message = event.message
 
+        module = ""
+        if self.account.modules.calculator and not message.media and message.text[-1] == "=" \
+                and message.text.find("\n") == -1:  # Калькулятор в чате
+            request = calculator(message.text[:-1])
+            if request:
+                await self.client.edit_message(message.chat_id, message, request)
+                message.text = request
+                module = "#Калькулятор"
+
         try:
             saved_message = await self.client.forward_messages(self.account.my_messages, message)
         except (ChatForwardsRestrictedError, BroadcastPublicVotersForbiddenError):
@@ -284,7 +295,7 @@ class Program:
             is_read = -2
         await self.account.insert_new_message(message.chat_id, message.id, saved_message.id, is_read)
         system_message = await self.client.send_message(
-            self.account.my_messages, f"{title}{chat_id}{name}{media}{type_message}{auto_answer}",
+            self.account.my_messages, f"{title}{chat_id}{name}{media}{type_message}{auto_answer}{module}",
             reply_to=saved_message.id)
         system_message_id = (await self.client(GetDiscussionMessageRequest(self.account.my_messages, system_message.id))).messages[0].id
         await self.client.delete_messages(self.account.message_changes, system_message_id)

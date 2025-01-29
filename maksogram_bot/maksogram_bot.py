@@ -385,6 +385,7 @@ def settings(user_id: int) -> dict[str, Any]:
                                           [IButton(text="🌐 Друг в сети", callback_data="status_users"),
                                            IButton(text="🤖 Автоответчик", callback_data="answering_machine")],
                                           [IButton(text="📸 Новая аватарка", callback_data="avatars")],
+                                          [IButton(text="💬 Maksogram в чате", callback_data="modules")],
                                           [IButton(text="ℹ️ Памятка по функциям", url=SITE)]])
     return {"text": "⚙️ Maksogram — настройки ⚙️", "reply_markup": markup}
 
@@ -404,6 +405,56 @@ async def _friends(message: Message):
         f"Привет! Я хочу тебе посоветовать отличного <a href='{url}'>бота</a>. "
         "Он сохранит все твои сообщения и подскажет, когда кто-то их удалит, изменит, прочитает или поставит реакцию. "
         "Также в нем есть множество других полезных функций", parse_mode=html, reply_markup=markup, disable_web_page_preview=True)
+
+
+@dp.callback_query(F.data == "modules")
+@security()
+async def _modules(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    await callback_query.message.edit_text(**modules())
+
+
+def modules() -> dict[str, Any]:
+    markup = IMarkup(inline_keyboard=[[IButton(text="🔢 Калькулятор", callback_data="calculator")],
+                                      [IButton(text="◀️  Назад", callback_data="settings")]])
+    return {"text": "💬 <b>Maksogram в чате</b>\nФункции, которые работают прямо из любого чата, не нужно вызывать меня",
+            "reply_markup": markup, "parse_mode": html}
+
+
+@dp.callback_query(F.data == "calculator")
+@security()
+async def _calculator(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    await callback_query.message.edit_text(**calculator_menu(callback_query.message.chat.id))
+
+
+def calculator_menu(user_id: int) -> dict[str, Any]:
+    if accounts[user_id].modules.calculator:
+        status_button = IButton(text="🔴 Выключить калькулятор", callback_data="calculator_off")
+    else:
+        status_button = IButton(text="🟢 Включить калькулятор", callback_data="calculator_on")
+    markup = IMarkup(inline_keyboard=[[status_button],
+                                      [IButton(text="Как работает калькулятор?", url=f"{SITE}#калькулятор")],
+                                      [IButton(text="◀️  Назад", callback_data="modules")]])
+    return {"text": "🔢 <b>Калькулятор в чате</b>\nРешает примеры разных уровней сложности от обычного умножения до "
+                    "длинных примеров. Для срабатывания укажите в конце \"=\"\n<blockquote>10+5*15=</blockquote>",
+            "reply_markup": markup, "parse_mode": html}
+
+
+@dp.callback_query(F.data.startswith("calculator_o"))  # on или off
+@security()
+async def _calculator_status(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    command = callback_query.data.split("_")[1]
+    account = accounts[callback_query.message.chat.id]
+    match command:
+        case "on":
+            account.modules.calculator = True
+            await db.execute("UPDATE accounts SET modules=? WHERE id=?", (account.modules.json(), account.id))
+        case "off":
+            account.modules.calculator = False
+            await db.execute("UPDATE accounts SET modules=? WHERE id=?", (account.modules.json(), account.id))
+    await callback_query.message.edit_text(**calculator_menu(callback_query.message.chat.id))
 
 
 @dp.callback_query(F.data == "avatars")
