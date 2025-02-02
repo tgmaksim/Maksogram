@@ -839,6 +839,7 @@ async def _answering_machine_edit(message: Message, state: FSMContext):
         answer.entities = message.entities or []
         await db.execute("UPDATE accounts SET answering_machine=? WHERE id=?",
                          (accounts[message.chat.id].answering_machine.json(), message.chat.id))
+        await message.answer(**auto_answer(message.chat.id, answer_id))
     else:
         await message.answer(**auto_answer(message.chat.id, answer_id))
     await bot.delete_messages(chat_id=message.chat.id, message_ids=[message_id, message.message_id])
