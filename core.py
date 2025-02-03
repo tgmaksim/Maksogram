@@ -5,20 +5,30 @@ subscribe = "https://t.me/+F5YW1gV3gdhjNjVi"
 channel = "@tgmaksim_ru"
 
 html = "HTML"
+s1, s2 = "{}"
 
 import os
 import json
 import string
+import asyncio
 import sys_keys
-import aiosqlite
 import traceback
 
 from aiogram import Bot
-from typing import Union
+from typing import Union, Any
+from database import Database
 from telethon import TelegramClient
 from datetime import datetime, timedelta
+from telethon.tl.functions.photos import GetUserPhotosRequest
 from sys_keys import sessions_path, TOKEN, BOT_ID, USERNAME_BOT
 from aiogram.types import LinkPreviewOptions, InlineKeyboardMarkup, InlineKeyboardButton
+
+
+class UserIsNotAuthorized(Exception):
+    pass
+
+
+telegram_clients: dict[int, TelegramClient] = {}
 
 
 def resources_path(path: str) -> str:
@@ -51,16 +61,42 @@ def unzip_int_data(data: str) -> int:
 
 
 class db:
-    db_path = "db.sqlite3"
+    @staticmethod
+    async def execute(sql: str, *params) -> bool:
+        async with Database() as conn:
+            return await conn.execute(sql, *params)
 
     @staticmethod
-    async def execute(sql: str, params: tuple = None) -> tuple[tuple[Union[str, int]]]:
-        async with aiosqlite.connect(resources_path(db.db_path)) as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(sql, params)
-                result = await cur.fetchall()
-            await conn.commit()
-        return result
+    async def fetch_all(sql: str, *params, one_data: bool = False) -> Union[list[dict], list]:
+        async with Database() as conn:
+            return await conn.fetch_all(sql, *params, one_data=one_data)
+
+    @staticmethod
+    async def fetch_one(sql: str, *params, one_data: bool = False) -> Union[dict, Any]:
+        async with Database() as conn:
+            return await conn.fetch_one(sql, *params, one_data=one_data)
+
+
+async def count_avatars(account_id: int, user_id: int) -> int:
+    return len((await telegram_clients[account_id](GetUserPhotosRequest(user_id, 0, 0, 128))).photos)
+
+
+async def account_off(account_id: int, phone_number: str):
+    await db.execute(f"UPDATE accounts SET is_started='false' WHERE id={account_id}")
+    telegram_client, telegram_clients[account_id] = telegram_clients[account_id], new_telegram_client(phone_number)
+    if telegram_client.is_connected():
+        await telegram_client.disconnect()
+
+
+async def account_on(account_id: int, Program):
+    if not telegram_clients[account_id].is_connected():
+        await telegram_clients[account_id].connect()
+    if await telegram_clients[account_id].is_user_authorized():
+        await db.execute(f"UPDATE accounts SET is_started='true' WHERE id={account_id}")
+        status_users = await db.fetch_all(f"SELECT key FROM accounts, jsonb_each(status_users) WHERE id={account_id};", one_data=True)
+        asyncio.get_running_loop().create_task(Program(telegram_clients[account_id], account_id, status_users).run_until_disconnected())
+    else:
+        raise UserIsNotAuthorized()
 
 
 def security(*arguments):
@@ -100,10 +136,6 @@ def time_now() -> datetime:
 def omsk_time(t: datetime):
     tz = int(t.tzinfo.utcoffset(None).total_seconds() // 3600)
     return (t + timedelta(hours=6-tz)).replace(tzinfo=None)
-
-
-async def get_users() -> set:
-    return set(map(lambda x: int(x[0]), await db.execute("SELECT id FROM users")))
 
 
 def preview_options(path="", site=SITE):

@@ -1,44 +1,49 @@
 from . import program, admin_program
-
-from datetime import timedelta
-from . accounts import Account, UserIsNotAuthorized
 from aiogram.exceptions import TelegramForbiddenError
-from core import OWNER, Variables, time_now, MaksogramBot
+from core import (
+    db,
+    OWNER,
+    time_now,
+    Variables,
+    account_on,
+    MaksogramBot,
+    telegram_clients,
+    new_telegram_client,
+    UserIsNotAuthorized,
+)
 
 
-async def warning(account: Account):
-    await MaksogramBot.send_message(account.id, "Ваша подписка истечет завтра. Продлите ее, чтобы пользоваться Maksogram")
-    await MaksogramBot.send_system_message(f"Платеж просрочен ({account.name})")
-
-
-async def error(account: Account):
-    await account.set_status_payment(False)
-    await account.off()
-    await MaksogramBot.send_message(account.id, "Ваша подписка истекла. Продлите ее, чтобы пользоваться Maksogram")
-    await MaksogramBot.send_system_message(f"Платеж просрочен. maksogram не запущен ({account.name})")
+async def warning(id: int, name: str):
+    await MaksogramBot.send_message(id, "Ваша подписка истечет завтра. Продлите ее, чтобы пользоваться Maksogram")
+    await MaksogramBot.send_system_message(f"Платеж просрочен ({name})")
 
 
 async def main():
-    accounts = Account.get_accounts()
-    for account in accounts:
-        if account.payment.user == 'user':
-            if account.payment.next_payment.strftime("%Y/%m/%d") == time_now().strftime("%Y/%m/%d"):
-                await warning(account)
-            elif (time_now() + timedelta(days=1)) >= account.payment.next_payment and account.is_started:
-                await error(account)
+    for account in await db.fetch_all("SELECT id, name, is_started, is_paid, payment, phone_number FROM accounts"):
+        telegram_clients[account['id']] = new_telegram_client(f"+{account['phone_number']}")
+        if account['payment']['user'] == 'user' and account['is_started'] and account['is_paid']:
+            if account['payment']['next_payment'] + 24*60*60 <= time_now().timestamp():
+                await db.execute(f"UPDATE accounts SET is_paid=false WHERE id={account['id']}")
+                await db.execute(f"UPDATE accounts SET is_started=false WHERE id={account['id']}")
+                await MaksogramBot.send_message(account['id'], "Ваша подписка истекла. Продлите ее, чтобы пользоваться Maksogram")
+                await MaksogramBot.send_system_message(f"Платеж просрочен. Maksogram не запущен ({account['name']})")
                 continue
+            if account['payment']['next_payment'] <= time_now().timestamp():
+                await MaksogramBot.send_message(account['id'], "Ваша подписка истечет завтра. "
+                                                               "Продлите ее, чтобы пользоваться Maksogram")
+                await MaksogramBot.send_system_message(f"Платеж просрочен ({account['name']})")
 
-        if not account.my_messages or not account.is_started or not account.is_paid:
+        if not account['is_started'] or not account['is_paid']:
             continue
 
-        print("Вход %s" % account.name)
+        print("Вход %s" % account['name'])
         try:
-            await account.on((admin_program if account.id == OWNER else program).Program)
+            await account_on(account['id'], (admin_program if account['id'] == OWNER else program).Program)
         except UserIsNotAuthorized:
-            await account.off()
+            await db.execute(f"UPDATE accounts SET is_started=false WHERE id={account['id']}")
             try:
-                await MaksogramBot.send_message(account.id, "Вы удалили сессию Telegram, Maksogram не может работать без нее")
+                await MaksogramBot.send_message(account['id'], "Вы удалили сессию Telegram, Maksogram не может работать без нее")
             except TelegramForbiddenError:
                 pass
             continue
-        print("Запуск %s (v%s)" % (account.name, Variables.version))
+        print("Запуск %s (v%s)" % (account['name'], Variables.version))

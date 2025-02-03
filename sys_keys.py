@@ -29,3 +29,6 @@ BOT_ID = RELEASE_BOT_ID if release else DEBUG_BOT_ID
 RELEASE_USERNAME_BOT = "MaksogramBot"
 DEBUG_USERNAME_BOT = "TestMaksimBot"
 USERNAME_BOT = RELEASE_USERNAME_BOT if release else DEBUG_USERNAME_BOT
+
+db_config = {"host": os.environ['DBHOST'], "user": os.environ['DBUSER'],
+             "password": os.environ['DBPASS'], "database": f"{os.environ['DBNAME']}_maksogram"}

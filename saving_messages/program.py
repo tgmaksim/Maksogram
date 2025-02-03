@@ -5,15 +5,14 @@ import asyncio
 from modules.calculator import main as calculator
 
 from typing import Union
-from . accounts import accounts
 from telethon.tl.patched import Message
 from datetime import timedelta, datetime
 from telethon import TelegramClient, events
 from telethon.events.common import EventCommon
 from telethon.errors import ChatForwardsRestrictedError
-from core import MaksogramBot, Variables, security, time_now
 from telethon.tl.functions.account import UpdateStatusRequest
-from telethon.tl.functions.messages import GetCustomEmojiDocumentsRequest, GetDiscussionMessageRequest
+from telethon.tl.functions.messages import GetCustomEmojiDocumentsRequest
+from core import db, MaksogramBot, Variables, security, time_now, count_avatars, account_off
 from telethon.errors.rpcerrorlist import MsgIdInvalidError, AuthKeyInvalidError, BroadcastPublicVotersForbiddenError, AuthKeyUnregisteredError
 from telethon.tl.types import (
     User,
@@ -73,14 +72,12 @@ class Program:
         if difference < LastEvent.seconds:
             await asyncio.sleep(LastEvent.seconds - difference)
 
-    def __init__(self, client: TelegramClient, account_id: int):
+    def __init__(self, client: TelegramClient, account_id: int, status_users: list[int]):
         self.id = account_id
-        self.account = accounts[self.id]
-        self.name = self.account.name
         self.client = client
         self.last_event = LastEvent()
 
-        self.status_users: dict[int, bool] = {user: None for user in self.account.status_users}  # {id: True} -> id в сети
+        self.status_users: dict[int, bool] = {user: None for user in status_users}  # {id: True} -> id в сети
 
         @client.on(events.NewMessage(func=self.initial_checking_event))
         @security()
@@ -89,8 +86,10 @@ class Program:
                 await self.sleep()
                 await self.new_message(event)
                 await self.client(UpdateStatusRequest(offline=True))
-                if self.account.answering_machine.main and event.is_private and event.message.from_id.user_id != self.id \
-                        and event.chat_id not in self.account.answering_machine.sending:
+                if await db.fetch_one(f"SELECT answering_machine['main'] FROM accounts WHERE id={self.id}", one_data=True) \
+                        and event.is_private and event.message.from_id and event.message.from_id.user_id != self.id \
+                        and not await db.fetch_one(f"SELECT answering_machine['sending'] @> '{event.chat_id}' "
+                                                   f"FROM accounts WHERE id={self.id}", one_data=True):
                     auto_message = await self.answering_machine(event)
                     new_event = events.newmessage.NewMessage.Event(auto_message)
                     await self.new_message(new_event, auto_answer=True)
@@ -107,7 +106,7 @@ class Program:
         @security()
         async def message_delete(event: events.messagedeleted.MessageDeleted.Event):
             if event.is_private is False:  # Сообщение удалено в группе, супергруппе или канале
-                if event.chat_id not in self.account.added_chats:
+                if not await db.fetch_one(f"SELECT added_chats @> '{event.chat_id}' FROM accounts WHERE id={self.id}", one_data=True):
                     return
             await self.sleep()
             await self.message_delete(event)
@@ -128,7 +127,7 @@ class Program:
                 await self.client(UpdateStatusRequest(offline=True))
 
         @client.on(events.UserUpdate(
-            chats=self.account.status_users.list(),
+            chats=self.status_users,
             func=lambda event: isinstance(event.status, (UserStatusOnline, UserStatusOffline)))
         )
         @security()
@@ -141,8 +140,10 @@ class Program:
         async def system_bot(event: events.newmessage.NewMessage.Event):
             await self.system_bot(event)
 
-    def initial_checking_event(self, event: EventCommon) -> bool:
-        return event.is_private and event.chat_id not in self.account.removed_chats or event.chat_id in self.account.added_chats
+    async def initial_checking_event(self, event: EventCommon) -> bool:
+        return event.is_private and \
+            not await db.fetch_one(f"SELECT removed_chats @> '{event.chat_id}' FROM accounts WHERE id={self.id}", one_data=True) or \
+            await db.fetch_one(f"SELECT added_chats @> '{event.chat_id}' FROM accounts WHERE id={self.id}", one_data=True)
 
     async def secondary_checking_event(self, event: EventCommon) -> bool:
         if event.is_private:
@@ -179,7 +180,7 @@ class Program:
         return name
 
     # Получает id пользователя или группы
-    async def get_id(self, peer: Union[PeerUser, PeerChat, PeerChannel, None]) -> int:
+    async def get_id(self, peer: Union[PeerUser, PeerChat, PeerChannel, None]):
         if peer is None:
             return self.id
         if isinstance(peer, PeerUser):
@@ -188,7 +189,8 @@ class Program:
             return peer.chat_id
         if isinstance(peer, PeerChannel):
             return peer.channel_id
-        await MaksogramBot.send_system_message(f"⚠️ Ошибка ⚠️\n\nТип peer - {peer.__class__.__name__} ({self.id})")
+        name = await db.fetch_one(f"SELECT name FROM accounts WHERE id={self.id}", one_data=True)
+        await MaksogramBot.send_system_message(f"⚠️ Ошибка ⚠️\n\nТип peer - {peer.__class__.__name__} ({name})")
         raise TypeError("peer isn't instance PeerUser, PeerChat, PeerChannel or NoneType")
 
     # Считает длину сообщения
@@ -199,12 +201,16 @@ class Program:
     async def is_premium(self) -> bool:
         return (await self.client.get_me()).premium
 
+    @property
+    def my_messages(self):
+        return db.fetch_one(f"SELECT my_messages FROM accounts WHERE id={self.id}", one_data=True)
+
     async def new_message(self, event: events.newmessage.NewMessage.Event, auto_answer: bool = False):
         message: Message = event.message
 
         module = ""
-        if self.account.modules.calculator and not message.media and message.text[-1] == "=" \
-                and message.text.find("\n") == -1:  # Калькулятор в чате
+        if await db.fetch_one(f"SELECT modules['calculator'] FROM accounts WHERE id={self.id}", one_data=True) and \
+                not message.media and message.text[-1] == "=" and message.text.find("\n") == -1:  # Калькулятор в чате
             request = calculator(message.text[:-1])
             if request:
                 await self.client.edit_message(message.chat_id, message, request)
@@ -212,7 +218,7 @@ class Program:
                 module = "#Калькулятор"
 
         try:
-            saved_message = await self.client.forward_messages(self.account.my_messages, message)
+            saved_message = await self.client.forward_messages(await self.my_messages, message)
         except (ChatForwardsRestrictedError, BroadcastPublicVotersForbiddenError):
             return
 
@@ -293,17 +299,16 @@ class Program:
             is_read = -1
         else:
             is_read = -2
-        await self.account.insert_new_message(message.chat_id, message.id, saved_message.id, is_read)
-        system_message = await self.client.send_message(
-            self.account.my_messages, f"{title}{chat_id}{name}{media}{type_message}{auto_answer}{module}",
-            reply_to=saved_message.id)
-        system_message_id = (await self.client(GetDiscussionMessageRequest(self.account.my_messages, system_message.id))).messages[0].id
-        await self.client.delete_messages(self.account.message_changes, system_message_id)
+        await db.execute(f"INSERT INTO \"{self.id}_messages\" VALUES "
+                         f"({message.chat_id}, {message.id}, {saved_message.id}, {is_read}, '')")
+        await self.client.send_message(await self.my_messages, f"{title}{chat_id}{name}{media}{type_message}{auto_answer}{module}",
+                                       reply_to=saved_message.id)
 
     # Проверка на изменение
     async def check_reactions(self, event: events.messageedited.MessageEdited.Event) -> bool:
         message: Message = event.message
-        last_reactions = await self.account.get_last_reactions(message.chat_id, message.id)
+        last_reactions = await db.fetch_one(f"SELECT reactions FROM \"{self.id}_messages\" "
+                                            f"WHERE chat_id={message.chat_id} AND message_id={message.id}", one_data=True)
         if last_reactions is None:
             return False
         now_reactions, _ = await self.get_reactions(event)
@@ -323,7 +328,7 @@ class Program:
         if message.reactions.recent_reactions:  # Реакции и их "владельцы" (например, в личном чате)
             for reaction in message.reactions.recent_reactions:
                 user_id = await self.get_id(reaction.peer_id)
-                peer = await self.chat_name(user_id, 'Я')
+                peer = await self.chat_name(user_id, my_name="Я")
                 if isinstance(reaction.reaction, ReactionEmoji):
                     reactions += f"{peer}: {reaction.reaction.emoticon}\n"
                 elif isinstance(reaction.reaction, ReactionCustomEmoji):
@@ -332,10 +337,10 @@ class Program:
                     emoticon = document['attributes'][1]['alt']
                     if is_premium:
                         reactions += f"{peer}: {emoticon}\n"
-                        offset = self.get_length_message(reactions[:-len(emoticon) - 1])
+                        offset = self.get_length_message(reactions[:-len(emoticon)-1])
                         entities.append(MessageEntityCustomEmoji(document_id=document_id, length=2, offset=offset))
                     else:
-                        reactions += f"{peer}: premium'{emoticon}'\n"
+                        reactions += f"{peer}: premium{emoticon}\n"
         elif message.reactions.results:  # Реакции и их количество (например, в канале)
             for reaction in message.reactions.results:
                 count = reaction.count
@@ -356,7 +361,7 @@ class Program:
                         reactions += f"{emoticon}: {count} {word_reactions}\n"
                         entities.append(MessageEntityCustomEmoji(document_id=document_id, length=2, offset=offset))
                     else:
-                        reactions += f"premium'{emoticon}': {count} {word_reactions}\n"
+                        reactions += f"premium{emoticon}: {count} {word_reactions}\n"
         else:
             return "", []
         return reactions, entities
@@ -364,51 +369,54 @@ class Program:
     # Взаимодействие с изменением сообщения
     async def message_edited(self, event: events.messageedited.MessageEdited.Event):
         message: Message = event.message
-        saved_message_id = await self.account.get_saved_message_id(message.chat_id, message.id)
+        saved_message_id: int = await db.fetch_one(f"SELECT saved_message_id FROM \"{self.id}_messages\" "
+                                                   f"WHERE chat_id={message.chat_id} AND message_id={message.id}", one_data=True)
         if saved_message_id is None:  # Если сообщение не было обработано ранее функцией new_message
             return
         if not event.is_private:
             return await self.message_edited_in_group(event, saved_message_id)
         if not await self.check_reactions(event):  # Если изменено содержание сообщения (текст или медиа)
             try:
-                await self.client.send_message(self.account.my_messages, message, comment_to=saved_message_id)
+                await self.client.send_message(await self.my_messages, message, comment_to=saved_message_id)
             except MsgIdInvalidError:
-                await self.client.send_message(self.account.my_messages, message, reply_to=saved_message_id)
+                await self.client.send_message(await self.my_messages, message, reply_to=saved_message_id)
         else:  # Изменение реакций
             is_premium = await self.is_premium()
             reactions, entities = await self.get_reactions(event, is_premium=is_premium)
             reactions_str, _ = await self.get_reactions(event)
-            await self.account.update_reactions(reactions_str, message.chat_id, message.id)
-
+            await db.execute(f"UPDATE \"{self.id}_messages\" SET reactions='{reactions_str}' "
+                             f"WHERE chat_id={message.chat_id} AND message_id={message.id}")
             reactions = reactions if reactions else "Реакции убраны"
             try:
-                await self.client.send_message(self.account.my_messages, reactions,
+                await self.client.send_message(await self.my_messages, reactions,
                                                formatting_entities=entities, comment_to=saved_message_id)
             except MsgIdInvalidError:
-                await self.client.send_message(self.account.my_messages, reactions,
+                await self.client.send_message(await self.my_messages, reactions,
                                                formatting_entities=entities, reply_to=saved_message_id)
 
     async def message_edited_in_group(self, event: events.MessageEdited.Event, saved_message_id: int):
         reactions = await self.get_reactions(event, is_premium=await self.is_premium())
         try:
-            await self.client.send_message(self.account.my_messages, event.message, comment_to=saved_message_id)
+            await self.client.send_message(await self.my_messages, event.message, comment_to=saved_message_id)
             if reactions[0]:
-                await self.client.send_message(self.account.my_messages, reactions[0],
+                await self.client.send_message(await self.my_messages, reactions[0],
                                                formatting_entities=reactions[1], comment_to=saved_message_id)
         except MsgIdInvalidError:
-            await self.client.send_message(self.account.my_messages, event.message, reply_to=saved_message_id)
+            await self.client.send_message(await self.my_messages, event.message, reply_to=saved_message_id)
             if reactions[0]:
-                await self.client.send_message(self.account.my_messages, reactions[0],
+                await self.client.send_message(await self.my_messages, reactions[0],
                                                formatting_entities=reactions[1], reply_to=saved_message_id)
 
     # Получение данных об удаленном сообщении
     async def get_data_delete_message(self, chat_id: int, is_private: bool, message_id: int):
         if is_private:
-            data = await self.account.get_private_message_by_id(message_id)
+            data = await db.fetch_one(f"SELECT chat_id, saved_message_id FROM \"{self.id}_messages\" "
+                                      f"WHERE message_id={message_id} AND chat_id>-10000000000")
             if data is None: return
-            chat_id, saved_message_id = data
+            chat_id, saved_message_id = data.values()
         else:
-            saved_message_id = await self.account.get_saved_message_id(chat_id, message_id)
+            saved_message_id = await db.fetch_one(f"SELECT saved_message_id FROM \"{self.id}_messages\" "
+                                                  f"WHERE message_id={message_id}", one_data=True)
             if saved_message_id is None: return
         return chat_id, saved_message_id
 
@@ -423,13 +431,13 @@ class Program:
                 await MaksogramBot.send_message(self.id, f"Произошло удаление {len(delete_ids)} сообщений")
                 return
             chat_id, saved_message_id = message_data
-            await self.account.delete_message(saved_message_id)
+            await db.execute(f"DELETE FROM \"{self.id}_messages\" WHERE saved_message_id={saved_message_id}")
             try:
-                await self.client.send_message(self.account.my_messages, f"Сообщение (и еще {len(delete_ids)-1}) удалено", comment_to=saved_message_id)
+                await self.client.send_message(await self.my_messages, f"Сообщение (и еще {len(delete_ids)-1}) удалено", comment_to=saved_message_id)
             except MsgIdInvalidError:
-                await self.client.send_message(self.account.my_messages, f"Сообщение (и еще {len(delete_ids)-1}) удалено", reply_to=saved_message_id)
+                await self.client.send_message(await self.my_messages, f"Сообщение (и еще {len(delete_ids)-1}) удалено", reply_to=saved_message_id)
             if chat_id != self.id:
-                link_to_message = f"t.me/c/{str(self.account.my_messages)[4:]}/{saved_message_id}"  # Сис. канал
+                link_to_message = f"t.me/c/{str(await self.my_messages)[4:]}/{saved_message_id}"  # Сис. канал
                 chat_name = await self.chat_name(chat_id, my_name="Я")
                 if is_private:
                     await MaksogramBot.send_message(self.id, f"В чате {chat_name} удалены {len(delete_ids)} сообщений, например, "
@@ -442,13 +450,13 @@ class Program:
             message_data = await self.get_data_delete_message(chat_id, is_private, id)
             if message_data is None: continue
             chat_id, saved_message_id = message_data
-            await self.account.delete_message(saved_message_id)
+            await db.execute(f"DELETE FROM \"{self.id}_messages\" WHERE saved_message_id={saved_message_id}")
             try:
-                await self.client.send_message(self.account.my_messages, "Сообщение удалено", comment_to=saved_message_id)
+                await self.client.send_message(await self.my_messages, "Сообщение удалено", comment_to=saved_message_id)
             except MsgIdInvalidError:
-                await self.client.send_message(self.account.my_messages, "Сообщение удалено", reply_to=saved_message_id)
+                await self.client.send_message(await self.my_messages, "Сообщение удалено", reply_to=saved_message_id)
             if chat_id != self.id:
-                link_to_message = f"t.me/c/{str(self.account.my_messages)[4:]}/{saved_message_id}"  # Сис. канал
+                link_to_message = f"t.me/c/{str(await self.my_messages)[4:]}/{saved_message_id}"  # Сис. канал
                 chat_name = await self.chat_name(chat_id, my_name="Я")
                 if is_private:
                     await MaksogramBot.send_message(
@@ -467,19 +475,23 @@ class Program:
             read_user = await self.chat_name(await self.get_id(event.original_update.peer))
         max_id = event.max_id
         chat_id = (await event.get_chat()).id
-        if self.account.status_users[chat_id] and self.account.status_users[chat_id].reading and not me:
-            self.account.status_users[chat_id].reading = False
+        if await db.fetch_one(f"SELECT status_users['{chat_id}']['reading'] FROM accounts WHERE id={self.id}", one_data=True) \
+                and not me:
+            await db.execute(f"UPDATE accounts SET status_users['{chat_id}']['reading']='false' WHERE id={self.id}")
             await MaksogramBot.send_message(self.id, f"🌐 {read_user} прочитал сообщение", reply_markup=MaksogramBot.IMarkup(
                 inline_keyboard=[[MaksogramBot.IButton(text="Настройки", callback_data=f"status_user_menu{event.chat_id}")]]))
-        saved_message_ids = await self.account.get_read_messages(chat_id, max_id, -2 if me else -1)
+        saved_message_ids: list[int] = await db.fetch_all(
+            f"SELECT saved_message_id FROM \"{self.id}_messages\" WHERE is_read={-2 if me else -1} "
+            f"AND chat_id={chat_id} AND message_id<={max_id}", one_data=True)
         if saved_message_ids is None:
             return
+        await db.execute(f"UPDATE \"{self.id}_messages\" SET is_read='1' WHERE chat_id={chat_id} AND message_id<={max_id}")
         for saved_message_id in saved_message_ids:
             await asyncio.sleep(0.5)
             try:
-                await self.client.send_message(self.account.my_messages, f"{read_user} прочитал(а) сообщение", comment_to=saved_message_id)
+                await self.client.send_message(await self.my_messages, f"{read_user} прочитал(а) сообщение", comment_to=saved_message_id)
             except MsgIdInvalidError:
-                await self.client.send_message(self.account.my_messages, f"{read_user} прочитал(а) сообщение", reply_to=saved_message_id)
+                await self.client.send_message(await self.my_messages, f"{read_user} прочитал(а) сообщение", reply_to=saved_message_id)
 
     # Взаимодействие с изменением статуса (в сети/офлайн)
     async def user_update(self, event: events.userupdate.UserUpdate.Event):
@@ -487,8 +499,10 @@ class Program:
         if self.status_users.get(event.chat_id) == status:
             return
         self.status_users[event.chat_id] = status
-        online = self.account.status_users[event.chat_id].online and status is True
-        offline = self.account.status_users[event.chat_id].offline and status is False
+        function = await db.fetch_one(f"SELECT status_users['{event.chat_id}']['online'] AS online, "
+                                      f"status_users['{event.chat_id}']['offline'] AS offline FROM accounts WHERE id={self.id}")
+        online = function['online'] and status is True
+        offline = function['offline'] and status is False
         if online or offline:
             user = await self.chat_name(event.chat_id, my_name="Я")
             status_str = "в сети" if status else "вышел(а) из сети"
@@ -501,58 +515,62 @@ class Program:
 
     async def answering_machine(self, event: events.newmessage.NewMessage.Event):
         message: Message = event.message
-        answer = self.account.answering_machine.variants[self.account.answering_machine.main]
+        answer = await db.fetch_one(f"SELECT answering_machine->'variants'->(SELECT answering_machine['main']::text "
+                                    f"FROM accounts WHERE id={self.id}) FROM accounts WHERE id={self.id}", one_data=True)
         if not answer: return
-        self.account.answering_machine.done(message.chat_id)
+        await db.execute(f"UPDATE accounts SET answering_machine['sending']=answering_machine['sending'] || '{message.chat_id}' "
+                         f"WHERE id={self.id}")
         entities = []
-        for entity in answer.entities:
-            match entity.type:
+        for entity in answer['entities']:
+            match entity['type']:
                 case "bold":
-                    entities.append(MessageEntityBold(entity.offset, entity.length))
+                    entities.append(MessageEntityBold(entity['offset'], entity['length']))
                 case "italic":
-                    entities.append(MessageEntityItalic(entity.offset, entity.length))
+                    entities.append(MessageEntityItalic(entity['offset'], entity['length']))
                 case "underline":
-                    entities.append(MessageEntityUnderline(entity.offset, entity.length))
+                    entities.append(MessageEntityUnderline(entity['offset'], entity['length']))
                 case "strikethrough":
-                    entities.append(MessageEntityStrike(entity.offset, entity.length))
+                    entities.append(MessageEntityStrike(entity['offset'], entity['length']))
                 case "spoiler":
-                    entities.append(MessageEntitySpoiler(entity.offset, entity.length))
+                    entities.append(MessageEntitySpoiler(entity['offset'], entity['length']))
                 case "blockquote":
-                    entities.append(MessageEntityBlockquote(entity.offset, entity.length))
+                    entities.append(MessageEntityBlockquote(entity['offset'], entity['length']))
                 case "text_link":
-                    entities.append(MessageEntityTextUrl(entity.offset, entity.length, url=entity.url))
+                    entities.append(MessageEntityTextUrl(entity['offset'], entity['length'], entity['url']))
                 case "custom_emoji":
-                    entities.append(
-                        MessageEntityCustomEmoji(entity.offset, entity.length, document_id=int(entity.custom_emoji_id)))
-        return await self.client.send_message(message.chat_id, answer.text, formatting_entities=entities)
+                    entities.append(MessageEntityCustomEmoji(entity['offset'], entity['length'], document_id=int(entity['custom_emoji_id'])))
+        return await self.client.send_message(message.chat_id, answer['text'], formatting_entities=entities)
 
     async def new_avatar(self):
-        while self.account.is_started:
-            for user in self.account.avatars:
-                count_avatars = await self.account.count_avatars(user.id)
-                if user.count > count_avatars:
+        while await db.fetch_one(f"SELECT is_started FROM accounts WHERE id={self.id}", one_data=True):
+            for user_id, user in (await db.fetch_one(f"SELECT avatars FROM accounts WHERE id={self.id}", one_data=True)).items():
+                count = await count_avatars(self.id, int(user_id))
+                if user['count'] > count:
                     await MaksogramBot.send_message(
-                        self.id, f"📸 <b><a href='tg://user?id={user.id}'>{user.name}</a></b> удалил(а) аватарку",
+                        self.id, f"📸 <b><a href='tg://user?id={user_id}'>{user['name']}</a></b> удалил(а) аватарку",
                         reply_markup=MaksogramBot.IMarkup(
-                            inline_keyboard=[[MaksogramBot.IButton(text="🔴 Выключить", callback_data=f"avatar_del{user.id}")]]),
+                            inline_keyboard=[[MaksogramBot.IButton(text="🔴 Выключить", callback_data=f"avatar_del{user_id}")]]),
                         parse_mode="html")
-                elif user.count < count_avatars:
+                elif user['count'] < count:
                     await MaksogramBot.send_message(
-                        self.id, f"📸 <b><a href='tg://user?id={user.id}'>{user.name}</a></b> добавил(а) аватарку",
+                        self.id, f"📸 <b><a href='tg://user?id={user_id}'>{user['name']}</a></b> добавил(а) аватарку",
                         reply_markup=MaksogramBot.IMarkup(
-                            inline_keyboard=[[MaksogramBot.IButton(text="🔴 Выключить", callback_data=f"avatar_del{user.id}")]]),
+                            inline_keyboard=[[MaksogramBot.IButton(text="🔴 Выключить", callback_data=f"avatar_del{user_id}")]]),
                         parse_mode="html")
-                user.count = count_avatars
-            await self.account.execute("UPDATE accounts SET avatars=? WHERE id=?", (self.account.avatars.json(), self.id))
+                else: continue
+                await db.execute(f"UPDATE accounts SET avatars['{user_id}']['count']='{count}' WHERE id={self.id}")
             await asyncio.sleep(5*60)
 
     async def run_until_disconnected(self):
-        await self.account.create_table()
-        await MaksogramBot.send_system_message(f"SavingMessages v{self.__version__} для {self.name} запущен")
-        self.account.checking_new_avatar = asyncio.create_task(self.new_avatar())
+        await db.execute(f"CREATE TABLE IF NOT EXISTS \"{self.id}_messages\" (chat_id BIGINT, message_id BIGINT, "
+                         "saved_message_id BIGINT, is_read INTEGER, reactions TEXT)")
+        name = await db.fetch_one(f"SELECT name FROM accounts WHERE id={self.id}", one_data=True)
+        await MaksogramBot.send_system_message(f"SavingMessages v{self.__version__} для {name} запущен")
+        asyncio.get_running_loop().create_task(self.new_avatar())
         try:
             await self.client.run_until_disconnected()
         except (AuthKeyInvalidError, AuthKeyUnregisteredError):
             await MaksogramBot.send_message(self.id, "Вы удалили сессию, она была необходима для работы программы!")
-            await MaksogramBot.send_system_message(f"Удалена сессия у пользователя {self.name}")
-            await self.account.off()
+            await MaksogramBot.send_system_message(f"Удалена сессия у пользователя {name}")
+            phone_number = await db.fetch_one(f"SELECT phone_number FROM accounts WHERE id={self.id}", one_data=True)
+            await account_off(self.id, f"+{phone_number}")
