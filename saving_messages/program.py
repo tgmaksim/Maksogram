@@ -87,7 +87,7 @@ class Program:
                 await self.new_message(event)
                 await self.client(UpdateStatusRequest(offline=True))
                 if await db.fetch_one(f"SELECT answering_machine['main'] FROM accounts WHERE id={self.id}", one_data=True) \
-                        and event.is_private and event.message.from_id and event.message.from_id.user_id != self.id \
+                        and event.is_private and (not event.message.from_id or event.message.from_id.user_id != self.id) \
                         and not await db.fetch_one(f"SELECT answering_machine['sending'] @> '{event.chat_id}' "
                                                    f"FROM accounts WHERE id={self.id}", one_data=True):
                     auto_message = await self.answering_machine(event)
