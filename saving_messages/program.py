@@ -562,8 +562,8 @@ class Program:
             await asyncio.sleep(5*60)
 
     async def run_until_disconnected(self):
-        await db.execute(f"CREATE TABLE IF NOT EXISTS \"{self.id}_messages\" (chat_id BIGINT, message_id BIGINT, "
-                         "saved_message_id BIGINT, is_read INTEGER, reactions TEXT)")
+        await db.execute(f"CREATE TABLE IF NOT EXISTS \"{self.id}_messages\" (chat_id BIGINT NOT NULL, message_id BIGINT NOT NULL, "
+                           "saved_message_id BIGINT NOT NULL, is_read INTEGER NOT NULL, reactions TEXT NOT NULL)")
         name = await db.fetch_one(f"SELECT name FROM accounts WHERE id={self.id}", one_data=True)
         await MaksogramBot.send_system_message(f"SavingMessages v{self.__version__} для {name} запущен")
         asyncio.get_running_loop().create_task(self.new_avatar())
