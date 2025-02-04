@@ -1042,6 +1042,9 @@ async def _other_callback_query(callback_query: CallbackQuery):
 @security()
 async def _other_message(message: Message):
     if await new_message(message): return
+    if await db.fetch_one(f"SELECT modules['calculator'] FROM accounts WHERE id={message.chat.id}", one_data=True) and \
+            message.content_type == "text" and message.text[-1] == "=" and message.text.find("\n") == -1:
+        return await message.answer("Калькулятор здесь не работает, вы можете пользоваться им в Избранном")
 
 
 async def start_program(account_id: int, username: str, phone_number: int, telegram_client: TelegramClient):
