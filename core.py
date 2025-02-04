@@ -156,7 +156,7 @@ def new_telegram_client(phone_number: str) -> TelegramClient:
 
 
 class Variables:
-    version = "2.3"
+    version = "2.4"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])
