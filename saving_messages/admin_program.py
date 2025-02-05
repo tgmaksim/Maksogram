@@ -219,7 +219,8 @@ class Program:
             await reload_server()
             return
 
-        if await db.fetch_one(f"SELECT modules['qrcode'] FROM accounts WHERE id={self.id}", one_data=True) \
+        if message.from_id and message.from_id.user_id == self.id and message.entities \
+                and await db.fetch_one(f"SELECT modules['qrcode'] FROM accounts WHERE id={self.id}", one_data=True) \
                 and ("создай" in text or "сгенерируй" in text or "qr" in text or "создать" in text or "сгенерировать" in text) \
                 and len(message.entities) == 1 and isinstance(message.entities[0], MessageEntityUrl):
             link = message.text[message.entities[0].offset:message.entities[0].length+message.entities[0].offset]
@@ -228,8 +229,9 @@ class Program:
             return os.remove(qr)
 
         module = ""
-        if await db.fetch_one(f"SELECT modules['calculator'] FROM accounts WHERE id={self.id}", one_data=True) and \
-                not message.media and text[-1] == "=" and text.find("\n") == -1:  # Калькулятор в чате
+        if message.from_id and message.from_id.user_id == self.id \
+                and await db.fetch_one(f"SELECT modules['calculator'] FROM accounts WHERE id={self.id}", one_data=True) and \
+                not message.media and text[-1] == "=" and text.find("\n") == -1:
             request = calculator(text[:-1])
             if request:
                 await self.client.edit_message(message.chat_id, message, request)
@@ -545,14 +547,14 @@ class Program:
 
         if await db.fetch_one(f"SELECT modules['qrcode'] FROM accounts WHERE id={self.id}", one_data=True) \
                 and ("создай" in text or "сгенерируй" in text or "qr" in text or "создать" in text or "сгенерировать" in text) \
-                and len(message.entities) == 1 and isinstance(message.entities[0], MessageEntityUrl):  # Генератор Qr-кодов в чате
+                and message.entities and len(message.entities) == 1 and isinstance(message.entities[0], MessageEntityUrl):
             link = message.text[message.entities[0].offset:message.entities[0].length+message.entities[0].offset]
             qr = create_qrcode(link)
             await message.edit("Maksogram в чате (qr-код)", file=qr)
             return os.remove(qr)
 
         if await db.fetch_one(f"SELECT modules['calculator'] FROM accounts WHERE id={self.id}", one_data=True) and \
-                not message.media and text[-1] == "=" and text.find("\n") == -1:  # Калькулятор в чате
+                not message.media and text[-1] == "=" and text.find("\n") == -1:
             request = calculator(text[:-1])
             if request:
                 return await self.client.edit_message(message.chat_id, message, request)
