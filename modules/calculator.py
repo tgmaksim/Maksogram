@@ -70,7 +70,6 @@ def eval(string: str):
 
 
 def calculator(string: str) -> Union[int, float]:
-    string = string.lower()
     result = round(eval(string), 5)
     if result == int(result):
         return int(result)

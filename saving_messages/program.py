@@ -1,8 +1,10 @@
+import os
 import emoji
 import string
 import asyncio
 
 from modules.calculator import main as calculator
+from modules.qrcode import create as create_qrcode
 
 from typing import Union
 from telethon.tl.patched import Message
@@ -38,6 +40,7 @@ from telethon.tl.types import (
     DocumentAttributeCustomEmoji,
 )
 from telethon.tl.types import (
+    MessageEntityUrl,
     MessageEntityBold,
     MessageEntityItalic,
     MessageEntityStrike,
@@ -141,7 +144,7 @@ class Program:
             await self.system_bot(event)
 
     async def initial_checking_event(self, event: EventCommon) -> bool:
-        return event.is_private and \
+        return not event.chat_id or event.is_private and \
             not await db.fetch_one(f"SELECT removed_chats @> '{event.chat_id}' FROM accounts WHERE id={self.id}", one_data=True) or \
             await db.fetch_one(f"SELECT added_chats @> '{event.chat_id}' FROM accounts WHERE id={self.id}", one_data=True)
 
@@ -207,14 +210,22 @@ class Program:
 
     async def new_message(self, event: events.newmessage.NewMessage.Event, auto_answer: bool = False):
         message: Message = event.message
+        text = message.text.lower()
+
+        if await db.fetch_one(f"SELECT modules['qrcode'] FROM accounts WHERE id={self.id}", one_data=True) \
+                and ("создай" in text or "сгенерируй" in text or "qr" in text or "создать" in text or "сгенерировать" in text) \
+                and len(message.entities) == 1 and isinstance(message.entities[0], MessageEntityUrl):  # Генератор Qr-кодов в чате
+            link = message.text[message.entities[0].offset:message.entities[0].length+message.entities[0].offset]
+            qr = create_qrcode(link)
+            await message.edit("Maksogram в чате (qr-код)", file=qr)
+            return os.remove(qr)
 
         module = ""
         if await db.fetch_one(f"SELECT modules['calculator'] FROM accounts WHERE id={self.id}", one_data=True) and \
-                not message.media and message.text[-1] == "=" and message.text.find("\n") == -1:  # Калькулятор в чате
-            request = calculator(message.text[:-1])
+                not message.media and text[-1] == "=" and text.find("\n") == -1:  # Калькулятор в чате
+            request = calculator(text[:-1])
             if request:
                 await self.client.edit_message(message.chat_id, message, request)
-                message.text = request
                 module = "#Калькулятор"
 
         try:

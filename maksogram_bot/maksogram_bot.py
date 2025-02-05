@@ -15,6 +15,7 @@ from core import (
     html,
     SITE,
     OWNER,
+    channel,
     support,
     time_now,
     security,
@@ -401,6 +402,7 @@ async def _modules(callback_query: CallbackQuery):
 
 def modules_menu() -> dict[str, Any]:
     markup = IMarkup(inline_keyboard=[[IButton(text="🔢 Калькулятор", callback_data="calculator")],
+                                      [IButton(text="🔗 Генератор QR-кодов", callback_data="qrcode")],
                                       [IButton(text="◀️  Назад", callback_data="settings")]])
     return {"text": "💬 <b>Maksogram в чате</b>\nФункции, которые работают прямо из любого чата, не нужно вызывать меня",
             "reply_markup": markup, "parse_mode": html}
@@ -437,6 +439,39 @@ async def _calculator_switch(callback_query: CallbackQuery):
         case "off":
             await db.execute(f"UPDATE accounts SET modules['calculator']='false' WHERE id={callback_query.from_user.id}")
     await callback_query.message.edit_text(**await calculator_menu(callback_query.message.chat.id))
+
+
+@dp.callback_query(F.data == "qrcode")
+@security()
+async def _qrcode(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    await callback_query.message.edit_text(**await qrcode_menu(callback_query.message.chat.id))
+
+
+async def qrcode_menu(account_id: int) -> dict[str, Any]:
+    if await db.fetch_one(f"SELECT modules['qrcode'] FROM accounts WHERE id={account_id}", one_data=True):
+        status_button = IButton(text="🔴 Выключить генератор", callback_data="qrcode_off")
+    else:
+        status_button = IButton(text="🟢 Включить генератор", callback_data="qrcode_on")
+    markup = IMarkup(inline_keyboard=[[status_button],
+                                      [IButton(text="Как работает генератор?", url=f"{SITE}#генератор-qr")],
+                                      [IButton(text="◀️  Назад", callback_data="modules")]])
+    return {"text": "🔗 <b>Генератор QR-кодов</b>\nГенерирует QR-код с нужной ссылкой. "
+                    f"Тригеры: создай, создать, qr, сгенерировать\n<blockquote>Создай t.me/{channel}</blockquote>",
+            "reply_markup": markup, "parse_mode": html, "disable_web_page_preview": True}
+
+
+@dp.callback_query(F.data.in_(["qrcode_on", "qrcode_off"]))
+@security()
+async def _qrcode_switch(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    command = callback_query.data.split("_")[1]
+    match command:
+        case "on":
+            await db.execute(f"UPDATE accounts SET modules['qrcode']='true' WHERE id={callback_query.from_user.id}")
+        case "off":
+            await db.execute(f"UPDATE accounts SET modules['qrcode']='false' WHERE id={callback_query.from_user.id}")
+    await callback_query.message.edit_text(**await qrcode_menu(callback_query.message.chat.id))
 
 
 @dp.callback_query(F.data == "avatars")
@@ -1042,9 +1077,14 @@ async def _other_callback_query(callback_query: CallbackQuery):
 @security()
 async def _other_message(message: Message):
     if await new_message(message): return
+    text = message.text.lower()
     if await db.fetch_one(f"SELECT modules['calculator'] FROM accounts WHERE id={message.chat.id}", one_data=True) and \
-            message.content_type == "text" and message.text[-1] == "=" and message.text.find("\n") == -1:
+            message.content_type == "text" and text[-1] == "=" and text.find("\n") == -1:
         return await message.answer("Калькулятор здесь не работает, вы можете пользоваться им в Избранном")
+    if await db.fetch_one(f"SELECT modules['qrcode'] FROM accounts WHERE id={message.chat.id}", one_data=True) \
+            and ("создай" in text or "сгенерируй" in text or "qr" in text or "создать" in text or "сгенерировать" in text) \
+            and len(message.entities) == 1 and message.entities[0].type == "url":
+        return await message.answer("Генератор QR-кодов здесь не работает, вы можете пользоваться им в Избранном")
 
 
 async def start_program(account_id: int, username: str, phone_number: int, telegram_client: TelegramClient):
@@ -1056,7 +1096,7 @@ async def start_program(account_id: int, username: str, phone_number: int, teleg
     await db.execute(
         f"INSERT INTO accounts VALUES ({account_id}, '{name}', {phone_number}, {request['my_messages']}, "
         f"{request['message_changes']}, '[]', '[]', '{s1}{s2}', true, '{json_encode(next_payment)}', true, "
-        f"'{s1}\"main\": 0, \"variants\": {s1}{s2}{s2}', '{s1}{s2}', '{s1}\"calculator\": false{s2}')")
+        f"'{s1}\"main\": 0, \"variants\": {s1}{s2}{s2}', '{s1}{s2}', '{s1}\"calculator\": false, \"qrcode\": false{s2}')")
     status_users = await db.fetch_all(f"SELECT key FROM accounts, jsonb_each(status_users) WHERE id={account_id} AND "
                                       "(value['online'] = 'true' OR value['offline'] = 'true');", one_data=True)
     telegram_clients[account_id] = telegram_client
