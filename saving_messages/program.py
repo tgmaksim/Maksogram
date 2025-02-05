@@ -522,7 +522,22 @@ class Program:
 
     # Обработка сообщений системному боту от аккаунта
     async def system_bot(self, event: events.newmessage.NewMessage.Event):
-        pass
+        message: Message = event.message
+        text = message.text.lower()
+
+        if await db.fetch_one(f"SELECT modules['qrcode'] FROM accounts WHERE id={self.id}", one_data=True) \
+                and ("создай" in text or "сгенерируй" in text or "qr" in text or "создать" in text or "сгенерировать" in text) \
+                and len(message.entities) == 1 and isinstance(message.entities[0], MessageEntityUrl):  # Генератор Qr-кодов в чате
+            link = message.text[message.entities[0].offset:message.entities[0].length+message.entities[0].offset]
+            qr = create_qrcode(link)
+            await message.edit("Maksogram в чате (qr-код)", file=qr)
+            return os.remove(qr)
+
+        if await db.fetch_one(f"SELECT modules['calculator'] FROM accounts WHERE id={self.id}", one_data=True) and \
+                not message.media and text[-1] == "=" and text.find("\n") == -1:  # Калькулятор в чате
+            request = calculator(text[:-1])
+            if request:
+                return await self.client.edit_message(message.chat_id, message, request)
 
     async def answering_machine(self, event: events.newmessage.NewMessage.Event):
         message: Message = event.message

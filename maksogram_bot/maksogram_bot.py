@@ -457,7 +457,7 @@ async def qrcode_menu(account_id: int) -> dict[str, Any]:
                                       [IButton(text="Как работает генератор?", url=f"{SITE}#генератор-qr")],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
     return {"text": "🔗 <b>Генератор QR-кодов</b>\nГенерирует QR-код с нужной ссылкой. "
-                    f"Тригеры: создай, создать, qr, сгенерировать\n<blockquote>Создай t.me/{channel}</blockquote>",
+                    f"Тригеры: создай, создать, qr, сгенерировать\n<blockquote>Создай t.me/{channel[1:]}</blockquote>",
             "reply_markup": markup, "parse_mode": html, "disable_web_page_preview": True}
 
 
@@ -1077,14 +1077,6 @@ async def _other_callback_query(callback_query: CallbackQuery):
 @security()
 async def _other_message(message: Message):
     if await new_message(message): return
-    text = message.text.lower()
-    if await db.fetch_one(f"SELECT modules['calculator'] FROM accounts WHERE id={message.chat.id}", one_data=True) and \
-            message.content_type == "text" and text[-1] == "=" and text.find("\n") == -1:
-        return await message.answer("Калькулятор здесь не работает, вы можете пользоваться им в Избранном")
-    if await db.fetch_one(f"SELECT modules['qrcode'] FROM accounts WHERE id={message.chat.id}", one_data=True) \
-            and ("создай" in text or "сгенерируй" in text or "qr" in text or "создать" in text or "сгенерировать" in text) \
-            and len(message.entities) == 1 and message.entities[0].type == "url":
-        return await message.answer("Генератор QR-кодов здесь не работает, вы можете пользоваться им в Избранном")
 
 
 async def start_program(account_id: int, username: str, phone_number: int, telegram_client: TelegramClient):
