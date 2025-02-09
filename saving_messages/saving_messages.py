@@ -4,7 +4,6 @@ from core import (
     db,
     OWNER,
     time_now,
-    Variables,
     account_on,
     MaksogramBot,
     telegram_clients,
@@ -36,7 +35,6 @@ async def main():
         if not account['is_started'] or not account['is_paid']:
             continue
 
-        print("Вход %s" % account['name'])
         try:
             await account_on(account['id'], (admin_program if account['id'] == OWNER else program).Program)
         except UserIsNotAuthorized:
@@ -46,4 +44,3 @@ async def main():
             except TelegramForbiddenError:
                 pass
             continue
-        print("Запуск %s (v%s)" % (account['name'], Variables.version))

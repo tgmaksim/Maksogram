@@ -130,7 +130,7 @@ def human_bytes(size: int):
 
 
 def time_now() -> datetime:
-    return datetime.utcnow() + timedelta(hours=6)
+    return datetime.utcnow()
 
 
 def omsk_time(t: datetime):

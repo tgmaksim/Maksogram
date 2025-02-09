@@ -232,16 +232,17 @@ async def _feedback(message: Message, state: FSMContext):
     if await new_message(message, forward=False): return
     await state.clear()
     acquaintance = await username_acquaintance(message)
-    acquaintance = f"<b>Знакомый: {acquaintance}</b>\n" if acquaintance else ""
-    await bot.send_photo(OWNER,
-                         photo=FSInputFile(resources_path("feedback.png")),
-                         caption=f"ID: {message.chat.id}\n"
-                                 f"{acquaintance}" +
-                                 (f"USERNAME: @{message.from_user.username}\n" if message.from_user.username else "") +
-                                 f"Имя: {message.from_user.first_name}\n" +
-                                 (f"Фамилия: {message.from_user.last_name}\n" if message.from_user.last_name else "") +
-                                 f"Время: {omsk_time(message.date)}",
-                         parse_mode=html)
+    if acquaintance:
+        await bot.send_photo(OWNER, photo=FSInputFile(resources_path("feedback.png")),
+                             caption=f"{acquaintance} написал(а) отзыв 👇")
+    else:
+        await bot.send_photo(OWNER,
+                             photo=FSInputFile(resources_path("feedback.png")),
+                             caption=f"ID: {message.chat.id}\n" +
+                                     (f"USERNAME: @{message.from_user.username}\n" if message.from_user.username else "") +
+                                     f"Имя: {message.from_user.first_name}\n" +
+                                     (f"Фамилия: {message.from_user.last_name}\n" if message.from_user.last_name else "") +
+                                     f"Время: {omsk_time(message.date)}")
     await message.forward(OWNER)
     await message.answer("Большое спасибо за отзыв!❤️❤️❤️")
 
@@ -273,7 +274,7 @@ async def payment(account_id: int) -> dict[str, Any]:
                                        IButton(text="BTC", web_app=WebAppInfo(url=f"{Data.web_app}/payment/btc"))],
                                       [IButton(text="Перевод по номеру", web_app=WebAppInfo(url=f"{Data.web_app}/payment/fps"))],
                                       [IButton(text="Я отправил(а)  ✅", callback_data="send_payment")]])
-    return {"text": f"Способы оплаты:\nСбер: ({fee} руб)\nBTC: (0.00002 btc)\nTON: (0.25 ton)",
+    return {"text": f"Способы оплаты (любой):\nСбер: ({fee} руб)\nBTC: (0.00002 btc)\nTON: (0.4 ton)",
             "parse_mode": html, "reply_markup": markup}
 
 
@@ -286,10 +287,10 @@ async def _confirm_sending_payment(callback_query: CallbackQuery):
     account_id, message_id = map(int, callback_query.data.replace("confirm_sending_payment", "").split("_"))
     await db.execute(f"""UPDATE accounts SET payment['next_payment']=to_jsonb(extract(epoch FROM ((CASE WHEN 
                      to_timestamp(payment['next_payment']::int) > CURRENT_TIMESTAMP THEN 
-                     to_timestamp(payment['next_payment']::int) ELSE CURRENT_TIMESTAMP END) + INTERVAL '32 days'))::int), 
-                     is_paid=true WHERE id=7302572022;""")  # перемещение даты следующей оплаты на 30 дней вперед
+                     to_timestamp(payment['next_payment']::int) ELSE CURRENT_TIMESTAMP END) + INTERVAL '30 days'))::int), 
+                     is_paid=true WHERE id={callback_query.from_user.id};""")  # перемещение даты следующей оплаты на 30 дней вперед
     await bot.edit_message_reply_markup(chat_id=account_id, message_id=message_id)
-    await bot.send_message(account_id, f"Ваша оплата подтверждена! Следующий платеж через 32 дня", reply_to_message_id=message_id)
+    await bot.send_message(account_id, f"Ваша оплата подтверждена! Следующий платеж через месяц", reply_to_message_id=message_id)
     await callback_query.message.edit_text(callback_query.message.text + '\n\nУспешно!')
 
 
@@ -519,7 +520,9 @@ async def _new_avatar(message: Message, state: FSMContext):
     if message.content_type == "users_shared":
         user_id = message.users_shared.user_ids[0]
         account_id = message.chat.id
-        if user_id != account_id:
+        if user_id == account_id:
+            await message.answer(**await avatars_menu(account_id))
+        else:
             user = await telegram_clients[account_id].get_entity(user_id)
             user = json_encode({"name": user.first_name + (f" {user.last_name}" if user.last_name else ""),
                                 "count": await count_avatars(account_id, user_id)})
@@ -651,13 +654,16 @@ async def _new_status_user(message: Message, state: FSMContext):
     if message.content_type == "users_shared":
         user_id = message.users_shared.user_ids[0]
         account_id = message.chat.id
-        user = await telegram_clients[message.chat.id].get_entity(user_id)
-        name = user.first_name + (f" {user.last_name}" if user.last_name else "")
-        name = (name[:30] + "...") if len(name) > 30 else name
-        telegram_clients[account_id].list_event_handlers()[5][1].chats.add(user_id)
-        status_user = json_encode({"name": name, "online": False, "offline": False, "reading": False})
-        await db.execute(f"UPDATE accounts SET status_users['{user_id}']=$1 WHERE id={account_id}", status_user)
-        await message.answer(**await status_user_menu(message.chat.id, user_id))
+        if user_id == account_id:
+            await message.answer(**await status_users_menu(account_id))
+        else:
+            user = await telegram_clients[message.chat.id].get_entity(user_id)
+            name = user.first_name + (f" {user.last_name}" if user.last_name else "")
+            name = (name[:30] + "...") if len(name) > 30 else name
+            telegram_clients[account_id].list_event_handlers()[4][1].chats.add(user_id)
+            status_user = json_encode({"name": name, "online": False, "offline": False, "reading": False})
+            await db.execute(f"UPDATE accounts SET status_users['{user_id}']=$1 WHERE id={account_id}", status_user)
+            await message.answer(**await status_user_menu(message.chat.id, user_id))
     else:
         await message.answer(**await status_users_menu(message.chat.id))
     await bot.delete_messages(chat_id=message.chat.id, message_ids=[message.message_id, message_id])
@@ -669,7 +675,7 @@ async def _status_user_del(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     user_id = int(callback_query.data.replace("status_user_del", ""))
     account_id = callback_query.from_user.id
-    telegram_clients[account_id].list_event_handlers()[5][1].chats.remove(user_id)
+    telegram_clients[account_id].list_event_handlers()[4][1].chats.remove(user_id)
     await db.execute(f"UPDATE accounts SET status_users=status_users - '{user_id}' WHERE id={account_id}")
     await callback_query.message.edit_text(**await status_users_menu(callback_query.message.chat.id))
 
@@ -963,6 +969,7 @@ async def _contact(message: Message, state: FSMContext):
     await message.answer("Осталось отправить код для входа (<b>только кнопкой!</b>). Напоминаю, что мы не собираем "
                          f"никаких данных, а по любым вопросам можете обращаться в @{support}", reply_markup=markup, parse_mode=html)
     await telegram_client.connect()
+    await asyncio.sleep(1)  # Ожидание соединения
     await telegram_client.send_code_request(phone_number)
 
 
@@ -1016,8 +1023,8 @@ async def _login(message: Message, state: FSMContext):
         else:
             await loading.delete()
             await message.answer("Maksogram запущен 🚀\nВ канале \"Мои сообщения\" будут храниться все ваши сообщения, в "
-                                 "комментариях будет информация о прочтении, изменении и удалении. "
-                                 "Можете попросить друга отправить вам сообщение и удалить его, чтобы убедиться, что все работает")
+                                 "комментариях к постам будет информация о изменении и удалении\n"
+                                 "Пробная подписка заканчивается через неделю")
             await message.answer("Пробная подписка заканчивается через неделю, у вас есть время все опробовать")
             await bot.send_message(OWNER, "Создание чатов завершено успешно!")
 
@@ -1060,9 +1067,8 @@ async def _login_with_password(message: Message, state: FSMContext):
         else:
             await loading.delete()
             await message.answer("Maksogram запущен 🚀\nВ канале \"Мои сообщения\" будут храниться все ваши сообщения, в "
-                                 "комментариях будет информация о прочтении, изменении и удалении. "
-                                 "Можете попросить друга отправить вам сообщение и удалить его, чтобы убедиться, что все работает")
-            await message.answer("Пробная подписка заканчивается через неделю, у вас есть время все опробовать")
+                                 "комментариях к постам будет информация о изменении и удалении\n"
+                                 "Пробная подписка заканчивается через неделю")
             await message.answer(**await settings(message.chat.id))
             await bot.send_message(OWNER, "Создание чатов завершено успешно!")
 
@@ -1089,10 +1095,8 @@ async def start_program(account_id: int, username: str, phone_number: int, teleg
         f"INSERT INTO accounts VALUES ({account_id}, '{name}', {phone_number}, {request['my_messages']}, "
         f"{request['message_changes']}, '[]', '[]', '{s1}{s2}', true, '{json_encode(next_payment)}', true, "
         f"'{s1}\"main\": 0, \"variants\": {s1}{s2}{s2}', '{s1}{s2}', '{s1}\"calculator\": false, \"qrcode\": false{s2}')")
-    status_users = await db.fetch_all(f"SELECT key FROM accounts, jsonb_each(status_users) WHERE id={account_id} AND "
-                                      "(value['online'] = 'true' OR value['offline'] = 'true');", one_data=True)
     telegram_clients[account_id] = telegram_client
-    asyncio.get_running_loop().create_task(program.Program(telegram_client, account_id, status_users).run_until_disconnected())
+    asyncio.get_running_loop().create_task(program.Program(telegram_client, account_id, []).run_until_disconnected())
 
 
 def referal_link(user_id: int) -> str:
@@ -1207,9 +1211,9 @@ async def new_callback_query(callback_query: CallbackQuery) -> bool:
 async def check_payment_datetime():
     for account in await db.fetch_all("SELECT id, is_started, payment FROM accounts"):
         if not account['is_started'] or account['payment']['user'] != 'user': continue
-        if account['payment']['next_payment'] <= (time_now() + timedelta(days=2)).timestamp():
+        if time_now().timestamp() <= account['payment']['next_payment'] <= time_now().timestamp() + 24*60*60:
             await bot.send_message(account['id'], "Текущая подписка заканчивается! Произведите следующий "
-                                               "платеж до конца завтрашнего дня")
+                                                  "платеж до конца завтрашнего дня")
             await bot.send_message(account['id'], **await payment(account['id']))
 
 
