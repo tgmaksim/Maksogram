@@ -1,3 +1,4 @@
+from datetime import timedelta
 from . import program, admin_program
 from aiogram.exceptions import TelegramForbiddenError
 from core import (
@@ -12,35 +13,40 @@ from core import (
 )
 
 
-async def warning(id: int, name: str):
-    await MaksogramBot.send_message(id, "Ваша подписка истечет завтра. Продлите ее, чтобы пользоваться Maksogram")
-    await MaksogramBot.send_system_message(f"Платеж просрочен ({name})")
-
-
 async def main():
-    for account in await db.fetch_all("SELECT id, name, is_started, is_paid, payment, phone_number FROM accounts"):
-        telegram_clients[account['id']] = new_telegram_client(f"+{account['phone_number']}")
-        if account['payment']['user'] == 'user' and account['is_started'] and account['is_paid']:
-            if account['payment']['next_payment'] + 24*60*60 <= time_now().timestamp():
-                await db.execute(f"UPDATE accounts SET is_paid=false WHERE id={account['id']}")
-                await db.execute(f"UPDATE accounts SET is_started=false WHERE id={account['id']}")
-                await MaksogramBot.send_message(account['id'], "Ваша подписка истекла. Продлите ее, чтобы пользоваться Maksogram")
-                await MaksogramBot.send_system_message(f"Платеж просрочен. Maksogram не запущен ({account['name']})")
+    for account_id in await db.fetch_all("SELECT account_id FROM accounts", one_data=True):
+        account_id: int
+        phone_number = await db.fetch_one(f"SELECT phone_number FROM accounts WHERE account_id={account_id}", one_data=True)
+        name = await db.fetch_one(f"SELECT name FROM accounts WHERE account_id={account_id}", one_data=True)
+        telegram_clients[account_id] = new_telegram_client(f"+{phone_number}")
+        is_started: bool = await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={account_id}", one_data=True)
+        payment = await db.fetch_one(f"SELECT \"user\", is_paid, next_payment FROM payment WHERE account_id={account_id}")
+        if payment['user'] == 'user' and payment['is_paid']:
+            if payment['next_payment'] <= (time_now() - timedelta(days=1)):  # После дня окончания
+                try:
+                    await db.execute(f"UPDATE payment SET is_paid=false WHERE account_id={account_id}")
+                    await db.execute(f"UPDATE settings SET is_started=false WHERE account_id={account_id}")
+                    await MaksogramBot.send_message(account_id, "Ваша подписка истекла. Продлите ее, чтобы пользоваться Maksogram")
+                    await MaksogramBot.send_system_message(f"Платеж просрочен. Maksogram не запущен ({name})")
+                except TelegramForbiddenError:
+                    pass
                 continue
-            if account['payment']['next_payment'] <= time_now().timestamp():
-                await MaksogramBot.send_message(account['id'], "Ваша подписка истечет завтра. "
-                                                               "Продлите ее, чтобы пользоваться Maksogram")
-                await MaksogramBot.send_system_message(f"Платеж просрочен ({account['name']})")
+            if (time_now() - timedelta(days=1)) <= payment['next_payment'] <= time_now():  # В день окончания
+                try:
+                    await MaksogramBot.send_message(account_id, "Ваша подписка истечет завтра. Продлите ее, чтобы пользоваться Maksogram")
+                    await MaksogramBot.send_system_message(f"Платеж просрочен ({name})")
+                except TelegramForbiddenError:
+                    pass
 
-        if not account['is_started'] or not account['is_paid']:
+        if not is_started or not payment['is_paid']:
             continue
 
         try:
-            await account_on(account['id'], (admin_program if account['id'] == OWNER else program).Program)
+            await account_on(account_id, (admin_program if account_id == OWNER else program).Program)
         except UserIsNotAuthorized:
-            await db.execute(f"UPDATE accounts SET is_started=false WHERE id={account['id']}")
+            await db.execute(f"UPDATE settings SET is_started=false WHERE account_id={account_id}")
             try:
-                await MaksogramBot.send_message(account['id'], "Вы удалили сессию Telegram, Maksogram не может работать без нее")
+                await MaksogramBot.send_message(account_id, "Вы удалили сессию Telegram, Maksogram не может работать без нее")
             except TelegramForbiddenError:
                 pass
             continue

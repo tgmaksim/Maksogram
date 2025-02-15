@@ -7,10 +7,9 @@ from datetime import timedelta
 from typing import Literal, Any
 from sys_keys import TOKEN, release
 from saving_messages import admin_program, program
+from asyncpg.exceptions import UniqueViolationError
 from create_chats import create_chats, CreateChatsError
 from core import (
-    s1,  # "{"
-    s2,  # "}"
     db,
     html,
     SITE,
@@ -83,24 +82,6 @@ class UserState(StatesGroup):
     avatar = State('avatar')
 
 
-# Метод для добавления и изменения "знакомых"
-@dp.message(Command('new_acquaintance'))
-@security()
-async def _new_acquaintance(message: Message):
-    if await developer_command(message): return
-    if message.reply_to_message and message.reply_to_message.text:
-        id = int(message.reply_to_message.text.split('\n', 1)[0].replace("ID: ", ""))
-        name = message.text.split(maxsplit=1)[1]
-    else:
-        id, name = message.text.split(maxsplit=2)[1:]
-    if await db.fetch_one(f"SELECT id FROM acquaintances WHERE id={id}"):
-        await db.execute(f"UPDATE acquaintances SET name='{name}' WHERE id={id}")
-        await message.answer("Данные знакомого изменены")
-    else:
-        await db.execute(f"INSERT INTO acquaintances VALUES({id}, '{name}')")
-        await message.answer("Добавлен новый знакомый!")
-
-
 # Метод для отправки сообщения от имени бота
 @dp.message(F.reply_to_message.__and__(F.chat.id == OWNER).__and__(F.reply_to_message.text.startswith("ID")))
 @security()
@@ -108,6 +89,8 @@ async def _sender(message: Message):
     user_id = int(message.reply_to_message.text.split('\n', 1)[0].replace("ID: ", ""))
     try:
         copy_message = await bot.copy_message(user_id, OWNER, message.message_id)
+    except TelegramForbiddenError:
+        await message.answer("Пользователь заблокировал бота...")
     except Exception as e:
         await message.answer(f"Сообщение не отправлено из-за ошибки {e.__class__.__name__}: {e}")
     else:
@@ -122,8 +105,6 @@ async def _admin(message: Message):
     await message.answer("Команды разработчика:\n"
                          "/reload - перезапустить программу\n"
                          "/stop - остановить программу\n"
-                         "/version - изменить версию бота\n"
-                         "/new_acquaintance - добавить знакомого\n"
                          "/mailing - рассылка")
 
 
@@ -200,12 +181,13 @@ async def _confirm_mailing(callback_query: CallbackQuery, state: FSMContext):
         case _:
             await state.clear()
             return await callback_query.message.edit_text("Операция отменена!")
+    # Получение количества активным зарегистрированных и активных пользователей
     result = [await db.fetch_one("SELECT COUNT(*) FROM accounts", one_data=True), 0, 0, 0]
-    for account in await db.fetch_all("SELECT id, is_started FROM accounts"):
+    for account in await db.fetch_all("SELECT account_id, is_started FROM settings"):
         if account['is_started']:
             result[1] += 1  # Количество активных пользователей
             try:
-                await fun(account['id'])
+                await fun(account['account_id'])
             except (TelegramBadRequest, TelegramForbiddenError):
                 result[2] += 1  # Количество ошибок
             else:
@@ -260,7 +242,7 @@ async def _stop_feedback(callback_query: CallbackQuery, state: FSMContext):
 async def _send_payment(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     account_id = callback_query.from_user.id
-    name = await db.fetch_one(f"SELECT name FROM accounts WHERE id={account_id}", one_data=True)
+    name = await db.fetch_one(f"SELECT name FROM accounts WHERE account_id={account_id}", one_data=True)  # Имя пользователя
     markup = IMarkup(inline_keyboard=[[
         IButton(text="Подтвердить! ✅", callback_data=f"confirm_sending_payment{account_id}_{callback_query.message.message_id}")]])
     await bot.send_message(OWNER, f"Пользователь {name} отправил оплату, проверь это! Если так, то подтверди, "
@@ -268,8 +250,8 @@ async def _send_payment(callback_query: CallbackQuery):
     await callback_query.answer("Запрос отправлен. Ожидайте!", True)
 
 
-async def payment(account_id: int) -> dict[str, Any]:
-    fee = await db.fetch_one(f"SELECT payment['fee'] FROM accounts WHERE id={account_id}", one_data=True)
+async def payment_menu(account_id: int) -> dict[str, Any]:
+    fee = await db.fetch_one(f"SELECT fee FROM payment WHERE account_id={account_id}", one_data=True)  # Цена подписки
     markup = IMarkup(inline_keyboard=[[IButton(text="TON", web_app=WebAppInfo(url=f"{Data.web_app}/payment/ton")),
                                        IButton(text="BTC", web_app=WebAppInfo(url=f"{Data.web_app}/payment/btc"))],
                                       [IButton(text="Перевод по номеру", web_app=WebAppInfo(url=f"{Data.web_app}/payment/fps"))],
@@ -285,10 +267,10 @@ async def _confirm_sending_payment(callback_query: CallbackQuery):
     if callback_query.from_user.id != OWNER:
         return await callback_query.answer("Ошибка!", True)
     account_id, message_id = map(int, callback_query.data.replace("confirm_sending_payment", "").split("_"))
-    await db.execute(f"""UPDATE accounts SET payment['next_payment']=to_jsonb(extract(epoch FROM ((CASE WHEN 
-                     to_timestamp(payment['next_payment']::int) > CURRENT_TIMESTAMP THEN 
-                     to_timestamp(payment['next_payment']::int) ELSE CURRENT_TIMESTAMP END) + INTERVAL '30 days'))::int), 
-                     is_paid=true WHERE id={callback_query.from_user.id};""")  # перемещение даты следующей оплаты на 30 дней вперед
+    await db.execute(f"""UPDATE payment SET next_payment=((CASE WHEN 
+                     next_payment > CURRENT_TIMESTAMP THEN 
+                     next_payment ELSE CURRENT_TIMESTAMP END) + INTERVAL '30 days'), 
+                     is_paid=true WHERE account_id={account_id}""")  # перемещение даты оплаты на 30 дней вперед
     await bot.edit_message_reply_markup(chat_id=account_id, message_id=message_id)
     await bot.send_message(account_id, f"Ваша оплата подтверждена! Следующий платеж через месяц", reply_to_message_id=message_id)
     await callback_query.message.edit_text(callback_query.message.text + '\n\nУспешно!')
@@ -309,19 +291,26 @@ async def _start(message: Message, state: FSMContext):
     if await new_message(message): return
     await state.clear()
     service_message = await message.answer("...", reply_markup=ReplyKeyboardRemove())
+    if await db.fetch_one(f"SELECT true FROM accounts WHERE account_id={message.chat.id}", one_data=True):  # Зарегистрирован(а)
+        markup = IMarkup(inline_keyboard=[[IButton(text="⚙️ Меню и настройки", callback_data="settings")]])
+    else:
+        markup = IMarkup(inline_keyboard=[[IButton(text="🚀 Запустить бота", callback_data="settings")]])
+    await message.answer(f"Привет, {escape(await username_acquaintance(message, 'first_name'))} 👋\n"
+                         f"<a href='{SITE}'>Обзор всех функций</a> 👇",
+                         parse_mode=html, reply_markup=markup, link_preview_options=preview_options())
     if message.text.startswith('/start r'):
         friend_id = unzip_int_data(message.text.replace('/start r', ''))
         if message.chat.id == friend_id:
             return await message.answer("Вы не можете зарегистрироваться по своей реферальной ссылке!")
+        if not await db.fetch_one(f"SELECT true FROM accounts WHERE account_id={friend_id}", one_data=True):
+            await message.answer("Реферальная ссылка не найдена!")
+        try:
+            await db.execute(f"INSERT INTO referals VALUES ({friend_id}, {message.chat.id})")
+        except UniqueViolationError:
+            await db.execute(f"UPDATE referals SET account_id={friend_id} WHERE referal_id={message.chat.id}")
         await bot.send_message(friend_id, "По вашей реферальной ссылке зарегистрировался новый пользователь. Если он "
-                                          "оплатит подписку, то вы получите скидку 20% (действует только при оплате по СБП)")
+                                          "подключит бота, то вы получите месяц подписки в подарок")
         await bot.send_message(OWNER, f"Регистрация по реферальной ссылке #r{friend_id}")
-    else:
-        markup = IMarkup(inline_keyboard=[[IButton(text="🚀 Мои функции", callback_data="help")],
-                                          [IButton(text="⚙️ Меню и настройки", callback_data="settings")]])
-        await message.answer(f"Привет, {escape(await username_acquaintance(message, 'first_name'))} 👋\n"
-                             f"<a href='{SITE}'>Обзор всех функций</a> 👇",
-                             parse_mode=html, reply_markup=markup, link_preview_options=preview_options())
     await service_message.delete()
 
 
@@ -360,7 +349,7 @@ async def _settings_button(callback_query: CallbackQuery):
 
 
 async def settings(account_id: int) -> dict[str, Any]:
-    status = await db.fetch_one(f"SELECT is_started FROM accounts WHERE id={account_id}", one_data=True)
+    status = await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={account_id}", one_data=True)  # Вкл/выкл Maksogram
     if status is None:
         markup = IMarkup(inline_keyboard=[[IButton(text="🟢 Включить Maksogram", callback_data="registration")],
                                           [IButton(text="ℹ️ Узнать все возможности", url=SITE)]])
@@ -381,10 +370,12 @@ async def settings(account_id: int) -> dict[str, Any]:
 @security()
 async def _friends(message: Message):
     if await new_message(message): return
+    if not await db.fetch_one(f"SELECT true FROM accounts WHERE account_id={message.chat.id}", one_data=True):
+        return await message.answer("Вы не подключили бота, у вас еще нет реферальной ссылки!")
     url = f"tg://resolve?domain={MaksogramBot.username}&start={referal_link(message.chat.id)}"
     await message.answer(
         "<b>Реферальная программа\n</b>"
-        "Приглашайте своих знакомых и получайте скидку 20% при оплате по СПБ рублями за каждого друга. "
+        "Приглашайте своих знакомых и получайте в подарок месяц подписки за каждого друга. "
         "Пригласить друга можно, отправив сообщение 👇", parse_mode=html)
     markup = IMarkup(inline_keyboard=[[IButton(text="Попробовать бесплатно", url=url)]])
     await message.answer_photo(
@@ -417,7 +408,7 @@ async def _calculator(callback_query: CallbackQuery):
 
 
 async def calculator_menu(account_id: int) -> dict[str, Any]:
-    if await db.fetch_one(f"SELECT modules['calculator'] FROM accounts WHERE id={account_id}", one_data=True):
+    if await db.fetch_one(f"SELECT calculator FROM modules WHERE account_id={account_id}", one_data=True):  # Вкл/выкл калькулятор
         status_button = IButton(text="🔴 Выключить калькулятор", callback_data="calculator_off")
     else:
         status_button = IButton(text="🟢 Включить калькулятор", callback_data="calculator_on")
@@ -436,9 +427,9 @@ async def _calculator_switch(callback_query: CallbackQuery):
     command = callback_query.data.split("_")[1]
     match command:
         case "on":
-            await db.execute(f"UPDATE accounts SET modules['calculator']='true' WHERE id={callback_query.from_user.id}")
+            await db.execute(f"UPDATE modules SET calculator=true WHERE account_id={callback_query.from_user.id}")
         case "off":
-            await db.execute(f"UPDATE accounts SET modules['calculator']='false' WHERE id={callback_query.from_user.id}")
+            await db.execute(f"UPDATE modules SET calculator=false WHERE account_id={callback_query.from_user.id}")
     await callback_query.message.edit_text(**await calculator_menu(callback_query.message.chat.id))
 
 
@@ -450,7 +441,7 @@ async def _qrcode(callback_query: CallbackQuery):
 
 
 async def qrcode_menu(account_id: int) -> dict[str, Any]:
-    if await db.fetch_one(f"SELECT modules['qrcode'] FROM accounts WHERE id={account_id}", one_data=True):
+    if await db.fetch_one(f"SELECT qrcode FROM modules WHERE account_id={account_id}", one_data=True):  # Вкл/выкл генератор QR
         status_button = IButton(text="🔴 Выключить генератор", callback_data="qrcode_off")
     else:
         status_button = IButton(text="🟢 Включить генератор", callback_data="qrcode_on")
@@ -469,9 +460,9 @@ async def _qrcode_switch(callback_query: CallbackQuery):
     command = callback_query.data.split("_")[1]
     match command:
         case "on":
-            await db.execute(f"UPDATE accounts SET modules['qrcode']='true' WHERE id={callback_query.from_user.id}")
+            await db.execute(f"UPDATE modules SET qrcode=true WHERE account_id={callback_query.from_user.id}")  # Включение QR
         case "off":
-            await db.execute(f"UPDATE accounts SET modules['qrcode']='false' WHERE id={callback_query.from_user.id}")
+            await db.execute(f"UPDATE modules SET qrcode=false WHERE account_id={callback_query.from_user.id}")  # Выключение QR
     await callback_query.message.edit_text(**await qrcode_menu(callback_query.message.chat.id))
 
 
@@ -484,11 +475,9 @@ async def _avatars(callback_query: CallbackQuery):
 
 async def avatars_menu(account_id: int) -> dict[str, Any]:
     buttons = []
-    users = await db.fetch_all(f"SELECT key.k AS id, avatars -> key.k ->> 'name' AS name "
-                               f"FROM (SELECT jsonb_object_keys(avatars) AS k FROM accounts WHERE id={account_id}) AS key, "
-                               f"(SELECT avatars FROM accounts WHERE id={account_id}) AS avatars;")
+    users = await db.fetch_all(f"SELECT user_id, name FROM avatars WHERE account_id={account_id}")  # Список новых аватарок
     for user in users:
-        buttons.append([IButton(text=f"📸 {user['name']}", callback_data=f"avatar_menu{user['id']}")])
+        buttons.append([IButton(text=f"📸 {user['name']}", callback_data=f"avatar_menu{user['user_id']}")])
     buttons.append([IButton(text="➕ Добавить пользователя", callback_data="new_avatar")])
     buttons.append([IButton(text="◀️  Назад", callback_data="settings")])
     return {"text": "📸 <b>Новая аватарка</b>\nКогда кто-то из выбранных пользователей изменит или добавит аватарку, я сообщу вам",
@@ -499,8 +488,8 @@ async def avatars_menu(account_id: int) -> dict[str, Any]:
 @security('state')
 async def _new_avatar_start(callback_query: CallbackQuery, state: FSMContext):
     if await new_callback_query(callback_query): return
-    if await db.fetch_one(f"SELECT COUNT(*) FROM (SELECT jsonb_object_keys(avatars) FROM accounts WHERE id="
-                          f"{callback_query.from_user.id}) AS count", one_data=True) >= 2:
+    if await db.fetch_one(f"SELECT COUNT(*) FROM avatars WHERE account_id={callback_query.from_user.id}", one_data=True) >= 2:
+        # Количество новых аватарок уже достигло максимума
         return await callback_query.answer("У вас максимальное количество \"новых аватарок\"")
     await state.set_state(UserState.avatar)
     request_users = KeyboardButtonRequestUsers(request_id=1, user_is_bot=False)
@@ -520,13 +509,13 @@ async def _new_avatar(message: Message, state: FSMContext):
     if message.content_type == "users_shared":
         user_id = message.users_shared.user_ids[0]
         account_id = message.chat.id
-        if user_id == account_id:
+        if user_id == account_id:  # Себя нельзя
             await message.answer(**await avatars_menu(account_id))
         else:
             user = await telegram_clients[account_id].get_entity(user_id)
-            user = json_encode({"name": user.first_name + (f" {user.last_name}" if user.last_name else ""),
-                                "count": await count_avatars(account_id, user_id)})
-            await db.execute(f"UPDATE accounts SET avatars['{user_id}']=$1 WHERE id={account_id}", user)
+            name = user.first_name + (f" {user.last_name}" if user.last_name else "")
+            count = await count_avatars(account_id, user_id)
+            await db.execute(f"INSERT INTO avatars VALUES ({account_id}, {user_id}, $1, {count})", name)  # Добавление новой аватарки
             await message.answer(**await avatar_menu(message.chat.id, user_id))
     else:
         await message.answer(**await avatars_menu(message.chat.id))
@@ -534,7 +523,7 @@ async def _new_avatar(message: Message, state: FSMContext):
 
 
 async def avatar_menu(account_id: int, user_id: int) -> dict[str, Any]:
-    name = await db.fetch_one(f"SELECT avatars['{user_id}']['name'] FROM accounts WHERE id={account_id}", one_data=True)
+    name = await db.fetch_one(f"SELECT name FROM avatars WHERE account_id={account_id} AND user_id={user_id}", one_data=True)  # Имя новой аватарки
     if name is None:
         return await avatars_menu(account_id)
     markup = IMarkup(inline_keyboard=[
@@ -549,7 +538,7 @@ async def avatar_menu(account_id: int, user_id: int) -> dict[str, Any]:
 async def _avatar_del(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     user_id = int(callback_query.data.replace("avatar_del", ""))
-    await db.execute(f"UPDATE accounts SET avatars=avatars-'{user_id}' WHERE id={callback_query.from_user.id}")
+    await db.execute(f"DELETE FROM avatars WHERE account_id={callback_query.from_user.id} AND user_id={user_id}")  # Удаление новой аватарки
     await callback_query.message.edit_text(**await avatars_menu(callback_query.message.chat.id))
 
 
@@ -570,11 +559,9 @@ async def _status_users(callback_query: CallbackQuery):
 
 async def status_users_menu(account_id: int) -> dict[str, Any]:
     buttons = []
-    users = await db.fetch_all(f"SELECT key.k AS id, status_users -> key.k ->> 'name' AS name "
-                               f"FROM (SELECT jsonb_object_keys(status_users) AS k FROM accounts WHERE id={account_id}) AS key, "
-                               f"(SELECT status_users FROM accounts WHERE id={account_id}) AS status_users;")
+    users = await db.fetch_all(f"SELECT user_id, name FROM status_users WHERE account_id={account_id}")  # Список друзей в сети
     for user in users:
-        buttons.append([IButton(text=f"🌐 {user['name']}", callback_data=f"status_user_menu{user['id']}")])
+        buttons.append([IButton(text=f"🌐 {user['name']}", callback_data=f"status_user_menu{user['user_id']}")])
     buttons.append([IButton(text="➕ Добавить нового пользователя", callback_data="new_status_user")])
     buttons.append([IButton(text="◀️  Назад", callback_data="settings")])
     return {"text": "🌐 <b>Друг в сети</b>\nЯ уведомлю вас, если пользователь будет онлайн/офлайн. Не работает, если собеседник "
@@ -596,7 +583,8 @@ async def status_user_menu(account_id: int, user_id: int) -> dict[str, Any]:
     def command(parameter: bool):
         return "off" if parameter else "on"
 
-    user = await db.fetch_one(f"SELECT status_users['{user_id}'] FROM accounts WHERE id={account_id}", one_data=True)
+    user = await db.fetch_one(f"SELECT name, online, offline, reading FROM status_users WHERE account_id={account_id} AND "
+                              f"user_id={user_id}")  # Данные о друге в сети
     if user is None:
         return await status_users_menu(account_id)
     markup = IMarkup(inline_keyboard=[
@@ -620,12 +608,11 @@ async def _status_user_switch(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     account_id = callback_query.from_user.id
     function_status_user, command, user_id = callback_query.data.replace("status_user_", "").split("_")
-    user = await db.fetch_one(f"SELECT status_users['{user_id}']['online'] FROM accounts WHERE id={account_id}", one_data=True)
-    if user is None:
+    user = await db.fetch_one(f"SELECT true FROM status_users WHERE account_id={account_id} AND user_id={user_id}", one_data=True)
+    if user is None:  # Пользователь удален из списка друзей в сети
         return await callback_query.message.edit_text(**await status_users_menu(account_id))
-    await db.execute(
-        f"UPDATE accounts SET status_users['{user_id}']['{function_status_user}']="
-        f"'{'true' if command == 'on' else 'false'}' WHERE id={account_id}")
+    await db.execute(f"UPDATE status_users SET {function_status_user}={'true' if command == 'on' else 'false'} WHERE "
+                     f"account_id={account_id} AND user_id={user_id}")  # Вкл/выкл нужной функции друга в сети
     await callback_query.message.edit_text(**await status_user_menu(account_id, int(user_id)))
 
 
@@ -633,8 +620,8 @@ async def _status_user_switch(callback_query: CallbackQuery):
 @security('state')
 async def _new_status_user_start(callback_query: CallbackQuery, state: FSMContext):
     if await new_callback_query(callback_query): return
-    if await db.fetch_one(f"SELECT COUNT(*) FROM (SELECT jsonb_object_keys(status_users) FROM accounts WHERE id="
-                          f"{callback_query.from_user.id}) AS count", one_data=True) >= 2:
+    if await db.fetch_one(f"SELECT COUNT(*) FROM status_users WHERE account_id={callback_query.from_user.id}", one_data=True) >= 2:
+        # Количество друзей в сети уже достигло максимума
         return await callback_query.answer("У вас максимальное количество!", True)
     await state.set_state(UserState.status_user)
     request_users = KeyboardButtonRequestUsers(request_id=1, user_is_bot=False)
@@ -654,15 +641,14 @@ async def _new_status_user(message: Message, state: FSMContext):
     if message.content_type == "users_shared":
         user_id = message.users_shared.user_ids[0]
         account_id = message.chat.id
-        if user_id == account_id:
+        if user_id == account_id:  # Себя нельзя
             await message.answer(**await status_users_menu(account_id))
         else:
             user = await telegram_clients[message.chat.id].get_entity(user_id)
             name = user.first_name + (f" {user.last_name}" if user.last_name else "")
             name = (name[:30] + "...") if len(name) > 30 else name
             telegram_clients[account_id].list_event_handlers()[4][1].chats.add(user_id)
-            status_user = json_encode({"name": name, "online": False, "offline": False, "reading": False})
-            await db.execute(f"UPDATE accounts SET status_users['{user_id}']=$1 WHERE id={account_id}", status_user)
+            await db.execute(f"INSERT INTO status_users VALUES ({account_id}, {user_id}, $1, false, false, false)", name)  # Добавление друга в сети
             await message.answer(**await status_user_menu(message.chat.id, user_id))
     else:
         await message.answer(**await status_users_menu(message.chat.id))
@@ -676,7 +662,7 @@ async def _status_user_del(callback_query: CallbackQuery):
     user_id = int(callback_query.data.replace("status_user_del", ""))
     account_id = callback_query.from_user.id
     telegram_clients[account_id].list_event_handlers()[4][1].chats.remove(user_id)
-    await db.execute(f"UPDATE accounts SET status_users=status_users - '{user_id}' WHERE id={account_id}")
+    await db.execute(f"DELETE FROM status_users WHERE account_id={account_id} AND user_id={user_id}")  # Удаление друга в сети
     await callback_query.message.edit_text(**await status_users_menu(callback_query.message.chat.id))
 
 
@@ -689,12 +675,12 @@ async def _answering_machine(callback_query: CallbackQuery):
 
 async def answering_machine_menu(account_id: int) -> dict[str, Any]:
     buttons = []
-    main, answers = (await db.fetch_one(f"SELECT answering_machine['main'] AS main, answering_machine['variants'] AS variants "
-                                         f"FROM accounts WHERE id={account_id}")).values()
-    for answer_id in answers:
-        text = (answers[answer_id]['text'][:30] + "...") if len(answers[answer_id]['text']) > 30 else answers[answer_id]['text']
-        indicator = "🟢 " if main == int(answer_id) else ""
-        buttons.append([IButton(text=f"{indicator}{text}", callback_data=f"answering_machine_menu{answer_id}")])
+    main = await db.fetch_one(f"SELECT answering_machine_main FROM functions WHERE account_id={account_id}", one_data=True)  # Включенный автоответ
+    answers = await db.fetch_all(f"SELECT answer_id, text FROM answering_machine WHERE account_id={account_id}")  # Автоответы
+    for answer in answers:
+        text = (str(answer['text'])[:30] + "...") if len(str(answer['text'])) > 30 else str(answer['text'])
+        indicator = "🟢 " if main == int(answer['answer_id']) else ""
+        buttons.append([IButton(text=f"{indicator}{text}", callback_data=f"answering_machine_menu{answer['answer_id']}")])
     buttons.append([IButton(text="➕ Создать новый ответ", callback_data="new_answering_machine")])
     buttons.append([IButton(text="◀️  Назад", callback_data="settings")])
     markup = IMarkup(inline_keyboard=buttons)
@@ -706,8 +692,8 @@ async def answering_machine_menu(account_id: int) -> dict[str, Any]:
 @security('state')
 async def _new_answering_machine_start(callback_query: CallbackQuery, state: FSMContext):
     if await new_callback_query(callback_query): return
-    if await db.fetch_one("SELECT COUNT(*) FROM (SELECT jsonb_object_keys(answering_machine['variants']) "
-                          f"FROM accounts WHERE id={callback_query.from_user.id}) AS count", one_data=True) >= 5:
+    if await db.fetch_one(f"SELECT COUNT(*) FROM answering_machine WHERE account_id={callback_query.from_user.id}", one_data=True) >= 5:
+        # Количество автоответов уже достигло максимума
         return await callback_query.answer("У вас максимальное количество автоответов", True)
     await state.set_state(UserState.answering_machine)
     markup = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Отмена")]], resize_keyboard=True)
@@ -731,8 +717,9 @@ async def _new_answering_machine(message: Message, state: FSMContext):
                              reply_markup=(await answering_machine_menu(message.chat.id))['reply_markup'])
     elif message.text != "Отмена":
         answer_id = int(time.time()) - 1737828000  # 1737828000 - 2025/01/26 00:00 (день активного обновления автоответчика)
-        answer = json_encode({"text": message.text, "entities": [entity.model_dump() for entity in message.entities or []]})
-        await db.execute(f"UPDATE accounts SET answering_machine['variants']['{answer_id}']=$1::jsonb WHERE id={message.chat.id}", answer)
+        entities = json_encode([entity.model_dump() for entity in message.entities or []])
+        # Новый автоответ
+        await db.execute(f"INSERT INTO answering_machine VALUES ({message.chat.id}, {answer_id}, $1, '{entities}')", message.text)
         await message.answer(**await auto_answer_menu(message.chat.id, answer_id))
     else:
         await message.answer(**await answering_machine_menu(message.chat.id))
@@ -748,11 +735,11 @@ async def _answering_machine_menu(callback_query: CallbackQuery):
 
 
 async def auto_answer_menu(account_id: int, answer_id: int):
-    data = (await db.fetch_one(f"SELECT answering_machine['main'] AS main, answering_machine['variants']['{answer_id}'] AS answer "
-                               f"FROM accounts WHERE id={account_id}")).values()
-    if data is None:
+    # Включенный автоответ и нужный автоответ
+    main = await db.fetch_one(f"SELECT answering_machine_main FROM functions WHERE account_id={account_id}", one_data=True)
+    answer = await db.fetch_one(f"SELECT text, entities FROM answering_machine WHERE account_id={account_id} AND answer_id={answer_id}")
+    if answer is None:  # Автоответ не найден
         return await answering_machine_menu(account_id)
-    main, answer = data
     status = main == int(answer_id)
     status_button = IButton(text="🔴 Выключить автоответ", callback_data=f"answering_machine_off_{answer_id}") if status else \
         IButton(text="🟢 Включить автоответ", callback_data=f"answering_machine_on_{answer_id}")
@@ -760,7 +747,7 @@ async def auto_answer_menu(account_id: int, answer_id: int):
                                       [IButton(text="✏️ Изменить текст", callback_data=f"answering_machine_edit{answer_id}")],
                                       [IButton(text="🚫 Удалить автоответ", callback_data=f"answering_machine_del{answer_id}")],
                                       [IButton(text="◀️  Назад", callback_data="answering_machine")]])
-    return {"text": answer['text'], "entities": answer['entities'], "reply_markup": markup}
+    return {"text": str(answer['text']), "entities": answer['entities'], "reply_markup": markup}
 
 
 @dp.callback_query(F.data.startswith("answering_machine_del"))
@@ -769,10 +756,10 @@ async def _answering_machine_del(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     answer_id = int(callback_query.data.replace("answering_machine_del", ""))
     account_id = callback_query.from_user.id
-    await db.execute(f"UPDATE accounts SET answering_machine['variants']=answering_machine['variants'] - '{answer_id}' "
-                     f"WHERE id={account_id}")
-    if await db.fetch_one(f"SELECT answering_machine['main'] FROM accounts WHERE id={account_id}", one_data=True) == answer_id:
-        await db.execute(f"UPDATE accounts SET answering_machine['main']='0' WHERE id={account_id}")
+    if await db.fetch_one(f"SELECT answering_machine_main FROM functions WHERE account_id={account_id}", one_data=True) == answer_id:
+        # Если удаляемый автоответ являлся включенным, то выключить его
+        await db.execute(f"UPDATE functions SET answering_machine_main=0 WHERE account_id={account_id}")
+    await db.execute(f"DELETE FROM answering_machine WHERE account_id={account_id} AND answer_id={answer_id}")  # Удаление автоответа
     await callback_query.message.edit_text(**await answering_machine_menu(callback_query.message.chat.id))
 
 
@@ -782,13 +769,12 @@ async def _answering_machine_switch(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     command, answer_id = callback_query.data.replace("answering_machine_", "").split("_")
     account_id = callback_query.from_user.id
-    answer = await db.fetch_one(f"SELECT answering_machine['variants']['{answer_id}'] "
-                                f"FROM accounts WHERE id={account_id}", one_data=True)
-    if answer is None:
+    answer = await db.fetch_one(f"SELECT true FROM answering_machine WHERE account_id={account_id} AND answer_id={answer_id}", one_data=True)
+    if answer is None:  # Автоответ не найден
         await callback_query.answer("Автоответ был удалено ранее!", True)
         return await callback_query.message.edit_text(**await answering_machine_menu(account_id))
-    await db.execute(f"UPDATE accounts SET answering_machine['main']='{0 if command == 'off' else answer_id}', "
-                     f"answering_machine['sending']='[]' WHERE id={account_id}")
+    # Включение / выключение автоответа
+    await db.execute(f"UPDATE functions SET answering_machine_main={0 if command == 'off' else answer_id} WHERE account_id={account_id}")
     await callback_query.message.edit_text(**await auto_answer_menu(account_id, answer_id))
 
 
@@ -814,8 +800,8 @@ async def _answering_machine_edit(message: Message, state: FSMContext):
     answer_id = data['answer_id']
     await state.clear()
     account_id = message.chat.id
-    if not await db.fetch_one(f"SELECT answering_machine['variants'] ? '{answer_id}' FROM accounts WHERE id={account_id}"):
-        await message.answer(**await answering_machine_menu(account_id))
+    if not await db.fetch_one(f"SELECT true FROM answering_machine WHERE account_id={account_id} AND answer_id={answer_id}"):
+        await message.answer(**await answering_machine_menu(account_id))  # Автоответ не найден
     elif message.content_type != "text":
         await message.answer("<b>Ваше сообщение не является текстом</b>", parse_mode=html,
                              reply_markup=(await auto_answer_menu(message.chat.id, answer_id))['reply_markup'])
@@ -823,10 +809,11 @@ async def _answering_machine_edit(message: Message, state: FSMContext):
         await message.answer("<b>Ваше сообщение слишком длинное</b>", parse_mode=html,
                              reply_markup=(await auto_answer_menu(message.chat.id, answer_id))['reply_markup'])
     elif message.text != "Отмена":
-        text = '"' + message.text.replace("\n", "\\n") + '"'
-        await db.execute(f"UPDATE accounts SET answering_machine['variants']['{answer_id}']['text']=$1::jsonb, "
-                         f"answering_machine['variants']['{answer_id}']['entities']=$2 WHERE id={account_id}",
-                         text, json_encode([entity.model_dump() for entity in message.entities or []]))
+        entities = json_encode([entity.model_dump() for entity in message.entities or []])
+        await db.execute(f"UPDATE answering_machine SET text=$1, entities='{entities}' "
+                         f"WHERE account_id={account_id} AND answer_id={answer_id}", message.text)  # Изменение автоответа
+        await message.answer(**await auto_answer_menu(message.chat.id, answer_id))
+    else:
         await message.answer(**await auto_answer_menu(message.chat.id, answer_id))
     await bot.delete_messages(chat_id=message.chat.id, message_ids=[message_id, message.message_id])
 
@@ -848,7 +835,7 @@ async def _registration(callback_query: CallbackQuery, state: FSMContext):
 async def _off(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     account_id = callback_query.from_user.id
-    phone_number = await db.fetch_one(f"SELECT phone_number FROM accounts WHERE id={account_id}", one_data=True)
+    phone_number = await db.fetch_one(f"SELECT phone_number FROM accounts WHERE account_id={account_id}", one_data=True)
     await account_off(account_id, f"+{phone_number}")
     await callback_query.message.edit_text(**await settings(callback_query.message.chat.id))
 
@@ -858,13 +845,16 @@ async def _off(callback_query: CallbackQuery):
 async def _on(callback_query: CallbackQuery, state: FSMContext):
     if await new_callback_query(callback_query): return
     account_id = callback_query.from_user.id
-    account = await db.fetch_one(f"SELECT name, is_started, is_paid, phone_number FROM accounts WHERE id={account_id}")
-    if account is not None and account['is_started'] is False:  # Зарегистрирован, но отключен
-        if not account['is_paid']:  # Просрочен платеж
-            payment_message = await payment(account_id)
+    phone_number = await db.fetch_one(f"SELECT phone_number FROM accounts WHERE account_id={account_id}", one_data=True)
+    is_started = await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={account_id}", one_data=True)
+    is_paid = await db.fetch_one(f"SELECT is_paid FROM payment WHERE account_id={account_id}", one_data=True)
+    if is_started is False:  # Зарегистрирован, но отключен
+        if is_paid is False:  # Просрочен платеж
+            payment_message = await payment_menu(account_id)
             await callback_query.message.edit_text("Ваша подписка истекла. Продлите ее, чтобы пользоваться Maksogram\n"
                                                    f"{payment_message['text']}", reply_markup=payment_message['reply_markup'])
-            return await bot.send_message(OWNER, f"Платеж просрочен. Программа не запущена ({account['name']})")
+            name = await db.fetch_one(f"SELECT name FROM accounts WHERE account_id={account_id}", one_data=True)
+            return await bot.send_message(OWNER, f"Платеж просрочен. Программа не запущена ({name})")
         try:
             await account_on(account_id, (admin_program if callback_query.message.chat.id == OWNER else program).Program)
         except UserIsNotAuthorized:  # Удалена сессия
@@ -877,7 +867,7 @@ async def _on(callback_query: CallbackQuery, state: FSMContext):
                                                 "к вашему аккаунту. Пришлите код для повторного входа (<b>только кнопкой!</b>)",
                                                 parse_mode=html, reply_markup=markup)
             await callback_query.message.delete()
-            await telegram_clients[account_id].send_code_request(account['phone_number'])
+            await telegram_clients[account_id].send_code_request(phone_number)
             return await bot.send_message(OWNER, "Повторный вход...")
     await callback_query.message.edit_text(**await settings(callback_query.message.chat.id))
 
@@ -898,7 +888,7 @@ async def _relogin(message: Message, state: FSMContext):
                                     reply_markup=ReplyKeyboardRemove())
     code = unzip_int_data(message.web_app_data.data)
     account_id = message.chat.id
-    phone_number = await db.fetch_one(f"SELECT phone_number FROM accounts WHERE id={account_id}", one_data=True)
+    phone_number = await db.fetch_one(f"SELECT phone_number FROM accounts WHERE account_id={account_id}", one_data=True)
     try:
         await telegram_clients[account_id].sign_in(phone=phone_number, code=code)
     except errors.SessionPasswordNeededError:
@@ -933,7 +923,7 @@ async def _relogin_with_password(message: Message, state: FSMContext):
     if message.content_type != "text":
         return await message.answer("Отправьте пароль от вашего аккаунта")
     account_id = message.chat.id
-    phone_number = await db.fetch_one(f"SELECT phone_number FROM accounts WHERE id={account_id}", one_data=True)
+    phone_number = await db.fetch_one(f"SELECT phone_number FROM accounts WHERE account_id={account_id}", one_data=True)
     try:
         await telegram_clients[account_id].sign_in(phone=phone_number, password=message.text)
     except errors.PasswordHashInvalidError:
@@ -968,9 +958,12 @@ async def _contact(message: Message, state: FSMContext):
                                            [KeyboardButton(text="Отмена")]], resize_keyboard=True)
     await message.answer("Осталось отправить код для входа (<b>только кнопкой!</b>). Напоминаю, что мы не собираем "
                          f"никаких данных, а по любым вопросам можете обращаться в @{support}", reply_markup=markup, parse_mode=html)
-    await telegram_client.connect()
-    await asyncio.sleep(1)  # Ожидание соединения
-    await telegram_client.send_code_request(phone_number)
+    for i in range(5):
+        await telegram_client.connect()
+        if telegram_client.is_connected():
+            await telegram_client.send_code_request(phone_number)
+            break
+        await asyncio.sleep(1)  # Ожидание соединения
 
 
 @dp.message(UserState.send_code)
@@ -1021,6 +1014,14 @@ async def _login(message: Message, state: FSMContext):
             await message.answer("Произошла ошибка при создании необходимых чатов. Мы уже работает над ее решением")
             await bot.send_message(OWNER, f"⚠️ Ошибка (start_program) ⚠️\n\nПроизошла ошибка {e.__class__.__name__}: {e}")
         else:
+            referal: int = await db.fetch_one(f"SELECT account_id FROM referals WHERE referal_id={message.chat.id}", one_data=True)
+            if referal:
+                await db.execute(f"""UPDATE payment SET next_payment=((CASE WHEN 
+                                 next_payment > CURRENT_TIMESTAMP THEN 
+                                 next_payment ELSE CURRENT_TIMESTAMP END) + INTERVAL '30 days'), 
+                                 is_paid=true WHERE account_id={referal}""")  # перемещение даты оплаты на 30 дней вперед
+                await bot.send_message(referal, "По вашей реферальной ссылке зарегистрировался пользователь. "
+                                                "Вы получили месяц в подарок!")
             await loading.delete()
             await message.answer("Maksogram запущен 🚀\nВ канале \"Мои сообщения\" будут храниться все ваши сообщения, в "
                                  "комментариях к постам будет информация о изменении и удалении\n"
@@ -1065,6 +1066,14 @@ async def _login_with_password(message: Message, state: FSMContext):
             await message.answer("Произошла ошибка при создании необходимых чатов. Мы уже работает над ее решением")
             await bot.send_message(OWNER, f"⚠️ Ошибка (start_program) ⚠️\n\nПроизошла ошибка {e.__class__.__name__}: {e}")
         else:
+            referal: int = await db.fetch_one(f"SELECT account_id FROM referals WHERE referal_id={message.chat.id}", one_data=True)
+            if referal:
+                await db.execute(f"""UPDATE payment SET next_payment=((CASE WHEN 
+                                 next_payment > CURRENT_TIMESTAMP THEN 
+                                 next_payment ELSE CURRENT_TIMESTAMP END) + INTERVAL '30 days'), 
+                                 is_paid=true WHERE account_id={referal}""")  # перемещение даты оплаты на 30 дней вперед
+                await bot.send_message(referal, "По вашей реферальной ссылке зарегистрировался пользователь. "
+                                                "Вы получили месяц в подарок!")
             await loading.delete()
             await message.answer("Maksogram запущен 🚀\nВ канале \"Мои сообщения\" будут храниться все ваши сообщения, в "
                                  "комментариях к постам будет информация о изменении и удалении\n"
@@ -1090,11 +1099,12 @@ async def start_program(account_id: int, username: str, phone_number: int, teleg
     if request['result'] != "ok":
         raise CreateChatsError(request['message'], f"Произошла ошибка {request['error'].__class__.__name__}: {request['error']}")
     name = ('@' + username) if username else account_id
-    next_payment = {'next_payment': int((time_now() + timedelta(days=7)).timestamp()), 'user': 'user', 'fee': Variables.fee}
-    await db.execute(
-        f"INSERT INTO accounts VALUES ({account_id}, '{name}', {phone_number}, {request['my_messages']}, "
-        f"{request['message_changes']}, '[]', '[]', '{s1}{s2}', true, '{json_encode(next_payment)}', true, "
-        f"'{s1}\"main\": 0, \"variants\": {s1}{s2}{s2}', '{s1}{s2}', '{s1}\"calculator\": false, \"qrcode\": false{s2}')")
+    next_payment = time_now() + timedelta(days=7)
+    await db.execute(f"INSERT INTO accounts VALUES ({account_id}, '{name}', {phone_number}, {request['my_messages']}, {request['message_changes']})")
+    await db.execute(f"INSERT INTO settings VALUES ({account_id}, '[]', '[]', true)")
+    await db.execute(f"INSERT INTO payment VALUES ({account_id}, 'user', {Variables.fee}, '{next_payment}', true)")
+    await db.execute(f"INSERT INTO functions VALUES ({account_id}, 0, '[]')")
+    await db.execute(f"INSERT INTO modules VALUES ({account_id}, false, false)")
     telegram_clients[account_id] = telegram_client
     asyncio.get_running_loop().create_task(program.Program(telegram_client, account_id, []).run_until_disconnected())
 
@@ -1209,12 +1219,14 @@ async def new_callback_query(callback_query: CallbackQuery) -> bool:
 
 
 async def check_payment_datetime():
-    for account in await db.fetch_all("SELECT id, is_started, payment FROM accounts"):
-        if not account['is_started'] or account['payment']['user'] != 'user': continue
-        if time_now().timestamp() <= account['payment']['next_payment'] <= time_now().timestamp() + 24*60*60:
-            await bot.send_message(account['id'], "Текущая подписка заканчивается! Произведите следующий "
-                                                  "платеж до конца завтрашнего дня")
-            await bot.send_message(account['id'], **await payment(account['id']))
+    for account_id in await db.fetch_all("SELECT account_id FROM accounts", one_data=True):
+        account_id: int
+        payment = await db.fetch_one(f"SELECT \"user\", next_payment FROM payment WHERE account_id={account_id}")
+        if payment['user'] != 'user': continue
+        if time_now() <= payment['next_payment'] <= (time_now() + timedelta(days=1)):  # За день до конца
+            await bot.send_message(account_id, "Текущая подписка заканчивается! Произведите следующий "
+                                               "платеж до конца завтрашнего дня")
+            await bot.send_message(account_id, **await payment_menu(account_id))
 
 
 async def start_bot():

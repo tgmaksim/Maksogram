@@ -11,6 +11,7 @@ from datetime import timedelta, datetime
 from telethon import TelegramClient, events
 from telethon.events.common import EventCommon
 from telethon.errors import ChatForwardsRestrictedError
+from telethon.tl.functions.account import UpdateStatusRequest
 from telethon.tl.functions.messages import GetCustomEmojiDocumentsRequest
 from core import db, MaksogramBot, Variables, security, time_now, count_avatars, account_off
 from telethon.errors.rpcerrorlist import (
@@ -28,8 +29,7 @@ from telethon.tl.types import (
     UserStatusOnline,
     UserStatusOffline,
     ReactionCustomEmoji,
-)
-from telethon.tl.types import (
+
     MessageEntityUrl,
     MessageEntityBold,
     MessageEntityItalic,
@@ -78,11 +78,11 @@ class Program:
             if await self.secondary_checking_event(event):
                 await self.sleep()
                 await self.new_message(event)
-                # await self.client(UpdateStatusRequest(offline=True))
+                await self.client(UpdateStatusRequest(offline=True))
                 if event.is_private and not event.message.out \
-                        and await db.fetch_one(f"SELECT answering_machine['main'] FROM accounts WHERE id={self.id}", one_data=True) \
-                        and not await db.fetch_one(f"SELECT answering_machine['sending'] @> '{event.chat_id}' "
-                                                   f"FROM accounts WHERE id={self.id}", one_data=True):
+                        and await db.fetch_one(f"SELECT answering_machine_main FROM functions WHERE account_id={self.id}", one_data=True) \
+                        and not await db.fetch_one(f"SELECT answering_machine_sending @> '{event.chat_id}' "
+                                                   f"FROM functions WHERE account_id={self.id}", one_data=True):
                     auto_message = await self.answering_machine(event)
                     new_event = events.newmessage.NewMessage.Event(auto_message)
                     await self.new_message(new_event)
@@ -93,24 +93,24 @@ class Program:
             if await self.secondary_checking_event(event):
                 await self.sleep()
                 await self.message_edited(event)
-                # await self.client(UpdateStatusRequest(offline=True))
+                await self.client(UpdateStatusRequest(offline=True))
 
         @client.on(events.MessageDeleted())
         @security()
         async def message_deleted(event: events.messagedeleted.MessageDeleted.Event):
             if event.is_private is False:  # Сообщение удалено в группе, супергруппе или канале
-                if not await db.fetch_one(f"SELECT added_chats @> '{event.chat_id}' FROM accounts WHERE id={self.id}", one_data=True):
+                if not await db.fetch_one(f"SELECT added_chats @> '{event.chat_id}' FROM settings WHERE account_id={self.id}", one_data=True):
                     return
             await self.sleep()
             await self.message_deleted(event)
-            # await self.client(UpdateStatusRequest(offline=True))
+            await self.client(UpdateStatusRequest(offline=True))
 
         @client.on(events.MessageRead(func=self.initial_checking_event, inbox=False))
         @security()
         async def message_read_outbox(event: events.messageread.MessageRead.Event):
             if await self.secondary_checking_event(event):
                 await self.message_read(event)
-                # await self.client(UpdateStatusRequest(offline=True))
+                await self.client(UpdateStatusRequest(offline=True))
 
         @client.on(events.UserUpdate(
             chats=self.status_users,
@@ -128,8 +128,8 @@ class Program:
 
     async def initial_checking_event(self, event: EventCommon) -> bool:
         return event.is_private and \
-            not await db.fetch_one(f"SELECT removed_chats @> '{event.chat_id}' FROM accounts WHERE id={self.id}", one_data=True) or \
-            await db.fetch_one(f"SELECT added_chats @> '{event.chat_id}' FROM accounts WHERE id={self.id}", one_data=True)
+            not await db.fetch_one(f"SELECT removed_chats @> '{event.chat_id}' FROM settings WHERE account_id={self.id}", one_data=True) or \
+            await db.fetch_one(f"SELECT added_chats @> '{event.chat_id}' FROM settings WHERE account_id={self.id}", one_data=True)
 
     async def secondary_checking_event(self, event: EventCommon) -> bool:
         if event.is_private:
@@ -166,7 +166,7 @@ class Program:
             return peer.chat_id
         if isinstance(peer, PeerChannel):
             return peer.channel_id
-        name = await db.fetch_one(f"SELECT name FROM accounts WHERE id={self.id}", one_data=True)
+        name = await db.fetch_one(f"SELECT name FROM accounts WHERE account_id={self.id}", one_data=True)
         await MaksogramBot.send_system_message(f"⚠️ Ошибка ⚠️\n\nТип peer - {peer.__class__.__name__} ({name})")
         raise TypeError("peer isn't instance PeerUser, PeerChat, PeerChannel")
 
@@ -179,7 +179,7 @@ class Program:
 
     @property
     def my_messages(self):
-        return db.fetch_one(f"SELECT my_messages FROM accounts WHERE id={self.id}", one_data=True)
+        return db.fetch_one(f"SELECT my_messages FROM accounts WHERE account_id={self.id}", one_data=True)
 
     async def new_message(self, event: events.newmessage.NewMessage.Event):
         message: Message = event.message
@@ -188,7 +188,7 @@ class Program:
         # Генератор QR
         if ("создай" in text or "сгенерируй" in text or "qr" in text or "создать" in text or "сгенерировать" in text) \
                 and message.out and len(message.entities or []) == 1 and isinstance(message.entities[0], MessageEntityUrl):
-            if await db.fetch_one(f"SELECT modules['qrcode'] FROM accounts WHERE id={self.id}", one_data=True):
+            if await db.fetch_one(f"SELECT qrcode FROM modules WHERE account_id={self.id}", one_data=True):
                 link = message.text[message.entities[0].offset:message.entities[0].length + message.entities[0].offset]
                 qr = create_qrcode(link)
                 await message.edit("Maksogram в чате (qr-код)", file=qr)
@@ -198,7 +198,7 @@ class Program:
 
         # Калькулятор
         if text and text[-1] == "=" and "\n" not in text and message.out:
-            if await db.fetch_one(f"SELECT modules['calculator'] FROM accounts WHERE id={self.id}", one_data=True):
+            if await db.fetch_one(f"SELECT calculator FROM modules WHERE account_id={self.id}", one_data=True):
                 request = calculator(text[:-1])
                 if request:  # При срабатывании Maksogram в чате сохранение сообщения не происходит
                     return await self.client.edit_message(message.chat_id, message, request)
@@ -359,8 +359,8 @@ class Program:
             return
         chat_id = (await event.get_chat()).id
         name = await self.chat_name(chat_id)
-        if await db.fetch_one(f"SELECT status_users['{chat_id}']['reading'] FROM accounts WHERE id={self.id}", one_data=True):
-            await db.execute(f"UPDATE accounts SET status_users['{chat_id}']['reading']='false' WHERE id={self.id}")
+        if await db.fetch_one(f"SELECT reading FROM status_users WHERE account_id={self.id} AND user_id={chat_id}", one_data=True):
+            await db.execute(f"UPDATE status_users SET reading=false WHERE account_id={self.id} AND user_id={chat_id}")
             await MaksogramBot.send_message(self.id, f"🌐 {name} прочитал сообщение")
 
     async def user_update(self, event: events.userupdate.UserUpdate.Event):
@@ -368,8 +368,7 @@ class Program:
         if self.status_users.get(event.chat_id) == status:
             return
         self.status_users[event.chat_id] = status
-        function = await db.fetch_one(f"SELECT status_users['{event.chat_id}']['online'] AS online, "
-                                      f"status_users['{event.chat_id}']['offline'] AS offline FROM accounts WHERE id={self.id}")
+        function = await db.fetch_one(f"SELECT online, offline FROM status_users WHERE account_id={self.id} AND user_id={event.chat_id}")
         online = function['online'] and status is True
         offline = function['offline'] and status is False
         if online or offline:
@@ -385,7 +384,7 @@ class Program:
         # Генератор QR
         if ("создай" in text or "сгенерируй" in text or "qr" in text or "создать" in text or "сгенерировать" in text) \
                 and message.out and len(message.entities or []) == 1 and isinstance(message.entities[0], MessageEntityUrl):
-            if await db.fetch_one(f"SELECT modules['qrcode'] FROM accounts WHERE id={self.id}", one_data=True):
+            if await db.fetch_one(f"SELECT qrcode FROM modules WHERE account_id={self.id}", one_data=True):
                 link = message.text[message.entities[0].offset:message.entities[0].length + message.entities[0].offset]
                 qr = create_qrcode(link)
                 await message.edit("Maksogram в чате (qr-код)", file=qr)
@@ -396,7 +395,7 @@ class Program:
 
         # Калькулятор
         if text and text[-1] == "=" and "\n" not in text and message.out:
-            if await db.fetch_one(f"SELECT modules['calculator'] FROM accounts WHERE id={self.id}", one_data=True):
+            if await db.fetch_one(f"SELECT calculator FROM modules WHERE account_id={self.id}", one_data=True):
                 request = calculator(text[:-1])
                 if request:
                     await self.client.edit_message(message.chat_id, message, request)
@@ -408,11 +407,11 @@ class Program:
 
     async def answering_machine(self, event: events.newmessage.NewMessage.Event):
         message: Message = event.message
-        answer = await db.fetch_one(f"SELECT answering_machine->'variants'->(SELECT answering_machine['main']::text "
-                                    f"FROM accounts WHERE id={self.id}) FROM accounts WHERE id={self.id}", one_data=True)
+        answer = await db.fetch_one("SELECT text, entities FROM answering_machine WHERE answer_id=(SELECT answering_machine_main "
+                                    f"FROM functions WHERE account_id={self.id}) AND account_id={self.id}")
         if not answer: return
-        await db.execute(f"UPDATE accounts SET answering_machine['sending']=answering_machine['sending'] || '{message.chat_id}' "
-                         f"WHERE id={self.id}")
+        await db.execute(f"UPDATE functions SET answering_machine_sending=answering_machine_sending || '{message.chat_id}' "
+                         f"WHERE account_id={self.id}")
         entities = []
         for entity in answer['entities']:
             match entity['type']:
@@ -435,29 +434,29 @@ class Program:
         return await self.client.send_message(message.chat_id, answer['text'], formatting_entities=entities)
 
     async def new_avatar(self):
-        while await db.fetch_one(f"SELECT is_started FROM accounts WHERE id={self.id}", one_data=True):
-            for user_id, user in (await db.fetch_one(f"SELECT avatars FROM accounts WHERE id={self.id}", one_data=True)).items():
-                count = await count_avatars(self.id, int(user_id))
+        while await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={self.id}", one_data=True):
+            for user in await db.fetch_all(f"SELECT user_id, name, count FROM avatars WHERE account_id={self.id}"):
+                count = await count_avatars(self.id, user['user_id'])
                 if user['count'] > count:
                     await MaksogramBot.send_message(
-                        self.id, f"📸 <b><a href='tg://user?id={user_id}'>{user['name']}</a></b> удалил(а) аватарку",
+                        self.id, f"📸 <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> удалил(а) аватарку",
                         reply_markup=MaksogramBot.IMarkup(
-                            inline_keyboard=[[MaksogramBot.IButton(text="🔴 Выключить", callback_data=f"avatar_del{user_id}")]]),
+                            inline_keyboard=[[MaksogramBot.IButton(text="🔴 Выключить", callback_data=f"avatar_del{user['user_id']}")]]),
                         parse_mode="html")
                 elif user['count'] < count:
                     await MaksogramBot.send_message(
-                        self.id, f"📸 <b><a href='tg://user?id={user_id}'>{user['name']}</a></b> добавил(а) аватарку",
+                        self.id, f"📸 <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> добавил(а) аватарку",
                         reply_markup=MaksogramBot.IMarkup(
-                            inline_keyboard=[[MaksogramBot.IButton(text="🔴 Выключить", callback_data=f"avatar_del{user_id}")]]),
+                            inline_keyboard=[[MaksogramBot.IButton(text="🔴 Выключить", callback_data=f"avatar_del{user['user_id']}")]]),
                         parse_mode="html")
                 else: continue
-                await db.execute(f"UPDATE accounts SET avatars['{user_id}']['count']='{count}' WHERE id={self.id}")
+                await db.execute(f"UPDATE avatars SET count={count} WHERE account_id={self.id} AND user_id={user['user_id']}")
             await asyncio.sleep(5*60)
 
     async def run_until_disconnected(self):
         await db.execute(f"CREATE TABLE IF NOT EXISTS \"{self.id}_messages\" (chat_id BIGINT NOT NULL, "
                          "message_id INTEGER NOT NULL, saved_message_id INTEGER NOT NULL, reactions TEXT NOT NULL)")
-        name = await db.fetch_one(f"SELECT name FROM accounts WHERE id={self.id}", one_data=True)
+        name = await db.fetch_one(f"SELECT name FROM accounts WHERE account_id={self.id}", one_data=True)
         await MaksogramBot.send_system_message(f"SavingMessages v{self.__version__} для {name} запущен")
         asyncio.get_running_loop().create_task(self.new_avatar())
         try:
@@ -465,5 +464,5 @@ class Program:
         except (AuthKeyInvalidError, AuthKeyUnregisteredError):
             await MaksogramBot.send_message(self.id, "Вы удалили сессию, она была необходима для работы программы!")
             await MaksogramBot.send_system_message(f"Удалена сессия у пользователя {name}")
-            phone_number = await db.fetch_one(f"SELECT phone_number FROM accounts WHERE id={self.id}", one_data=True)
+            phone_number = await db.fetch_one(f"SELECT phone_number FROM accounts WHERE account_id={self.id}", one_data=True)
             await account_off(self.id, f"+{phone_number}")

@@ -12,7 +12,7 @@ def create(link: str) -> str:
     logo = logo.resize((width, int((float(logo.size[1]) * float(width / float(logo.size[0]))))), 1)
     qr = qrcode.QRCode(version=6, error_correction=qrcode.constants.ERROR_CORRECT_H)
     qr.add_data(link)
-    img = qr.make_image(fill_color="#e47c1b")
+    img = qr.make_image(fill_color="#02C67C")
     img = img.convert("RGBA")
     pos = ((img.size[0] - logo.size[0]) // 2,
            (img.size[1] - logo.size[1]) // 2)

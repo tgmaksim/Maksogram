@@ -82,7 +82,7 @@ async def count_avatars(account_id: int, user_id: int) -> int:
 
 
 async def account_off(account_id: int, phone_number: str):
-    await db.execute(f"UPDATE accounts SET is_started='false' WHERE id={account_id}")
+    await db.execute(f"UPDATE settings SET is_started=false WHERE account_id={account_id}")
     telegram_client, telegram_clients[account_id] = telegram_clients[account_id], new_telegram_client(phone_number)
     if telegram_client.is_connected():
         await telegram_client.disconnect()
@@ -92,8 +92,8 @@ async def account_on(account_id: int, Program):
     if not telegram_clients[account_id].is_connected():
         await telegram_clients[account_id].connect()
     if await telegram_clients[account_id].is_user_authorized():
-        await db.execute(f"UPDATE accounts SET is_started='true' WHERE id={account_id}")
-        status_users = await db.fetch_all(f"SELECT key FROM accounts, jsonb_each(status_users) WHERE id={account_id};", one_data=True)
+        await db.execute(f"UPDATE settings SET is_started=true WHERE account_id={account_id}")
+        status_users = await db.fetch_all(f"SELECT user_id FROM status_users WHERE account_id={account_id}", one_data=True)
         asyncio.get_running_loop().create_task(Program(telegram_clients[account_id], account_id, status_users).run_until_disconnected())
     else:
         raise UserIsNotAuthorized()
