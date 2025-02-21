@@ -99,6 +99,16 @@ async def account_on(account_id: int, Program):
         raise UserIsNotAuthorized()
 
 
+async def get_enabled_auto_answer(account_id: int) -> Union[int, None]:
+    enabled_ordinary_auto_answer = await db.fetch_one(f"SELECT answer_id FROM answering_machine WHERE account_id={account_id} AND "
+                                                       f"type=ordinary AND status=true", one_data=True)
+    now = str(time_now().time())
+    enabled_timetable_auto_answer = await db.fetch_one(
+        f"SELECT answer_id FROM answering_machine WHERE account_id={account_id} AND type=timetable "
+        f"AND status=true AND start_time <= '{now}' AND end_time >= '{now}'", one_data=True)
+    return enabled_ordinary_auto_answer or enabled_timetable_auto_answer  # Обыкновенный автоответ первостепеннее
+
+
 def security(*arguments):
     def new_decorator(fun):
         async def new(_object, **kwargs):
@@ -156,7 +166,7 @@ def new_telegram_client(phone_number: str) -> TelegramClient:
 
 
 class Variables:
-    version = "2.4"
+    version = "2.5"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])

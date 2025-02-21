@@ -4,7 +4,9 @@ import asyncio
 
 from modules.calculator import main as calculator
 from modules.qrcode import create as create_qrcode
+from modules.audio_transcription import main as audio_transcription
 
+from io import BytesIO
 from typing import Union
 from telethon.tl.patched import Message
 from datetime import timedelta, datetime
@@ -183,6 +185,10 @@ class Program:
     def my_messages(self):
         return db.fetch_one(f"SELECT my_messages FROM accounts WHERE account_id={self.id}", one_data=True)
 
+    async def get_message_by_id(self, chat_id: int, message_id: int) -> Message:
+        async for message in self.client.iter_messages(chat_id, ids=message_id):
+            return message
+
     async def new_message(self, event: events.newmessage.NewMessage.Event):
         message: Message = event.message
         text = message.text.lower()
@@ -199,16 +205,37 @@ class Program:
                 link = message.text[message.entities[0].offset:message.entities[0].length + message.entities[0].offset]
                 qr = create_qrcode(link)
                 await message.edit("Maksogram в чате (qr-код)", file=qr)
-                return os.remove(qr)  # При срабатывании Maksogram в чате сохранение сообщения не происходит
-            await MaksogramBot.send_message(self.id, "Вы хотели создать QR-код? Данная функция отключена у вас! "
-                                                     "Вы можете включить в настройках /settings (Maksogram в чате)")
+                os.remove(qr)
+                return  # При срабатывании Maksogram в чате сохранение сообщения не происходит
+            else:
+                await MaksogramBot.send_message(self.id, "Вы хотели создать QR-код? Данная функция отключена у вас! "
+                                                         "Вы можете включить в настройках /settings (Maksogram в чате)")
+
+        # Расшифровка голосовых сообщений
+        if text and ("расшифруй" in text or "в текст" in text) and message.out and message.reply_to \
+                and (reply_message := await self.get_message_by_id(message.chat_id, message.reply_to.reply_to_msg_id)).voice:
+            if await db.fetch_one(f"SELECT audio_transcription FROM modules WHERE account_id={self.id}", one_data=True):
+                await message.edit("@Maksogram в чате\nРасшифровка голосового сообщения...")
+                buffer = BytesIO()
+                await self.client.download_media(reply_message.media, file=buffer)
+                answer = await audio_transcription(buffer.getvalue())
+                if answer.ok:
+                    await message.edit(f"@Maksogram в чате\n<blockquote expandable>{answer.text}</blockquote>", parse_mode="HTML")
+                else:
+                    await MaksogramBot.send_system_message(f"⚠️Ошибка при расшифровке⚠️\n\n{answer.error}")
+                    await message.edit("@Maksogram в чате\nПроизошла ошибка при расшифровке... Скоро все будет исправлено")
+                return  # При срабатывании Maksogram в чате сохранение сообщения не происходит
+            else:
+                await MaksogramBot.send_message(self.id, "Вы хотели расшифровать гс? Данная функция отключена у вас! "
+                                                         "Вы можете включить в настройках /settings (Maksogram в чате)")
 
         # Калькулятор
         if text and text[-1] == "=" and "\n" not in text and message.out:
             if await db.fetch_one(f"SELECT calculator FROM modules WHERE account_id={self.id}", one_data=True):
                 request = calculator(text[:-1])
-                if request:  # При срабатывании Maksogram в чате сохранение сообщения не происходит
-                    return await self.client.edit_message(message.chat_id, message, request)
+                if request:
+                    await message.edit(request)
+                    return  # При срабатывании Maksogram в чате сохранение сообщения не происходит
                 else:
                     await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться калькулятором? Вы неправильно ввели пример")
             else:
@@ -411,12 +438,29 @@ class Program:
                 await MaksogramBot.send_message(self.id, "Вы хотели создать QR-код? Данная функция отключена у вас! "
                                                          "Вы можете включить в настройках /settings (Maksogram в чате)")
 
+        # Расшифровка голосовых сообщений
+        elif text and ("расшифруй" in text or "в текст" in text) and message.out and message.reply_to \
+                and (reply_message := await self.get_message_by_id(message.chat_id, message.reply_to.reply_to_msg_id)).voice:
+            if await db.fetch_one(f"SELECT audio_transcription FROM modules WHERE account_id={self.id}", one_data=True):
+                await message.edit("@Maksogram в чате\nРасшифровка голосового сообщения...")
+                buffer = BytesIO()
+                await self.client.download_media(reply_message.media, file=buffer)
+                answer = await audio_transcription(buffer.getvalue())
+                if answer.ok:
+                    await message.edit(f"@Maksogram в чате\n<blockquote expandable>{answer.text}</blockquote>", parse_mode="HTML")
+                else:
+                    await MaksogramBot.send_system_message(f"⚠️Ошибка при расшифровке⚠️\n\n{answer.error}")
+                    await message.edit("@Maksogram в чате\nПроизошла ошибка при расшифровке... Скоро все будет исправлено")
+            else:
+                await MaksogramBot.send_message(self.id, "Вы хотели расшифровать гс? Данная функция отключена у вас! "
+                                                         "Вы можете включить в настройках /settings (Maksogram в чате)")
+
         # Калькулятор
-        if text and text[-1] == "=" and "\n" not in text and message.out:
+        elif text and text[-1] == "=" and "\n" not in text and message.out:
             if await db.fetch_one(f"SELECT calculator FROM modules WHERE account_id={self.id}", one_data=True):
                 request = calculator(text[:-1])
                 if request:
-                    await self.client.edit_message(message.chat_id, message, request)
+                    await message.edit(request)
                 else:
                     await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться калькулятором? Вы неправильно ввели пример")
             else:

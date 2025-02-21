@@ -395,6 +395,7 @@ async def _modules(callback_query: CallbackQuery):
 def modules_menu() -> dict[str, Any]:
     markup = IMarkup(inline_keyboard=[[IButton(text="🔢 Калькулятор", callback_data="calculator")],
                                       [IButton(text="🔗 Генератор QR-кодов", callback_data="qrcode")],
+                                      [IButton(text="🗣 Расшифровка ГС", callback_data="audio_transcription")],
                                       [IButton(text="◀️  Назад", callback_data="settings")]])
     return {"text": "💬 <b>Maksogram в чате</b>\nФункции, которые работают прямо из любого чата, не нужно вызывать меня",
             "reply_markup": markup, "parse_mode": html}
@@ -424,7 +425,7 @@ async def calculator_menu(account_id: int) -> dict[str, Any]:
 @security()
 async def _calculator_switch(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
-    command = callback_query.data.split("_")[1]
+    command = callback_query.data.split("_")[-1]
     match command:
         case "on":
             await db.execute(f"UPDATE modules SET calculator=true WHERE account_id={callback_query.from_user.id}")
@@ -457,13 +458,45 @@ async def qrcode_menu(account_id: int) -> dict[str, Any]:
 @security()
 async def _qrcode_switch(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
-    command = callback_query.data.split("_")[1]
+    command = callback_query.data.split("_")[-1]
     match command:
         case "on":
             await db.execute(f"UPDATE modules SET qrcode=true WHERE account_id={callback_query.from_user.id}")  # Включение QR
         case "off":
             await db.execute(f"UPDATE modules SET qrcode=false WHERE account_id={callback_query.from_user.id}")  # Выключение QR
     await callback_query.message.edit_text(**await qrcode_menu(callback_query.message.chat.id))
+
+
+@dp.callback_query(F.data == "audio_transcription")
+@security()
+async def _audio_transcription(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    await callback_query.message.edit_text(**await audio_transcription_menu(callback_query.message.chat.id))
+
+
+async def audio_transcription_menu(account_id: int) -> dict[str, Any]:
+    if await db.fetch_one(f"SELECT audio_transcription FROM modules WHERE account_id={account_id}", one_data=True):  # Вкл/выкл расшифровка гс
+        status_button = IButton(text="🔴 Выключить расшифровку", callback_data="audio_transcription_off")
+    else:
+        status_button = IButton(text="🟢 Включить расшифровку", callback_data="audio_transcription_on")
+    markup = IMarkup(inline_keyboard=[[status_button],
+                                      [IButton(text="Как пользоваться расшифровкой гс?", url=f"{SITE}#расшифровка-гс")],
+                                      [IButton(text="◀️  Назад", callback_data="modules")]])
+    return {"text": "🗣 <b>Расшифровка ГС</b>\nНе хотите слушать голосовое? Расшифруйте его в текст. Тригеры: расшифруй, в текст",
+            "reply_markup": markup, "parse_mode": html}
+
+
+@dp.callback_query(F.data.in_(["audio_transcription_on", "audio_transcription_off"]))
+@security()
+async def _audio_transcription_switch(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    command = callback_query.data.split("_")[-1]
+    match command:
+        case "on":
+            await db.execute(f"UPDATE modules SET audio_transcription=true WHERE account_id={callback_query.from_user.id}")  # Включение расшифровки
+        case "off":
+            await db.execute(f"UPDATE modules SET audio_transcription=false WHERE account_id={callback_query.from_user.id}")  # Выключение расшифровки
+    await callback_query.message.edit_text(**await audio_transcription_menu(callback_query.message.chat.id))
 
 
 @dp.callback_query(F.data == "avatars")
