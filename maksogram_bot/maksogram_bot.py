@@ -301,16 +301,19 @@ async def _start(message: Message, state: FSMContext):
     if message.text.startswith('/start r'):
         friend_id = unzip_int_data(message.text.replace('/start r', ''))
         if message.chat.id == friend_id:
-            return await message.answer("Вы не можете зарегистрироваться по своей реферальной ссылке!")
-        if not await db.fetch_one(f"SELECT true FROM accounts WHERE account_id={friend_id}", one_data=True):
+            await message.answer("Вы не можете зарегистрироваться по своей реферальной ссылке!")
+        elif not await db.fetch_one(f"SELECT true FROM accounts WHERE account_id={friend_id}", one_data=True):
             await message.answer("Реферальная ссылка не найдена!")
-        try:
-            await db.execute(f"INSERT INTO referals VALUES ({friend_id}, {message.chat.id})")
-        except UniqueViolationError:
-            await db.execute(f"UPDATE referals SET account_id={friend_id} WHERE referal_id={message.chat.id}")
-        await bot.send_message(friend_id, "По вашей реферальной ссылке зарегистрировался новый пользователь. Если он "
-                                          "подключит бота, то вы получите месяц подписки в подарок")
-        await bot.send_message(OWNER, f"Регистрация по реферальной ссылке #r{friend_id}")
+        elif await db.fetch_one(f"SELECT true FROM accounts WHERE account_id={message.chat.id}", one_data=True):
+            await message.answer("Вы уже зарегистрированы и не можете использовать чьи-то реферальные ссылки")
+        else:
+            try:
+                await db.execute(f"INSERT INTO referals VALUES ({friend_id}, {message.chat.id})")
+            except UniqueViolationError:
+                await db.execute(f"UPDATE referals SET account_id={friend_id} WHERE referal_id={message.chat.id}")
+            await bot.send_message(friend_id, "По вашей реферальной ссылке зарегистрировался новый пользователь. Если он "
+                                              "подключит бота, то вы получите месяц подписки в подарок")
+            await bot.send_message(OWNER, f"Регистрация по реферальной ссылке #r{friend_id}")
     await service_message.delete()
 
 

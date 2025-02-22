@@ -197,7 +197,7 @@ class Program:
             if await db.fetch_one(f"SELECT qrcode FROM modules WHERE account_id={self.id}", one_data=True):
                 link = message.text[message.entities[0].offset:message.entities[0].length + message.entities[0].offset]
                 qr = create_qrcode(link)
-                await message.edit("Maksogram в чате (qr-код)", file=qr)
+                await message.edit("@MaksogramBot в чате", file=qr)
                 os.remove(qr)
                 return  # При срабатывании Maksogram в чате сохранение сообщения не происходит
             else:
@@ -208,15 +208,15 @@ class Program:
         if text and ("расшифруй" in text or "в текст" in text) and message.out and message.reply_to \
                 and (reply_message := await self.get_message_by_id(message.chat_id, message.reply_to.reply_to_msg_id)).voice:
             if await db.fetch_one(f"SELECT audio_transcription FROM modules WHERE account_id={self.id}", one_data=True):
-                await message.edit("@Maksogram в чате\nРасшифровка голосового сообщения...")
+                await message.edit("@MaksogramBot в чате\nРасшифровка голосового сообщения...")
                 buffer = BytesIO()
                 await self.client.download_media(reply_message.media, file=buffer)
                 answer = await audio_transcription(buffer.getvalue())
                 if answer.ok:
-                    await message.edit(f"@Maksogram в чате\n<blockquote expandable>{answer.text}</blockquote>", parse_mode="HTML")
+                    await message.edit(f"@MaksogramBot в чате\n<blockquote expandable>{answer.text}</blockquote>", parse_mode="HTML")
                 else:
                     await MaksogramBot.send_system_message(f"⚠️Ошибка при расшифровке⚠️\n\n{answer.error}")
-                    await message.edit("@Maksogram в чате\nПроизошла ошибка при расшифровке... Скоро все будет исправлено")
+                    await message.edit("@MaksogramBot в чате\nПроизошла ошибка при расшифровке... Скоро все будет исправлено")
                 return  # При срабатывании Maksogram в чате сохранение сообщения не происходит
             else:
                 await MaksogramBot.send_message(self.id, "Вы хотели расшифровать гс? Данная функция отключена у вас! "
@@ -414,7 +414,7 @@ class Program:
             if await db.fetch_one(f"SELECT qrcode FROM modules WHERE account_id={self.id}", one_data=True):
                 link = message.text[message.entities[0].offset:message.entities[0].length + message.entities[0].offset]
                 qr = create_qrcode(link)
-                await message.edit("Maksogram в чате (qr-код)", file=qr)
+                await message.edit("@MaksogramBot в чате", file=qr)
                 os.remove(qr)
             else:
                 await MaksogramBot.send_message(self.id, "Вы хотели создать QR-код? Данная функция отключена у вас! "
@@ -424,15 +424,15 @@ class Program:
         elif text and ("расшифруй" in text or "в текст" in text) and message.out and message.reply_to \
                 and (reply_message := await self.get_message_by_id(message.chat_id, message.reply_to.reply_to_msg_id)).voice:
             if await db.fetch_one(f"SELECT audio_transcription FROM modules WHERE account_id={self.id}", one_data=True):
-                await message.edit("@Maksogram в чате\nРасшифровка голосового сообщения...")
+                await message.edit("@MaksogramBot в чате\nРасшифровка голосового сообщения...")
                 buffer = BytesIO()
                 await self.client.download_media(reply_message.media, file=buffer)
                 answer = await audio_transcription(buffer.getvalue())
                 if answer.ok:
-                    await message.edit(f"@Maksogram в чате\n<blockquote expandable>{answer.text}</blockquote>", parse_mode="HTML")
+                    await message.edit(f"@MaksogramBot в чате\n<blockquote expandable>{answer.text}</blockquote>", parse_mode="HTML")
                 else:
                     await MaksogramBot.send_system_message(f"⚠️Ошибка при расшифровке⚠️\n\n{answer.error}")
-                    await message.edit("@Maksogram в чате\nПроизошла ошибка при расшифровке... Скоро все будет исправлено")
+                    await message.edit("@MaksogramBot в чате\nПроизошла ошибка при расшифровке... Скоро все будет исправлено")
             else:
                 await MaksogramBot.send_message(self.id, "Вы хотели расшифровать гс? Данная функция отключена у вас! "
                                                          "Вы можете включить в настройках /settings (Maksogram в чате)")
