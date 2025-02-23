@@ -16,7 +16,17 @@ from telethon.events.common import EventCommon
 from telethon.errors import ChatForwardsRestrictedError
 from telethon.tl.functions.account import UpdateStatusRequest
 from telethon.tl.functions.messages import GetCustomEmojiDocumentsRequest
-from core import db, MaksogramBot, Variables, security, time_now, human_bytes, count_avatars, account_off
+from core import (
+    db,
+    security,
+    time_now,
+    Variables,
+    account_off,
+    human_bytes,
+    MaksogramBot,
+    count_avatars,
+    get_enabled_auto_answer,
+)
 from telethon.errors.rpcerrorlist import (
     AuthKeyInvalidError,
     MessageIdInvalidError,
@@ -84,8 +94,7 @@ class Program:
                 await self.new_message(event)
                 await self.client(UpdateStatusRequest(offline=True))
 
-                if event.is_private and not event.message.out \
-                        and await db.fetch_one(f"SELECT answering_machine_main FROM functions WHERE account_id={self.id}", one_data=True) \
+                if event.is_private and not event.message.out and await get_enabled_auto_answer(self.id) \
                         and not await db.fetch_one(f"SELECT answering_machine_sending @> '{event.chat_id}' "
                                                    f"FROM functions WHERE account_id={self.id}", one_data=True):
                     auto_message = await self.answering_machine(event)
@@ -469,8 +478,8 @@ class Program:
 
     async def answering_machine(self, event: events.newmessage.NewMessage.Event):
         message: Message = event.message
-        answer = await db.fetch_one("SELECT text, entities FROM answering_machine WHERE answer_id=(SELECT answering_machine_main "
-                                    f"FROM functions WHERE account_id={self.id}) AND account_id={self.id}")
+        answer_id = await get_enabled_auto_answer(self.id)
+        answer = await db.fetch_one(f"SELECT text, entities FROM answering_machine WHERE answer_id={answer_id} AND account_id={self.id}")
         if not answer: return
         await db.execute(f"UPDATE functions SET answering_machine_sending=answering_machine_sending || '{message.chat_id}' "
                          f"WHERE account_id={self.id}")

@@ -91,6 +91,10 @@ async def account_off(account_id: int, phone_number: str):
 async def account_on(account_id: int, Program):
     if not telegram_clients[account_id].is_connected():
         await telegram_clients[account_id].connect()
+        for i in range(10):
+            if telegram_clients[account_id].is_connected():
+                break
+            await asyncio.sleep(1)
     if await telegram_clients[account_id].is_user_authorized():
         await db.execute(f"UPDATE settings SET is_started=true WHERE account_id={account_id}")
         status_users = await db.fetch_all(f"SELECT user_id FROM status_users WHERE account_id={account_id}", one_data=True)
@@ -100,12 +104,14 @@ async def account_on(account_id: int, Program):
 
 
 async def get_enabled_auto_answer(account_id: int) -> Union[int, None]:
+    # Если включен обыкновенный автоответ, то он будет главным, в противном случае - включенный автоответ по расписанию (если есть)
     enabled_ordinary_auto_answer = await db.fetch_one(f"SELECT answer_id FROM answering_machine WHERE account_id={account_id} AND "
-                                                       f"type=ordinary AND status=true", one_data=True)
+                                                       f"type='ordinary' AND status=true", one_data=True)
     now = str(time_now().time())
     enabled_timetable_auto_answer = await db.fetch_one(
-        f"SELECT answer_id FROM answering_machine WHERE account_id={account_id} AND type=timetable "
-        f"AND status=true AND start_time <= '{now}' AND end_time >= '{now}'", one_data=True)
+        f"SELECT answer_id FROM answering_machine WHERE account_id={account_id} AND type='timetable' "
+        f"AND status=true AND (start_time < end_time AND start_time <= '{now}' AND end_time >= '{now}' OR "
+        f"start_time > end_time AND (start_time <= '{now}' OR end_time >= '{now}'))", one_data=True)
     return enabled_ordinary_auto_answer or enabled_timetable_auto_answer  # Обыкновенный автоответ первостепеннее
 
 

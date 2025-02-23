@@ -1,3 +1,4 @@
+import re
 import time
 import asyncio
 import aiohttp
@@ -32,6 +33,7 @@ from core import (
     telegram_clients,
     UserIsNotAuthorized,
     new_telegram_client,
+    get_enabled_auto_answer,
 )
 
 from telethon import errors
@@ -70,6 +72,7 @@ class UserState(StatesGroup):
         mailing = State('mailing')
         confirm_mailing = State('confirm_mailing')
 
+    time_zone = State('time_zone')
     feedback = State('feedback')
     send_phone_number = State('send_phone_number')
     send_code = State('send_code')
@@ -78,7 +81,9 @@ class UserState(StatesGroup):
     relogin_with_password = State('relogin_with_password')
     status_user = State('status_user')
     answering_machine = State('answering_machine')
-    answering_machine_edit = State('answering_machine_edit')
+    answering_machine_edit_text = State('answering_machine_edit_text')
+    answering_machine_edit_timetable = State('answering_machine_edit_timetable')
+    answering_machine_edit_time = State('answering_machine_edit_time')
     avatar = State('avatar')
 
 
@@ -285,6 +290,25 @@ async def _version(message: Message):
                          parse_mode=html, link_preview_options=preview_options(version))
 
 
+@dp.message(Command('friends'))
+@security()
+async def _friends(message: Message):
+    if await new_message(message): return
+    if not await db.fetch_one(f"SELECT true FROM accounts WHERE account_id={message.chat.id}", one_data=True):
+        return await message.answer("Вы не подключили бота, у вас еще нет реферальной ссылки!")
+    url = f"tg://resolve?domain={MaksogramBot.username}&start={referal_link(message.chat.id)}"
+    await message.answer(
+        "<b>Реферальная программа\n</b>"
+        "Приглашайте своих знакомых и получайте в подарок месяц подписки за каждого друга. "
+        "Пригласить друга можно, отправив сообщение 👇", parse_mode=html)
+    markup = IMarkup(inline_keyboard=[[IButton(text="Попробовать бесплатно", url=url)]])
+    await message.answer_photo(
+        FSInputFile(resources_path("logo.jpg")),
+        f"Привет! Я хочу тебе посоветовать отличного <a href='{url}'>бота</a>. "
+        "Он сохранит все твои сообщения и подскажет, когда кто-то их удалит, изменит, прочитает или поставит реакцию. "
+        "Также в нем есть множество других полезных функций", parse_mode=html, reply_markup=markup, disable_web_page_preview=True)
+
+
 @dp.message(CommandStart())
 @security('state')
 async def _start(message: Message, state: FSMContext):
@@ -292,9 +316,9 @@ async def _start(message: Message, state: FSMContext):
     await state.clear()
     service_message = await message.answer("...", reply_markup=ReplyKeyboardRemove())
     if await db.fetch_one(f"SELECT true FROM accounts WHERE account_id={message.chat.id}", one_data=True):  # Зарегистрирован(а)
-        markup = IMarkup(inline_keyboard=[[IButton(text="⚙️ Меню и настройки", callback_data="settings")]])
+        markup = IMarkup(inline_keyboard=[[IButton(text="⚙️ Меню и настройки", callback_data="menu")]])
     else:
-        markup = IMarkup(inline_keyboard=[[IButton(text="🚀 Запустить бота", callback_data="settings")]])
+        markup = IMarkup(inline_keyboard=[[IButton(text="🚀 Запустить бота", callback_data="menu")]])
     await message.answer(f"Привет, {escape(await username_acquaintance(message, 'first_name'))} 👋\n"
                          f"<a href='{SITE}'>Обзор всех функций</a> 👇",
                          parse_mode=html, reply_markup=markup, link_preview_options=preview_options())
@@ -333,9 +357,44 @@ async def _help_button(callback_query: CallbackQuery):
 
 
 async def help(message: Message):
-    await message.answer("/settings - настройки (меню)\n"
+    await message.answer("/menu - меню функций\n"
+                         "/settings - настройки\n"
                          "/feedback - оставить отзыв или предложение\n"
                          "/friends - реферальная программа\n", parse_mode=html)
+
+
+@dp.message(Command('menu'))
+@security()
+async def _menu(message: Message):
+    if await new_message(message): return
+    await message.answer(**await menu(message.chat.id))
+
+
+@dp.callback_query(F.data == "menu")
+@security()
+async def _menu_button(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    await callback_query.message.edit_text(**await menu(callback_query.message.chat.id))
+
+
+async def menu(account_id: int) -> dict[str, Any]:
+    status = await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={account_id}", one_data=True)  # Вкл/выкл Maksogram
+    if status is None:
+        markup = IMarkup(inline_keyboard=[[IButton(text="🟢 Включить Maksogram", callback_data="registration")],
+                                          [IButton(text="ℹ️ Узнать все возможности", url=SITE)]])
+    elif status is False:
+        markup = IMarkup(inline_keyboard=[[IButton(text="🟢 Включить Maksogram", callback_data="on")],
+                                          [IButton(text="⚙️ Настройки", callback_data="settings")],
+                                          [IButton(text="ℹ️ Памятка по функциям", url=SITE)]])
+    else:
+        markup = IMarkup(inline_keyboard=[[IButton(text="🔴 Выключить Maksogram", callback_data="off")],
+                                          [IButton(text="📸 Новая аватарка", callback_data="avatars"),
+                                           IButton(text="🤖 Автоответчик", callback_data="answering_machine")],
+                                          [IButton(text="🌐 Друг в сети", callback_data="status_users"),
+                                           IButton(text="💬 Maksogram в чате", callback_data="modules")],
+                                          [IButton(text="⚙️ Настройки", callback_data="settings")],
+                                          [IButton(text="ℹ️ Памятка по функциям", url=SITE)]])
+    return {"text": "⚙️ Maksogram — меню ⚙️", "reply_markup": markup}
 
 
 @dp.message(Command('settings'))
@@ -346,46 +405,46 @@ async def _settings(message: Message):
 
 
 @dp.callback_query(F.data == "settings")
+@security()
 async def _settings_button(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
-    await callback_query.message.edit_text(**await settings(callback_query.message.chat.id))
+    await callback_query.message.edit_text(**await settings(callback_query.from_user.id))
 
 
 async def settings(account_id: int) -> dict[str, Any]:
-    status = await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={account_id}", one_data=True)  # Вкл/выкл Maksogram
-    if status is None:
-        markup = IMarkup(inline_keyboard=[[IButton(text="🟢 Включить Maksogram", callback_data="registration")],
-                                          [IButton(text="ℹ️ Узнать все возможности", url=SITE)]])
-    elif status is False:
-        markup = IMarkup(inline_keyboard=[[IButton(text="🟢 Включить Maksogram", callback_data="on")],
-                                          [IButton(text="ℹ️ Памятка по функциям", url=SITE)]])
-    else:
-        markup = IMarkup(inline_keyboard=[[IButton(text="🔴 Выключить Maksogram", callback_data="off")],
-                                          [IButton(text="🌐 Друг в сети", callback_data="status_users"),
-                                           IButton(text="🤖 Автоответчик", callback_data="answering_machine")],
-                                          [IButton(text="📸 Новая аватарка", callback_data="avatars")],
-                                          [IButton(text="💬 Maksogram в чате", callback_data="modules")],
-                                          [IButton(text="ℹ️ Памятка по функциям", url=SITE)]])
-    return {"text": "⚙️ Maksogram — настройки ⚙️", "reply_markup": markup}
+    account_settings = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={account_id}")
+    time_zone = f"+{account_settings['time_zone']}" if account_settings['time_zone'] >= 0 else account_settings['time_zone']
+    reply_markup = IMarkup(inline_keyboard=[[IButton(text="🕰 Часовой пояс", callback_data="time_zone")],
+                                            [IButton(text="◀️  Назад", callback_data="menu")]])
+    return {"text": f"⚙️ Общие настройки Maksogram\nЧасовой пояс: {time_zone}:00", "reply_markup": reply_markup}
 
 
-@dp.message(Command('friends'))
-@security()
-async def _friends(message: Message):
+@dp.callback_query(F.data == "time_zone")
+@security('state')
+async def _time_zone_start(callback_query: CallbackQuery, state: FSMContext):
+    if await new_callback_query(callback_query): return
+    await state.set_state(UserState.time_zone)
+    button = KeyboardButton(text="Выбрать часовой пояс", web_app=WebAppInfo(url=f"{Data.web_app}/time_zone"))
+    back_button = KeyboardButton(text="Отмена")
+    message_id = (await callback_query.message.answer("Нажмите на кнопку, чтобы выбрать часовой пояс",
+                                                      reply_markup=ReplyKeyboardMarkup(keyboard=[[button], [back_button]],
+                                                                                       resize_keyboard=True))).message_id
+    await state.update_data(message_id=message_id)
+    await callback_query.message.delete()
+
+
+@dp.message(UserState.time_zone)
+@security('state')
+async def _time_zone(message: Message, state: FSMContext):
     if await new_message(message): return
-    if not await db.fetch_one(f"SELECT true FROM accounts WHERE account_id={message.chat.id}", one_data=True):
-        return await message.answer("Вы не подключили бота, у вас еще нет реферальной ссылки!")
-    url = f"tg://resolve?domain={MaksogramBot.username}&start={referal_link(message.chat.id)}"
-    await message.answer(
-        "<b>Реферальная программа\n</b>"
-        "Приглашайте своих знакомых и получайте в подарок месяц подписки за каждого друга. "
-        "Пригласить друга можно, отправив сообщение 👇", parse_mode=html)
-    markup = IMarkup(inline_keyboard=[[IButton(text="Попробовать бесплатно", url=url)]])
-    await message.answer_photo(
-        FSInputFile(resources_path("logo.jpg")),
-        f"Привет! Я хочу тебе посоветовать отличного <a href='{url}'>бота</a>. "
-        "Он сохранит все твои сообщения и подскажет, когда кто-то их удалит, изменит, прочитает или поставит реакцию. "
-        "Также в нем есть множество других полезных функций", parse_mode=html, reply_markup=markup, disable_web_page_preview=True)
+    message_id = (await state.get_data())['message_id']
+    await state.clear()
+    account_id = message.chat.id
+    if message.content_type == "web_app_data":
+        time_zone = int(message.web_app_data.data)
+        await db.execute(f"UPDATE settings SET time_zone={time_zone} WHERE account_id={account_id}")
+    await message.answer(**await settings(account_id))
+    await bot.delete_messages(message.chat.id, [message_id, message.message_id])
 
 
 @dp.callback_query(F.data == "modules")
@@ -399,7 +458,7 @@ def modules_menu() -> dict[str, Any]:
     markup = IMarkup(inline_keyboard=[[IButton(text="🔢 Калькулятор", callback_data="calculator")],
                                       [IButton(text="🔗 Генератор QR-кодов", callback_data="qrcode")],
                                       [IButton(text="🗣 Расшифровка ГС", callback_data="audio_transcription")],
-                                      [IButton(text="◀️  Назад", callback_data="settings")]])
+                                      [IButton(text="◀️  Назад", callback_data="menu")]])
     return {"text": "💬 <b>Maksogram в чате</b>\nФункции, которые работают прямо из любого чата, не нужно вызывать меня",
             "reply_markup": markup, "parse_mode": html}
 
@@ -515,7 +574,7 @@ async def avatars_menu(account_id: int) -> dict[str, Any]:
     for user in users:
         buttons.append([IButton(text=f"📸 {user['name']}", callback_data=f"avatar_menu{user['user_id']}")])
     buttons.append([IButton(text="➕ Добавить пользователя", callback_data="new_avatar")])
-    buttons.append([IButton(text="◀️  Назад", callback_data="settings")])
+    buttons.append([IButton(text="◀️  Назад", callback_data="menu")])
     return {"text": "📸 <b>Новая аватарка</b>\nКогда кто-то из выбранных пользователей изменит или добавит аватарку, я сообщу вам",
             "parse_mode": html, "reply_markup": IMarkup(inline_keyboard=buttons)}
 
@@ -599,7 +658,7 @@ async def status_users_menu(account_id: int) -> dict[str, Any]:
     for user in users:
         buttons.append([IButton(text=f"🌐 {user['name']}", callback_data=f"status_user_menu{user['user_id']}")])
     buttons.append([IButton(text="➕ Добавить нового пользователя", callback_data="new_status_user")])
-    buttons.append([IButton(text="◀️  Назад", callback_data="settings")])
+    buttons.append([IButton(text="◀️  Назад", callback_data="menu")])
     return {"text": "🌐 <b>Друг в сети</b>\nЯ уведомлю вас, если пользователь будет онлайн/офлайн. Не работает, если собеседник "
                     "скрыл время последнего захода...", "reply_markup": IMarkup(inline_keyboard=buttons), "parse_mode": html}
 
@@ -711,17 +770,29 @@ async def _answering_machine(callback_query: CallbackQuery):
 
 async def answering_machine_menu(account_id: int) -> dict[str, Any]:
     buttons = []
-    main = await db.fetch_one(f"SELECT answering_machine_main FROM functions WHERE account_id={account_id}", one_data=True)  # Включенный автоответ
-    answers = await db.fetch_all(f"SELECT answer_id, text FROM answering_machine WHERE account_id={account_id}")  # Автоответы
+    answers = await db.fetch_all(f"SELECT answer_id, status, type, start_time, end_time, text FROM answering_machine "
+                                 f"WHERE account_id={account_id}")  # Автоответы
+    enabled_answer = await get_enabled_auto_answer(account_id)
     for answer in answers:
-        text = (str(answer['text'])[:30] + "...") if len(str(answer['text'])) > 30 else str(answer['text'])
-        indicator = "🟢 " if main == int(answer['answer_id']) else ""
+        text = (str(answer['text'])[:28] + "...") if len(str(answer['text'])) > 28 else str(answer['text'])
+        indicator = ""
+        if answer['answer_id'] == enabled_answer:  # Автоответ активен
+            if answer['type'] == 'timetable':  # Автоответ по расписанию
+                indicator = "⏰ "
+            elif answer['type'] == 'ordinary':  # Обычный автоответ
+                indicator = "🟢 "
         buttons.append([IButton(text=f"{indicator}{text}", callback_data=f"answering_machine_menu{answer['answer_id']}")])
     buttons.append([IButton(text="➕ Создать новый ответ", callback_data="new_answering_machine")])
-    buttons.append([IButton(text="◀️  Назад", callback_data="settings")])
+    buttons.append([IButton(text="◀️  Назад", callback_data="menu")])
     markup = IMarkup(inline_keyboard=buttons)
-    return {"text": "🤖 <b>Автоответчик</b>\nЗдесь хранятся все ваши автоматические ответы. Вы можете включить нужный, "
-                    "удалить, изменить или добавить новый", "reply_markup": markup, "parse_mode": html}
+    return {
+        "text": "🤖 <b>Автоответчик</b>\n<blockquote expandable><b>Подробнее об автоответчике</b>\n"
+                "Автоответчик бывает <b>обыкновенным</b> и <b>по расписанию</b>\n\nОбыкновенный автоответ работает при включении\n"
+                "Автоответ по расписанию имеет временные рамки, в течение которых будет работать\n\nОдновременно могут "
+                "работать сразу <b>несколько</b> автоответов по расписанию, но их время работы не должно пересекаться\n\n"
+                "Если включен обыкновенный автоответ и один (несколько) временной, то работать будет "
+                "<b>только обыкновенный</b></blockquote>",
+        "reply_markup": markup, "parse_mode": html}
 
 
 @dp.callback_query(F.data == "new_answering_machine")
@@ -755,7 +826,8 @@ async def _new_answering_machine(message: Message, state: FSMContext):
         answer_id = int(time.time()) - 1737828000  # 1737828000 - 2025/01/26 00:00 (день активного обновления автоответчика)
         entities = json_encode([entity.model_dump() for entity in message.entities or []])
         # Новый автоответ
-        await db.execute(f"INSERT INTO answering_machine VALUES ({message.chat.id}, {answer_id}, $1, '{entities}')", message.text)
+        await db.execute(f"INSERT INTO answering_machine VALUES ({message.chat.id}, {answer_id}, "
+                         f"false, 'ordinary', NULL, NULL, $1, '{entities}')", message.text)
         await message.answer(**await auto_answer_menu(message.chat.id, answer_id))
     else:
         await message.answer(**await answering_machine_menu(message.chat.id))
@@ -772,29 +844,36 @@ async def _answering_machine_menu(callback_query: CallbackQuery):
 
 async def auto_answer_menu(account_id: int, answer_id: int):
     # Включенный автоответ и нужный автоответ
-    main = await db.fetch_one(f"SELECT answering_machine_main FROM functions WHERE account_id={account_id}", one_data=True)
-    answer = await db.fetch_one(f"SELECT text, entities FROM answering_machine WHERE account_id={account_id} AND answer_id={answer_id}")
+    answer = await db.fetch_one(f"SELECT status, type, start_time, end_time, text, entities FROM answering_machine "
+                                f"WHERE account_id={account_id} AND answer_id={answer_id}")
     if answer is None:  # Автоответ не найден
         return await answering_machine_menu(account_id)
-    status = main == int(answer_id)
-    status_button = IButton(text="🔴 Выключить автоответ", callback_data=f"answering_machine_off_{answer_id}") if status else \
-        IButton(text="🟢 Включить автоответ", callback_data=f"answering_machine_on_{answer_id}")
+    time_button = IButton(text="⏰ Расписание", callback_data=f"answering_machine_time{answer_id}")
+    is_timetable = answer['type'] == 'timetable'
+    if is_timetable:
+        time_zone = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={account_id}", one_data=True)
+        hours_start_time = str((answer['start_time'].hour + time_zone) % 24).rjust(2, "0")
+        minutes_start_time = str(answer['start_time'].minute).rjust(2, "0")
+        hours_end_time = str((answer['end_time'].hour + time_zone) % 24).rjust(2, "0")
+        minutes_end_time = str(answer['end_time'].minute).rjust(2, "0")
+        timetable = f"{hours_start_time}:{minutes_start_time} — {hours_end_time}:{minutes_end_time}"
+        time_button = IButton(text=f"⏰ {timetable}", callback_data=f"answering_machine_time{answer_id}")
+    status_button = IButton(text="🔴 Выключить автоответ", callback_data=f"answering_machine_off_{answer_id}") if answer['status'] \
+        else IButton(text="🟢 Включить автоответ", callback_data=f"answering_machine_on_{answer_id}")
     markup = IMarkup(inline_keyboard=[[status_button],
-                                      [IButton(text="✏️ Изменить текст", callback_data=f"answering_machine_edit{answer_id}")],
-                                      [IButton(text="🚫 Удалить автоответ", callback_data=f"answering_machine_del{answer_id}")],
+                                      [IButton(text="✏️ Текст", callback_data=f"answering_machine_edit_text{answer_id}"),
+                                       time_button],
+                                      [IButton(text="🚫 Удалить автоответ", callback_data=f"answering_machine_del_answer{answer_id}")],
                                       [IButton(text="◀️  Назад", callback_data="answering_machine")]])
     return {"text": str(answer['text']), "entities": answer['entities'], "reply_markup": markup}
 
 
-@dp.callback_query(F.data.startswith("answering_machine_del"))
+@dp.callback_query(F.data.startswith("answering_machine_del_answer"))
 @security()
-async def _answering_machine_del(callback_query: CallbackQuery):
+async def _answering_machine_del_answer(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
-    answer_id = int(callback_query.data.replace("answering_machine_del", ""))
+    answer_id = int(callback_query.data.replace("answering_machine_del_answer", ""))
     account_id = callback_query.from_user.id
-    if await db.fetch_one(f"SELECT answering_machine_main FROM functions WHERE account_id={account_id}", one_data=True) == answer_id:
-        # Если удаляемый автоответ являлся включенным, то выключить его
-        await db.execute(f"UPDATE functions SET answering_machine_main=0 WHERE account_id={account_id}")
     await db.execute(f"DELETE FROM answering_machine WHERE account_id={account_id} AND answer_id={answer_id}")  # Удаление автоответа
     await callback_query.message.edit_text(**await answering_machine_menu(callback_query.message.chat.id))
 
@@ -805,21 +884,38 @@ async def _answering_machine_switch(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     command, answer_id = callback_query.data.replace("answering_machine_", "").split("_")
     account_id = callback_query.from_user.id
-    answer = await db.fetch_one(f"SELECT true FROM answering_machine WHERE account_id={account_id} AND answer_id={answer_id}", one_data=True)
+    answer = await db.fetch_one(f"SELECT type, start_time, end_time FROM answering_machine "
+                                f"WHERE account_id={account_id} AND answer_id={answer_id}")
     if answer is None:  # Автоответ не найден
         await callback_query.answer("Автоответ был удалено ранее!", True)
         return await callback_query.message.edit_text(**await answering_machine_menu(account_id))
-    # Включение / выключение автоответа
-    await db.execute(f"UPDATE functions SET answering_machine_main={0 if command == 'off' else answer_id} WHERE account_id={account_id}")
+    status = "true" if command == "on" else "false"
+    if answer['type'] == "ordinary" and command == "on":  # Обыкновенный автоответ
+        # Выключение включенного обыкновенного автоответа (если есть)
+        await db.execute(f"UPDATE answering_machine SET status=false WHERE account_id={account_id} AND type='ordinary'")
+        await callback_query.answer("Включенный ранее автоответ был выключен")
+    elif answer['type'] == "timetable" and command == "on":  # Автоответ по расписанию
+        # Автоответы по расписанию не должны пересекаться во времени
+        for ans in await db.fetch_all(f"SELECT start_time, end_time FROM answering_machine WHERE account_id={account_id} "
+                                      f"AND type='timetable' AND status=true AND answer_id!={answer_id}"):
+            if answer['start_time'] < answer['end_time'] < ans['start_time'] < ans['end_time'] or \
+                    ans['start_time'] < ans['end_time'] < answer['start_time'] < answer['end_time'] or \
+                    answer['end_time'] < ans['start_time'] < ans['end_time'] < answer['start_time'] or \
+                    ans['end_time'] < answer['start_time'] < answer['end_time'] < answer['start_time']:
+                pass  # Все случаи, когда автоответы по времени не пересекаются
+            else:
+                return await callback_query.answer("Расписание данного автоответа пересекается с расписанием уже включенного", True)
+    await db.execute(f"UPDATE answering_machine SET status={status} WHERE account_id={account_id} AND answer_id={answer_id}")
+    await db.execute(f"UPDATE functions SET answering_machine_sending='[]' WHERE account_id={account_id}")
     await callback_query.message.edit_text(**await auto_answer_menu(account_id, answer_id))
 
 
-@dp.callback_query(F.data.startswith("answering_machine_edit"))
+@dp.callback_query(F.data.startswith("answering_machine_edit_text"))
 @security('state')
-async def _answering_machine_edit_start(callback_query: CallbackQuery, state: FSMContext):
+async def _answering_machine_edit_text_start(callback_query: CallbackQuery, state: FSMContext):
     if await new_callback_query(callback_query): return
-    answer_id = int(callback_query.data.replace("answering_machine_edit", ""))
-    await state.set_state(UserState.answering_machine_edit)
+    answer_id = int(callback_query.data.replace("answering_machine_edit_text", ""))
+    await state.set_state(UserState.answering_machine_edit_text)
     markup = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Отмена")]], resize_keyboard=True)
     message_id = (await callback_query.message.answer("Напишите <b>текст</b>, который я отправлю в случае необходимости",
                                                       parse_mode=html, reply_markup=markup)).message_id
@@ -827,9 +923,9 @@ async def _answering_machine_edit_start(callback_query: CallbackQuery, state: FS
     await callback_query.message.delete()
 
 
-@dp.message(UserState.answering_machine_edit)
+@dp.message(UserState.answering_machine_edit_text)
 @security('state')
-async def _answering_machine_edit(message: Message, state: FSMContext):
+async def _answering_machine_edit_text(message: Message, state: FSMContext):
     if await new_message(message): return
     data = await state.get_data()
     message_id = data['message_id']
@@ -848,10 +944,162 @@ async def _answering_machine_edit(message: Message, state: FSMContext):
         entities = json_encode([entity.model_dump() for entity in message.entities or []])
         await db.execute(f"UPDATE answering_machine SET text=$1, entities='{entities}' "
                          f"WHERE account_id={account_id} AND answer_id={answer_id}", message.text)  # Изменение автоответа
-        await message.answer(**await auto_answer_menu(message.chat.id, answer_id))
+        await message.answer(**await auto_answer_menu(account_id, answer_id))
     else:
-        await message.answer(**await auto_answer_menu(message.chat.id, answer_id))
+        await message.answer(**await auto_answer_menu(account_id, answer_id))
     await bot.delete_messages(chat_id=message.chat.id, message_ids=[message_id, message.message_id])
+
+
+@dp.callback_query(F.data.startswith("answering_machine_time"))
+@security()
+async def _answering_machine_time(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    answer_id = int(callback_query.data.replace("answering_machine_time", ""))
+    await callback_query.message.edit_text(**await time_auto_answer_menu(callback_query.from_user.id, answer_id))
+
+
+async def time_auto_answer_menu(account_id: int, answer_id: int) -> dict[str, Any]:
+    answer = await db.fetch_one(f"SELECT type, start_time, end_time FROM answering_machine "
+                                f"WHERE account_id={account_id} AND answer_id={answer_id}")
+    if answer['type'] == "ordinary":  # Обыкновенный автоответ — расписание отсутствует
+        reply_markup = IMarkup(inline_keyboard=
+                               [[IButton(text="⏰ Выбрать время", callback_data=f"answering_machine_edit_timetable{answer_id}")],
+                                [IButton(text="◀️  Назад", callback_data=f"answering_machine_menu{answer_id}")]])
+        return {"text": f"Вы можете добавить расписание, чтобы я отвечал только в нужное время",
+                "reply_markup": reply_markup, "parse_mode": html}
+    elif answer['type'] == "timetable":  # Автоответ с расписанием
+        reply_markup = IMarkup(inline_keyboard=[[IButton(text="➡️ Начало", callback_data=f"answering_machine_edit_start_time_{answer_id}"),
+                                                IButton(text="Окончание ⬅️", callback_data=f"answering_machine_edit_end_time_{answer_id}")],
+                                                [IButton(text="❌ Удалить расписание", callback_data=f"answering_machine_del_time{answer_id}")],
+                                                [IButton(text="◀️  Назад", callback_data=f"answering_machine_menu{answer_id}")]])
+        time_zone = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={account_id}", one_data=True)
+        hours_start_time = str((answer['start_time'].hour + time_zone) % 24).rjust(2, "0")
+        minutes_start_time = str(answer['start_time'].minute).rjust(2, "0")
+        hours_end_time = str((answer['end_time'].hour + time_zone) % 24).rjust(2, "0")
+        minutes_end_time = str(answer['end_time'].minute).rjust(2, "0")
+        return {"text": f"Вы можете изменить или удалить расписание автоответа\n"
+                        f"{hours_start_time}:{minutes_start_time} — {hours_end_time}:{minutes_end_time}",
+                "reply_markup": reply_markup, "parse_mode": html}
+
+
+@dp.callback_query(F.data.startswith("answering_machine_edit_timetable"))
+@security('state')
+async def _answering_machine_edit_timetable_start(callback_query: CallbackQuery, state: FSMContext):
+    if await new_callback_query(callback_query): return
+    answer_id = int(callback_query.data.replace("answering_machine_edit_timetable", ""))
+    await state.set_state(UserState.answering_machine_edit_timetable)
+    markup = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Отмена")]], resize_keyboard=True)
+    message_id = (await callback_query.message.answer("Напишите <b>время</b>, в течение которого будет работать автоответ\n"
+                                                      "Например: 22:00 - 6:00", parse_mode=html, reply_markup=markup)).message_id
+    await state.update_data(message_id=message_id, answer_id=answer_id)
+    await callback_query.message.delete()
+
+
+@dp.message(UserState.answering_machine_edit_timetable)
+@security('state')
+async def _answering_machine_edit_timetable(message: Message, state: FSMContext):
+    if await new_message(message): return
+    data = await state.get_data()
+    answer_id = data['answer_id']
+    message_id = data['message_id']
+    await state.clear()
+    account_id = message.chat.id
+    if not await db.fetch_one(f"SELECT true FROM answering_machine WHERE account_id={account_id} AND answer_id={answer_id}"):
+        await message.answer(**await answering_machine_menu(account_id))  # Автоответ не найден
+    elif message.content_type != "text":
+        await message.answer("<b>Ваше сообщение не является текстом</b>", parse_mode=html,
+                             reply_markup=(await time_auto_answer_menu(message.chat.id, answer_id))['reply_markup'])
+    elif message.text != "Отмена":
+        text = message.text.replace(" ", "")
+        if not re.fullmatch(r'\d{1,2}:\d{1,2}-\d{1,2}:\d{1,2}', text):  # Некорректный формат
+            await message.answer("<b>Некорректный формат расписания</b>", parse_mode=html,
+                                 reply_markup=(await time_auto_answer_menu(message.chat.id, answer_id))['reply_markup'])
+        else:
+            time_zone = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={account_id}", one_data=True)
+            start_time, end_time = text.split("-")
+            hours_start_time, minutes_start_time = map(int, start_time.split(":"))
+            hours_start_time = (hours_start_time - time_zone) % 24
+            hours_end_time, minutes_end_time = map(int, end_time.split(":"))
+            hours_end_time = (hours_end_time - time_zone) % 24
+            if (hours_start_time, minutes_start_time) == (hours_end_time, minutes_end_time):  # Одинаковые start_time и end_time
+                await message.answer("<b>Некорректный формат расписания</b>", parse_mode=html,
+                                     reply_markup=(await time_auto_answer_menu(message.chat.id, answer_id))['reply_markup'])
+            else:
+                await db.execute(f"UPDATE answering_machine SET status=false, type='timetable', "
+                                 f"start_time='{hours_start_time}:{minutes_start_time}', "
+                                 f"end_time='{hours_end_time}:{minutes_end_time}' "
+                                 f"WHERE account_id={account_id} AND answer_id={answer_id}")
+                await message.answer(**await time_auto_answer_menu(account_id, answer_id))
+    else:
+        await message.answer(**await time_auto_answer_menu(message.chat.id, answer_id))
+    await bot.delete_messages(chat_id=message.chat.id, message_ids=[message_id, message.message_id])
+
+
+@dp.callback_query(F.data.startswith("answering_machine_edit_start_time").__or__(F.data.startswith("answering_machine_edit_end_time")))
+@security('state')
+async def _answering_machine_edit_time_start(callback_query: CallbackQuery, state: FSMContext):
+    if await new_callback_query(callback_query): return
+    type_time = "_".join(callback_query.data.split("_")[3:5])  # start_time или end_time
+    answer_id = int(callback_query.data.split("_")[-1])
+    await state.set_state(UserState.answering_machine_edit_time)
+    markup = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Отмена")]], resize_keyboard=True)
+    if type_time == "start_time":
+        text = "Напишите <b>начало</b> работы автоответа\nНапример: 22:00"
+    else:
+        text = "Напишите <b>окончание</b> работы автоответа\nНапример: 06:00"
+    message_id = (await callback_query.message.answer(text, parse_mode=html, reply_markup=markup)).message_id
+    await state.update_data(message_id=message_id, answer_id=answer_id, type_time=type_time)
+    await callback_query.message.delete()
+
+
+@dp.message(UserState.answering_machine_edit_time)
+@security('state')
+async def _answering_machine_edit_time(message: Message, state: FSMContext):
+    if await new_message(message): return
+    data = await state.get_data()
+    answer_id = data['answer_id']
+    message_id = data['message_id']
+    type_time = data['type_time']
+    await state.clear()
+    account_id = message.chat.id
+    if not await db.fetch_one(f"SELECT true FROM answering_machine WHERE account_id={account_id} AND answer_id={answer_id}"):
+        await message.answer(**await answering_machine_menu(account_id))  # Автоответ не найден
+    elif message.content_type != "text":
+        await message.answer("<b>Ваше сообщение не является текстом</b>", parse_mode=html,
+                             reply_markup=(await time_auto_answer_menu(message.chat.id, answer_id))['reply_markup'])
+    elif message.text != "Отмена":
+        text = message.text.replace(" ", "")
+        if not re.fullmatch(r'\d{1,2}:\d{1,2}', text):  # Некорректный формат
+            await message.answer("<b>Некорректный формат времени</b>", parse_mode=html,
+                                 reply_markup=(await time_auto_answer_menu(message.chat.id, answer_id))['reply_markup'])
+        else:
+            other_type_time = "start_time" if type_time == "end_time" else "end_time"
+            other_time = await db.fetch_one(f"SELECT {other_type_time} FROM answering_machine "
+                                            f"WHERE account_id={account_id} AND answer_id={answer_id}", one_data=True)
+            time_zone = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={account_id}", one_data=True)
+            hours, minutes = map(int, text.split(":"))
+            hours = (hours - time_zone) % 24
+            if (hours, minutes) == tuple(map(int, other_time.strftime("%H:%M").split(":"))):
+                await message.answer("<b>Начало и окончание расписания совпадают</b>", parse_mode=html,
+                                     reply_markup=(await time_auto_answer_menu(message.chat.id, answer_id))['reply_markup'])
+            else:
+                await db.execute(f"UPDATE answering_machine SET status=false, {type_time}='{hours}:{minutes}' "
+                                 f"WHERE account_id={account_id} AND answer_id={answer_id}")
+                await message.answer(**await time_auto_answer_menu(account_id, answer_id))
+    else:
+        await message.answer(**await time_auto_answer_menu(message.chat.id, answer_id))
+    await bot.delete_messages(chat_id=message.chat.id, message_ids=[message_id, message.message_id])
+
+
+@dp.callback_query(F.data.startswith("answering_machine_del_time"))
+@security()
+async def _answering_machine_del_time(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    answer_id = int(callback_query.data.replace("answering_machine_del_time", ""))
+    account_id = callback_query.from_user.id
+    await db.execute(f"UPDATE answering_machine SET status=false, type='ordinary', start_time=NULL, end_time=NULL "
+                     f"WHERE account_id={account_id} AND answer_id={answer_id}")
+    await callback_query.message.edit_text(**await auto_answer_menu(account_id, answer_id))
 
 
 @dp.callback_query(F.data == "registration")
@@ -873,7 +1121,7 @@ async def _off(callback_query: CallbackQuery):
     account_id = callback_query.from_user.id
     phone_number = await db.fetch_one(f"SELECT phone_number FROM accounts WHERE account_id={account_id}", one_data=True)
     await account_off(account_id, f"+{phone_number}")
-    await callback_query.message.edit_text(**await settings(callback_query.message.chat.id))
+    await callback_query.message.edit_text(**await menu(callback_query.message.chat.id))
 
 
 @dp.callback_query(F.data == "on")
@@ -905,7 +1153,7 @@ async def _on(callback_query: CallbackQuery, state: FSMContext):
             await callback_query.message.delete()
             await telegram_clients[account_id].send_code_request(phone_number)
             return await bot.send_message(OWNER, "Повторный вход...")
-    await callback_query.message.edit_text(**await settings(callback_query.message.chat.id))
+    await callback_query.message.edit_text(**await menu(callback_query.message.chat.id))
 
 
 @dp.message(UserState.relogin)
@@ -994,8 +1242,8 @@ async def _contact(message: Message, state: FSMContext):
                                            [KeyboardButton(text="Отмена")]], resize_keyboard=True)
     await message.answer("Осталось отправить код для входа (<b>только кнопкой!</b>). Напоминаю, что мы не собираем "
                          f"никаких данных, а по любым вопросам можете обращаться в @{support}", reply_markup=markup, parse_mode=html)
-    for i in range(5):
-        await telegram_client.connect()
+    await telegram_client.connect()
+    for i in range(10):
         if telegram_client.is_connected():
             await telegram_client.send_code_request(phone_number)
             break
@@ -1056,13 +1304,14 @@ async def _login(message: Message, state: FSMContext):
                                  next_payment > CURRENT_TIMESTAMP THEN 
                                  next_payment ELSE CURRENT_TIMESTAMP END) + INTERVAL '30 days'), 
                                  is_paid=true WHERE account_id={referal}""")  # перемещение даты оплаты на 30 дней вперед
+                await db.execute(f"DELETE FROM referals WHERE referal_id={message.chat.id}")
                 await bot.send_message(referal, "По вашей реферальной ссылке зарегистрировался пользователь. "
-                                                "Вы получили месяц в подарок!")
+                                                "Вы получили месяц подписки в подарок!")
             await loading.delete()
             await message.answer("Maksogram запущен 🚀\nВ канале \"Мои сообщения\" будут храниться все ваши сообщения, в "
                                  "комментариях к постам будет информация о изменении и удалении\n"
                                  "Пробная подписка заканчивается через неделю")
-            await message.answer("Пробная подписка заканчивается через неделю, у вас есть время все опробовать")
+            await message.answer(**await menu(message.chat.id))
             await bot.send_message(OWNER, "Создание чатов завершено успешно!")
 
 
@@ -1108,13 +1357,14 @@ async def _login_with_password(message: Message, state: FSMContext):
                                  next_payment > CURRENT_TIMESTAMP THEN 
                                  next_payment ELSE CURRENT_TIMESTAMP END) + INTERVAL '30 days'), 
                                  is_paid=true WHERE account_id={referal}""")  # перемещение даты оплаты на 30 дней вперед
+                await db.execute(f"DELETE FROM referals WHERE referal_id={message.chat.id}")
                 await bot.send_message(referal, "По вашей реферальной ссылке зарегистрировался пользователь. "
-                                                "Вы получили месяц в подарок!")
+                                                "Вы получили месяц подписки в подарок!")
             await loading.delete()
             await message.answer("Maksogram запущен 🚀\nВ канале \"Мои сообщения\" будут храниться все ваши сообщения, в "
                                  "комментариях к постам будет информация о изменении и удалении\n"
                                  "Пробная подписка заканчивается через неделю")
-            await message.answer(**await settings(message.chat.id))
+            await message.answer(**await menu(message.chat.id))
             await bot.send_message(OWNER, "Создание чатов завершено успешно!")
 
 
@@ -1137,10 +1387,10 @@ async def start_program(account_id: int, username: str, phone_number: int, teleg
     name = ('@' + username) if username else account_id
     next_payment = time_now() + timedelta(days=7)
     await db.execute(f"INSERT INTO accounts VALUES ({account_id}, '{name}', {phone_number}, {request['my_messages']}, {request['message_changes']})")
-    await db.execute(f"INSERT INTO settings VALUES ({account_id}, '[]', '[]', true)")
+    await db.execute(f"INSERT INTO settings VALUES ({account_id}, '[]', '[]', true, 3)")
     await db.execute(f"INSERT INTO payment VALUES ({account_id}, 'user', {Variables.fee}, '{next_payment}', true)")
-    await db.execute(f"INSERT INTO functions VALUES ({account_id}, 0, '[]')")
-    await db.execute(f"INSERT INTO modules VALUES ({account_id}, false, false)")
+    await db.execute(f"INSERT INTO functions VALUES ({account_id}, '[]')")
+    await db.execute(f"INSERT INTO modules VALUES ({account_id}, false, false, false)")
     telegram_clients[account_id] = telegram_client
     asyncio.get_running_loop().create_task(program.Program(telegram_client, account_id, []).run_until_disconnected())
 
@@ -1189,18 +1439,7 @@ async def new_message(message: Message, /, forward: bool = True) -> bool:
     if message.chat.id == OWNER:
         return False
 
-    if forward and message.content_type not in ("text", "web_app_data", "contact", "users_shared"):  # Если сообщение не является текстом, ответом mini app или контактом
-        await bot.send_message(
-            OWNER,
-            text=f"ID: {id}\n"
-                 f"{acquaintance}" +
-                 (f"USERNAME: @{username}\n" if username else "") +
-                 f"Имя: {escape(first_name)}\n" +
-                 (f"Фамилия: {escape(last_name)}\n" if last_name else "") +
-                 f"Время: {date}",
-            parse_mode=html)
-        await message.forward(OWNER)
-    elif forward and (message.entities and message.entities[0].type != 'bot_command'):  # Сообщение с форматированием
+    if forward and (message.entities and message.entities[0].type != 'bot_command'):  # Сообщение с форматированием
         await bot.send_message(
             OWNER,
             text=f"ID: {id}\n"
