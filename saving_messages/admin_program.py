@@ -448,7 +448,7 @@ class Program:
             if time_last_notification.date() == time.date() and morning[0] <= time_last_notification.hour < morning[1]:
                 return  # Сегодня уже отправлено
             if await db.fetch_one(f"SELECT morning_weather FROM modules WHERE account_id={self.id}", one_data=True):  # Погода по утрам
-                await MaksogramBot.send_message(self.id, f"Доброе утро!\n\n{await weather(self.id)}",
+                await MaksogramBot.send_message(self.id, f"Доброе утро! Как спалось? 😉\n\n{await weather(self.id)}",
                                                 reply_markup=MaksogramBot.IMarkup(inline_keyboard=[[
                                                     MaksogramBot.IButton(text="🌤 Настройки погоды", callback_data="modules")]]))
             self.time_morning_notification = time_now()
