@@ -425,11 +425,31 @@ async def settings(account_id: int) -> dict[str, Any]:
     account_settings = await db.fetch_one(f"SELECT time_zone, city FROM settings WHERE account_id={account_id}")
     time_zone = f"+{account_settings['time_zone']}" if account_settings['time_zone'] >= 0 else str(account_settings['time_zone'])
     city = account_settings['city']
-    reply_markup = IMarkup(inline_keyboard=[[IButton(text="🕰 Часовой пояс", callback_data="time_zone")],
+    reply_markup = IMarkup(inline_keyboard=[[IButton(text="👁 Профиль", callback_data="profile")],
+                                            [IButton(text="🕰 Часовой пояс", callback_data="time_zone")],
                                             [IButton(text="🌏 Местоположение (город)", callback_data="city")],
                                             [IButton(text="◀️  Назад", callback_data="menu")]])
     return {"text": f"⚙️ Общие настройки Maksogram\nЧасовой пояс: {time_zone}:00\nГород: {city}",
             "reply_markup": reply_markup}
+
+
+@dp.callback_query(F.data == "profile")
+@security()
+async def _profile(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    await callback_query.message.edit_text(**await profile_menu(callback_query.from_user.id))
+
+
+async def profile_menu(account_id: int) -> dict[str, Any]:
+    reply_markup = IMarkup(inline_keyboard=[[IButton(text="◀️  Назад", callback_data="settings")]])
+    account = await db.fetch_one(f"SELECT name, registration_date FROM accounts WHERE account_id={account_id}")
+    subscription = await db.fetch_one(f"SELECT \"user\", fee, next_payment FROM payment WHERE account_id={account_id}")
+    if subscription['user'] == 'admin':
+        subscription['next_payment'] = "конца жизни 😎"
+        subscription['fee'] = "бесплатно"
+    return {"text": f"👁 <b>Профиль</b>\nID: {account_id}\nИмя: {account['name']}\nРегистрация: {account['registration_date']}\n"
+                    f"Подписка до {subscription['next_payment']}\nСтоимость: {subscription['fee']}",
+            "parse_mode": html, "reply_markup": reply_markup}
 
 
 @dp.callback_query(F.data == "city")
@@ -646,7 +666,7 @@ async def _weather_switch(callback_query: CallbackQuery):
 
 @dp.callback_query(F.data.in_(["morning_weather_on", "morning_weather_off"]))
 @security()
-async def _weather_switch(callback_query: CallbackQuery):
+async def _morning_weather_switch(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     command = callback_query.data.split("_")[-1]
     account_id = callback_query.from_user.id
@@ -1485,7 +1505,7 @@ async def start_program(account_id: int, username: str, phone_number: int, teleg
         raise CreateChatsError(request['message'], f"Произошла ошибка {request['error'].__class__.__name__}: {request['error']}")
     name = ('@' + username) if username else account_id
     next_payment = time_now() + timedelta(days=7)
-    await db.execute(f"INSERT INTO accounts VALUES ({account_id}, '{name}', {phone_number}, {request['my_messages']}, {request['message_changes']})")
+    await db.execute(f"INSERT INTO accounts VALUES ({account_id}, '{name}', {phone_number}, {request['my_messages']}, {request['message_changes']}, now())")
     await db.execute(f"INSERT INTO settings VALUES ({account_id}, '[]', '[]', true, 6, 'Омск')")
     await db.execute(f"INSERT INTO payment VALUES ({account_id}, 'user', {Variables.fee}, '{next_payment}', true)")
     await db.execute(f"INSERT INTO functions VALUES ({account_id}, '[]')")
