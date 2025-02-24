@@ -444,6 +444,8 @@ async def profile_menu(account_id: int) -> dict[str, Any]:
     reply_markup = IMarkup(inline_keyboard=[[IButton(text="◀️  Назад", callback_data="settings")]])
     account = await db.fetch_one(f"SELECT name, registration_date FROM accounts WHERE account_id={account_id}")
     subscription = await db.fetch_one(f"SELECT \"user\", fee, next_payment FROM payment WHERE account_id={account_id}")
+    account['registration_date'] = account['registration_date'].strftime("%Y-%m-%d %H:%M")
+    subscription['next_payment'] = subscription['next_payment'].strftime("%Y-%m-%d 20:00")  # Время перезапуска
     if subscription['user'] == 'admin':
         subscription['next_payment'] = "конца жизни 😎"
         subscription['fee'] = "бесплатно"
