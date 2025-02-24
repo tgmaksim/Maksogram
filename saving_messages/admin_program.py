@@ -235,6 +235,7 @@ class Program:
                 else:
                     await MaksogramBot.send_system_message(f"⚠️Ошибка при расшифровке⚠️\n\n{answer.error}")
                     await message.edit("@MaksogramBot в чате\nПроизошла ошибка при расшифровке... Скоро все будет исправлено")
+                await db.execute(f"UPDATE statistics SET audio_transcription=now() WHERE account_id={self.id}")
                 return  # При срабатывании Maksogram в чате сохранение сообщения не происходит
             else:
                 await MaksogramBot.send_message(self.id, "Вы хотели расшифровать гс? Данная функция отключена у вас! "
@@ -258,6 +259,7 @@ class Program:
             if await db.fetch_one(f"SELECT weather FROM modules WHERE account_id={self.id}", one_data=True):
                 request = await weather(self.id)
                 await message.edit(f"@MaksogramBot в чате\n{request}")
+                await db.execute(f"UPDATE statistics SET weather=now() WHERE account_id={self.id}")
                 return  # При срабатывании Maksogram в чате сохранение сообщения не происходит
             else:
                 await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться погодой? Данная функция отключена у вас! "
@@ -490,6 +492,7 @@ class Program:
                 else:
                     await MaksogramBot.send_system_message(f"⚠️Ошибка при расшифровке⚠️\n\n{answer.error}")
                     await message.edit("@MaksogramBot в чате\nПроизошла ошибка при расшифровке... Скоро все будет исправлено")
+                await db.execute(f"UPDATE statistics SET audio_transcription=now() WHERE account_id={self.id}")
             else:
                 await MaksogramBot.send_message(self.id, "Вы хотели расшифровать гс? Данная функция отключена у вас! "
                                                          "Вы можете включить в настройках\n/menu_chat (Maksogram в чате)")
@@ -511,6 +514,7 @@ class Program:
             if await db.fetch_one(f"SELECT weather FROM modules WHERE account_id={self.id}", one_data=True):
                 request = await weather(self.id)
                 await message.edit(f"@MaksogramBot в чате\n{request}")
+                await db.execute(f"UPDATE statistics SET weather=now() WHERE account_id={self.id}")
             else:
                 await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться погодой? Данная функция отключена у вас! "
                                                          "Вы можете включить ее в настройках\n/menu_chat (Maksogram в чате)")
@@ -522,6 +526,7 @@ class Program:
         if not answer: return
         await db.execute(f"UPDATE functions SET answering_machine_sending=answering_machine_sending || '{message.chat_id}' "
                          f"WHERE account_id={self.id}")
+        await db.execute(f"UPDATE statistics SET answering_machine=now() WHERE account_id={self.id}")
         entities = []
         for entity in answer['entities']:
             match entity['type']:

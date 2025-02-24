@@ -1490,6 +1490,7 @@ async def start_program(account_id: int, username: str, phone_number: int, teleg
     await db.execute(f"INSERT INTO payment VALUES ({account_id}, 'user', {Variables.fee}, '{next_payment}', true)")
     await db.execute(f"INSERT INTO functions VALUES ({account_id}, '[]')")
     await db.execute(f"INSERT INTO modules VALUES ({account_id}, false, false, false, false, false)")
+    await db.execute(f"INSERT INTO statistics VALUES ({account_id}, now(), now(), now())")
     telegram_clients[account_id] = telegram_client
     asyncio.get_running_loop().create_task(program.Program(telegram_client, account_id, []).run_until_disconnected())
 
