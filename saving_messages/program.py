@@ -5,6 +5,7 @@ import asyncio
 from modules.calculator import main as calculator
 from modules.qrcode import create as create_qrcode
 from modules.audio_transcription import main as audio_transcription
+from modules.weather import main as weather
 
 from io import BytesIO
 from typing import Union
@@ -17,6 +18,7 @@ from telethon.tl.functions.account import UpdateStatusRequest
 from telethon.tl.functions.messages import GetCustomEmojiDocumentsRequest
 from core import (
     db,
+    morning,
     security,
     time_now,
     Variables,
@@ -82,6 +84,7 @@ class Program:
         self.last_event = LastEvent()
 
         self.status_users: dict[int, bool] = {user: None for user in status_users}  # {id: True} -> id в сети
+        self.time_morning_notification: datetime = time_now()
 
         @client.on(events.NewMessage(func=self.initial_checking_event))
         @security()
@@ -124,7 +127,7 @@ class Program:
                 await self.client(UpdateStatusRequest(offline=True))
 
         @client.on(events.UserUpdate(
-            chats=self.status_users,
+            chats=set(self.status_users),
             func=lambda event: isinstance(event.status, (UserStatusOnline, UserStatusOffline)))
         )
         @security()
@@ -211,7 +214,7 @@ class Program:
                 return  # При срабатывании Maksogram в чате сохранение сообщения не происходит
             else:
                 await MaksogramBot.send_message(self.id, "Вы хотели создать QR-код? Данная функция отключена у вас! "
-                                                         "Вы можете включить в настройках /settings (Maksogram в чате)")
+                                                         "Вы можете включить в настройках\n/menu_chat (Maksogram в чате)")
 
         # Расшифровка голосовых сообщений
         if text and ("расшифруй" in text or "в текст" in text) and message.out and message.reply_to \
@@ -229,7 +232,7 @@ class Program:
                 return  # При срабатывании Maksogram в чате сохранение сообщения не происходит
             else:
                 await MaksogramBot.send_message(self.id, "Вы хотели расшифровать гс? Данная функция отключена у вас! "
-                                                         "Вы можете включить в настройках /settings (Maksogram в чате)")
+                                                         "Вы можете включить в настройках\n/menu_chat (Maksogram в чате)")
 
         # Калькулятор
         if text and text[-1] == "=" and "\n" not in text and message.out:
@@ -242,7 +245,17 @@ class Program:
                     await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться калькулятором? Вы неправильно ввели пример")
             else:
                 await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться калькулятором? Данная функция отключена у вас! "
-                                                         "Вы можете включить ее в настройках /settings (Maksogram в чате)")
+                                                         "Вы можете включить ее в настройках\n/menu_chat (Maksogram в чате)")
+
+        # Погода
+        if ("какая" in text and "погода" in text) and "\n" not in text and message.out:
+            if await db.fetch_one(f"SELECT weather FROM modules WHERE account_id={self.id}", one_data=True):
+                request = await weather(self.id)
+                await message.edit(f"@MaksogramBot в чате\n{request}")
+                return  # При срабатывании Maksogram в чате сохранение сообщения не происходит
+            else:
+                await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться погодой? Данная функция отключена у вас! "
+                                                         "Вы можете включить ее в настройках\n/menu_chat (Maksogram в чате)")
 
         try:
             saved_message = await self.client.forward_messages(await self.my_messages, message)
@@ -404,6 +417,24 @@ class Program:
         if self.status_users.get(event.chat_id) == status:
             return
         self.status_users[event.chat_id] = status
+
+        if event.chat_id == self.id:  # Уведомления по утрам
+            if status is False:  # Обработка только статуса в сети
+                return
+            time_zone: int = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={self.id}", one_data=True)
+            time = time_now() + timedelta(hours=time_zone)
+            time_last_notification = self.time_morning_notification + timedelta(hours=time_zone)
+            if not (morning[0] <= time.hour < morning[1]):  # Сейчас не утро
+                return
+            if time_last_notification.date() == time.date() and morning[0] <= time_last_notification.hour < morning[1]:
+                return  # Сегодня уже отправлено
+            if await db.fetch_one(f"SELECT morning_weather FROM modules WHERE account_id={self.id}", one_data=True):  # Погода по утрам
+                await MaksogramBot.send_message(self.id, f"Доброе утро!\n\n{await weather(self.id)}",
+                                                reply_markup=MaksogramBot.IMarkup(inline_keyboard=[[
+                                                    MaksogramBot.IButton(text="🌤 Настройки погоды", callback_data="modules")]]))
+            self.time_morning_notification = time_now()
+            return
+
         function = await db.fetch_one(f"SELECT online, offline FROM status_users WHERE account_id={self.id} AND user_id={event.chat_id}")
         online = function['online'] and status is True
         offline = function['offline'] and status is False
@@ -427,7 +458,7 @@ class Program:
                 os.remove(qr)
             else:
                 await MaksogramBot.send_message(self.id, "Вы хотели создать QR-код? Данная функция отключена у вас! "
-                                                         "Вы можете включить в настройках /settings (Maksogram в чате)")
+                                                         "Вы можете включить в настройках\n/menu_chat (Maksogram в чате)")
 
         # Расшифровка голосовых сообщений
         elif text and ("расшифруй" in text or "в текст" in text) and message.out and message.reply_to \
@@ -444,7 +475,7 @@ class Program:
                     await message.edit("@MaksogramBot в чате\nПроизошла ошибка при расшифровке... Скоро все будет исправлено")
             else:
                 await MaksogramBot.send_message(self.id, "Вы хотели расшифровать гс? Данная функция отключена у вас! "
-                                                         "Вы можете включить в настройках /settings (Maksogram в чате)")
+                                                         "Вы можете включить в настройках\n/menu_chat (Maksogram в чате)")
 
         # Калькулятор
         elif text and text[-1] == "=" and "\n" not in text and message.out:
@@ -456,7 +487,16 @@ class Program:
                     await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться калькулятором? Вы неправильно ввели пример")
             else:
                 await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться калькулятором? Данная функция отключена у вас! "
-                                                         "Вы можете включить ее в настройках /settings (Maksogram в чате)")
+                                                         "Вы можете включить ее в настройках\n/menu_chat (Maksogram в чате)")
+
+        # Погода
+        elif ("какая" in text and "погода" in text) and "\n" not in text and message.out:
+            if await db.fetch_one(f"SELECT weather FROM modules WHERE account_id={self.id}", one_data=True):
+                request = await weather(self.id)
+                await message.edit(f"@MaksogramBot в чате\n{request}")
+            else:
+                await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться погодой? Данная функция отключена у вас! "
+                                                         "Вы можете включить ее в настройках\n/menu_chat (Maksogram в чате)")
 
     async def answering_machine(self, event: events.newmessage.NewMessage.Event):
         message: Message = event.message

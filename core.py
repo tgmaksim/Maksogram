@@ -3,6 +3,7 @@ support = "tgmaksim_ru_company"
 SITE = "https://tgmaksim.ru/проекты/maksogram"
 subscribe = "https://t.me/+F5YW1gV3gdhjNjVi"
 channel = "@tgmaksim_ru"
+morning = 5, 12
 
 html = "HTML"
 s1, s2 = "{}"
@@ -98,6 +99,8 @@ async def account_on(account_id: int, Program):
     if await telegram_clients[account_id].is_user_authorized():
         await db.execute(f"UPDATE settings SET is_started=true WHERE account_id={account_id}")
         status_users = await db.fetch_all(f"SELECT user_id FROM status_users WHERE account_id={account_id}", one_data=True)
+        if any((await db.fetch_one(f"SELECT morning_weather FROM modules WHERE account_id={account_id}")).values()):
+            status_users.append(account_id)
         asyncio.get_running_loop().create_task(Program(telegram_clients[account_id], account_id, status_users).run_until_disconnected())
     else:
         raise UserIsNotAuthorized()

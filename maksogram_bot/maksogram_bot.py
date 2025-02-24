@@ -7,6 +7,7 @@ from html import escape
 from datetime import timedelta
 from typing import Literal, Any
 from sys_keys import TOKEN, release
+from modules.weather import check_city
 from saving_messages import admin_program, program
 from asyncpg.exceptions import UniqueViolationError
 from create_chats import create_chats, CreateChatsError
@@ -15,6 +16,7 @@ from core import (
     html,
     SITE,
     OWNER,
+    morning,
     channel,
     support,
     time_now,
@@ -73,6 +75,7 @@ class UserState(StatesGroup):
         confirm_mailing = State('confirm_mailing')
 
     time_zone = State('time_zone')
+    city = State('city')
     feedback = State('feedback')
     send_phone_number = State('send_phone_number')
     send_code = State('send_code')
@@ -397,6 +400,13 @@ async def menu(account_id: int) -> dict[str, Any]:
     return {"text": "⚙️ Maksogram — меню ⚙️", "reply_markup": markup}
 
 
+@dp.message(Command('menu_chat'))
+@security()
+async def _menu_chat(message: Message):
+    if await new_message(message): return
+    await message.answer(**modules_menu())
+
+
 @dp.message(Command('settings'))
 @security()
 async def _settings(message: Message):
@@ -412,11 +422,45 @@ async def _settings_button(callback_query: CallbackQuery):
 
 
 async def settings(account_id: int) -> dict[str, Any]:
-    account_settings = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={account_id}")
-    time_zone = f"+{account_settings['time_zone']}" if account_settings['time_zone'] >= 0 else account_settings['time_zone']
+    account_settings = await db.fetch_one(f"SELECT time_zone, city FROM settings WHERE account_id={account_id}")
+    time_zone = f"+{account_settings['time_zone']}" if account_settings['time_zone'] >= 0 else str(account_settings['time_zone'])
+    city = account_settings['city']
     reply_markup = IMarkup(inline_keyboard=[[IButton(text="🕰 Часовой пояс", callback_data="time_zone")],
+                                            [IButton(text="🌏 Местоположение (город)", callback_data="city")],
                                             [IButton(text="◀️  Назад", callback_data="menu")]])
-    return {"text": f"⚙️ Общие настройки Maksogram\nЧасовой пояс: {time_zone}:00", "reply_markup": reply_markup}
+    return {"text": f"⚙️ Общие настройки Maksogram\nЧасовой пояс: {time_zone}:00\nГород: {city}",
+            "reply_markup": reply_markup}
+
+
+@dp.callback_query(F.data == "city")
+@security('state')
+async def _city_start(callback_query: CallbackQuery, state: FSMContext):
+    if await new_callback_query(callback_query): return
+    await state.set_state(UserState.city)
+    markup = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Отмена")]], resize_keyboard=True)
+    message_id = (await callback_query.message.answer("Отправьте название вашего города", reply_markup=markup)).message_id
+    await state.update_data(message_id=message_id)
+    await callback_query.message.delete()
+
+
+@dp.message(UserState.city)
+@security('state')
+async def _city(message: Message, state: FSMContext):
+    if await new_message(message): return
+    message_id = (await state.get_data())['message_id']
+    account_id = message.chat.id
+    if message.text != "Отмена":
+        if not await check_city(message.text.lower()):
+            markup = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Отмена")]], resize_keyboard=True)
+            await state.update_data(message_id=(await message.answer("Город не найден...", reply_markup=markup)).message_id)
+        else:
+            await state.clear()
+            await db.execute(f"UPDATE settings SET city=$1 WHERE account_id={account_id}", message.text)
+            await message.answer(**await settings(account_id))
+    else:
+        await state.clear()
+        await message.answer(**await settings(account_id))
+    await bot.delete_messages(account_id, [message_id, message.message_id])
 
 
 @dp.callback_query(F.data == "time_zone")
@@ -458,6 +502,7 @@ def modules_menu() -> dict[str, Any]:
     markup = IMarkup(inline_keyboard=[[IButton(text="🔢 Калькулятор", callback_data="calculator")],
                                       [IButton(text="🔗 Генератор QR-кодов", callback_data="qrcode")],
                                       [IButton(text="🗣 Расшифровка ГС", callback_data="audio_transcription")],
+                                      [IButton(text="🌤 Погода", callback_data="weather")],
                                       [IButton(text="◀️  Назад", callback_data="menu")]])
     return {"text": "💬 <b>Maksogram в чате</b>\nФункции, которые работают прямо из любого чата, не нужно вызывать меня",
             "reply_markup": markup, "parse_mode": html}
@@ -559,6 +604,60 @@ async def _audio_transcription_switch(callback_query: CallbackQuery):
         case "off":
             await db.execute(f"UPDATE modules SET audio_transcription=false WHERE account_id={callback_query.from_user.id}")  # Выключение расшифровки
     await callback_query.message.edit_text(**await audio_transcription_menu(callback_query.message.chat.id))
+
+
+@dp.callback_query(F.data == "weather")
+@security()
+async def _weather(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    await callback_query.message.edit_text(**await weather_menu(callback_query.from_user.id))
+
+
+async def weather_menu(account_id: int) -> dict[str, Any]:
+    if await db.fetch_one(f"SELECT weather FROM modules WHERE account_id={account_id}", one_data=True):  # Вкл/выкл погода
+        status_button_weather = IButton(text="🔴 Выключить погоду", callback_data="weather_off")
+    else:
+        status_button_weather = IButton(text="🟢 Включить погоду", callback_data="weather_on")
+    if await db.fetch_one(f"SELECT morning_weather FROM modules WHERE account_id={account_id}", one_data=True):  # Вкл/выкл погода по утрам
+        status_button_morning_weather = IButton(text="🔴 Выключить утреннюю погоду", callback_data="morning_weather_off")
+    else:
+        status_button_morning_weather = IButton(text="🟢 Включить утреннюю погоду", callback_data="morning_weather_on")
+    markup = IMarkup(inline_keyboard=[[status_button_weather],
+                                      [status_button_morning_weather],
+                                      [IButton(text="Как пользоваться погодой?", url=f"{SITE}#погода")],
+                                      [IButton(text="◀️  Назад", callback_data="modules")]])
+    return {"text": "🌤 <b>Погода</b>\nЛегко получайте погоду за окном, не выходя из Telegram. Тригеры: какая погода\n"
+                    f"Погода по утрам присылается, когда вы первый раз зашли в Telegram с {morning[0]}:00 до {morning[1]}:00",
+            "reply_markup": markup, "parse_mode": html}
+
+
+@dp.callback_query(F.data.in_(["weather_on", "weather_off"]))
+@security()
+async def _weather_switch(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    command = callback_query.data.split("_")[-1]
+    match command:
+        case "on":
+            await db.execute(f"UPDATE modules SET weather=true WHERE account_id={callback_query.from_user.id}")  # Включение погоды
+        case "off":
+            await db.execute(f"UPDATE modules SET weather=false WHERE account_id={callback_query.from_user.id}")  # Выключение погоды
+    await callback_query.message.edit_text(**await weather_menu(callback_query.message.chat.id))
+
+
+@dp.callback_query(F.data.in_(["morning_weather_on", "morning_weather_off"]))
+@security()
+async def _weather_switch(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    command = callback_query.data.split("_")[-1]
+    account_id = callback_query.from_user.id
+    match command:
+        case "on":
+            telegram_clients[account_id].list_event_handlers()[4][1].chats.add(account_id)
+            await db.execute(f"UPDATE modules SET morning_weather=true WHERE account_id={account_id}")  # Включение погоды по утрам
+        case "off":
+            telegram_clients[account_id].list_event_handlers()[4][1].chats.remove(account_id)
+            await db.execute(f"UPDATE modules SET morning_weather=false WHERE account_id={account_id}")  # Выключение погоды по утрам
+    await callback_query.message.edit_text(**await weather_menu(callback_query.message.chat.id))
 
 
 @dp.callback_query(F.data == "avatars")
@@ -1387,10 +1486,10 @@ async def start_program(account_id: int, username: str, phone_number: int, teleg
     name = ('@' + username) if username else account_id
     next_payment = time_now() + timedelta(days=7)
     await db.execute(f"INSERT INTO accounts VALUES ({account_id}, '{name}', {phone_number}, {request['my_messages']}, {request['message_changes']})")
-    await db.execute(f"INSERT INTO settings VALUES ({account_id}, '[]', '[]', true, 3)")
+    await db.execute(f"INSERT INTO settings VALUES ({account_id}, '[]', '[]', true, 6, 'Омск')")
     await db.execute(f"INSERT INTO payment VALUES ({account_id}, 'user', {Variables.fee}, '{next_payment}', true)")
     await db.execute(f"INSERT INTO functions VALUES ({account_id}, '[]')")
-    await db.execute(f"INSERT INTO modules VALUES ({account_id}, false, false, false)")
+    await db.execute(f"INSERT INTO modules VALUES ({account_id}, false, false, false, false, false)")
     telegram_clients[account_id] = telegram_client
     asyncio.get_running_loop().create_task(program.Program(telegram_client, account_id, []).run_until_disconnected())
 
