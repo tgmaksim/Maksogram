@@ -1,5 +1,6 @@
 import os
 import emoji
+import random
 import asyncio
 
 from modules.calculator import main as calculator
@@ -27,6 +28,7 @@ from core import (
     human_bytes,
     MaksogramBot,
     count_avatars,
+    resources_path,
     get_enabled_auto_answer,
 )
 from telethon.errors.rpcerrorlist import (
@@ -81,13 +83,13 @@ class Program:
         if difference < LastEvent.seconds:
             await asyncio.sleep(LastEvent.seconds - difference)
 
-    def __init__(self, client: TelegramClient, account_id: int, status_users: list[int]):
+    def __init__(self, client: TelegramClient, account_id: int, status_users: list[int], morning_notification: datetime):
         self.id = account_id
         self.client = client
         self.last_event = LastEvent()
 
         self.status_users: dict[int, bool] = {user: None for user in status_users}  # {id: True} -> id в сети
-        self.time_morning_notification: datetime = time_now()
+        self.time_morning_notification: datetime = morning_notification
 
         @client.on(events.NewMessage(func=self.initial_checking_event))
         @security()
@@ -258,7 +260,7 @@ class Program:
         if ("какая" in text and "погода" in text) and "\n" not in text and message.out:
             if await db.fetch_one(f"SELECT weather FROM modules WHERE account_id={self.id}", one_data=True):
                 request = await weather(self.id)
-                await message.edit(f"@MaksogramBot в чате\n{request}")
+                await message.edit(f"@MaksogramBot в чате\n{request}", parse_mode="HTML")
                 await db.execute(f"UPDATE statistics SET weather=now() WHERE account_id={self.id}")
                 return  # При срабатывании Maksogram в чате сохранение сообщения не происходит
             else:
@@ -447,11 +449,20 @@ class Program:
                 return
             if time_last_notification.date() == time.date() and morning[0] <= time_last_notification.hour < morning[1]:
                 return  # Сегодня уже отправлено
+            gender = await db.fetch_one(f"SELECT gender FROM settings WHERE account_id={self.id}", one_data=True)
+            if gender is True:  # Мужчина
+                postcard = random.choice(os.listdir(resources_path("good_morning/man")))
+                photo = resources_path(f"good_morning/man/{postcard}")
+            elif gender is False:  # Женщина
+                postcard = random.choice(os.listdir(resources_path("good_morning/woman")))
+                photo = resources_path(f"good_morning/woman/{postcard}")
+            else:
+                photo = None
             if await db.fetch_one(f"SELECT morning_weather FROM modules WHERE account_id={self.id}", one_data=True):  # Погода по утрам
                 await MaksogramBot.send_message(self.id, f"Доброе утро! Как спалось? 😉\n\n{await weather(self.id)}",
-                                                reply_markup=MaksogramBot.IMarkup(inline_keyboard=[[
-                                                    MaksogramBot.IButton(text="🌤 Настройки погоды", callback_data="modules")]]))
+                                                photo=photo, parse_mode="HTML")
             self.time_morning_notification = time_now()
+            await db.execute(f"UPDATE accounts SET morning_notification=now() WHERE account_id={self.id}")
             return
 
         function = await db.fetch_one(f"SELECT online, offline FROM status_users WHERE account_id={self.id} AND user_id={event.chat_id}")
@@ -513,7 +524,7 @@ class Program:
         elif ("какая" in text and "погода" in text) and "\n" not in text and message.out:
             if await db.fetch_one(f"SELECT weather FROM modules WHERE account_id={self.id}", one_data=True):
                 request = await weather(self.id)
-                await message.edit(f"@MaksogramBot в чате\n{request}")
+                await message.edit(f"@MaksogramBot в чате\n{request}", parse_mode="HTML")
                 await db.execute(f"UPDATE statistics SET weather=now() WHERE account_id={self.id}")
             else:
                 await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться погодой? Данная функция отключена у вас! "

@@ -288,9 +288,8 @@ async def _confirm_sending_payment(callback_query: CallbackQuery):
 @security()
 async def _version(message: Message):
     if await new_message(message): return
-    version = Variables.version
-    await message.answer(f"Версия: {version}\n<a href='{SITE}/{version}'>Обновление</a> 👇",
-                         parse_mode=html, link_preview_options=preview_options(version))
+    await message.answer(f"Версия: {Variables.version_string}\n<a href='{SITE}/{Variables.version}'>Обновление</a> 👇",
+                         parse_mode=html, link_preview_options=preview_options(Variables.version))
 
 
 @dp.message(Command('friends'))
@@ -422,20 +421,48 @@ async def _settings_button(callback_query: CallbackQuery):
 
 
 async def settings(account_id: int) -> dict[str, Any]:
-    account_settings = await db.fetch_one(f"SELECT time_zone, city FROM settings WHERE account_id={account_id}")
+    account_settings = await db.fetch_one(f"SELECT time_zone, city, gender FROM settings WHERE account_id={account_id}")
     time_zone = f"+{account_settings['time_zone']}" if account_settings['time_zone'] >= 0 else str(account_settings['time_zone'])
     city = account_settings['city']
-    reply_markup = IMarkup(inline_keyboard=[[IButton(text="👁 Профиль", callback_data="profile")],
-                                            [IButton(text="🕰 Часовой пояс", callback_data="time_zone")],
-                                            [IButton(text="🌏 Местоположение (город)", callback_data="city")],
+    gender = {None: "не указан", True: "мужчина", False: "женщина"}[account_settings['gender']]  # Заранее извиняюсь :)
+    reply_markup = IMarkup(inline_keyboard=[[IButton(text="👁 Профиль", callback_data="profile"),
+                                             IButton(text="🕰 Часовой пояс", callback_data="time_zone")],
+                                            [IButton(text="🌏 Город", callback_data="city"),
+                                             IButton(text="🚹 🚺 Пол", callback_data="gender")],
                                             [IButton(text="◀️  Назад", callback_data="menu")]])
-    return {"text": f"⚙️ Общие настройки Maksogram\nЧасовой пояс: {time_zone}:00\nГород: {city}",
+    return {"text": f"⚙️ Общие настройки Maksogram\nЧасовой пояс: {time_zone}:00\nГород: {city}\nПол: {gender}",
             "reply_markup": reply_markup}
+
+
+@dp.callback_query(F.data == "gender")
+@security()
+async def _gender(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    await callback_query.message.edit_text(**await gender_menu(callback_query.from_user.id))
+
+
+async def gender_menu(account_id: int) -> dict[str, Any]:
+    account_settings = await db.fetch_one(f"SELECT gender FROM settings WHERE account_id={account_id}")
+    gender = {None: "не указан", True: "мужчина", False: "женщина"}[account_settings['gender']]  # Заранее извиняюсь :)
+    reply_markup = IMarkup(inline_keyboard=[[IButton(text="🚹 Мужчина", callback_data="gender_edit__man")],
+                                            [IButton(text="🚺 Женщина", callback_data="gender_edit_woman")],
+                                            [IButton(text="◀️  Назад", callback_data="settings")]])
+    return {"text": f"Вы можете выбрать пол. Он нужен для красивых поздравлений\nПол: {gender}", "reply_markup": reply_markup}
+
+
+@dp.callback_query(F.data.startswith("gender_edit"))
+@security()
+async def _gender_edit(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    gender = "true" if callback_query.data.split("_")[-1] == "man" else "false"
+    account_id = callback_query.from_user.id
+    await db.execute(f"UPDATE settings SET gender={gender} WHERE account_id={account_id}")
+    await callback_query.message.edit_text(**await settings(account_id))
 
 
 @dp.callback_query(F.data == "profile")
 @security()
-async def _profile(callback_query: CallbackQuery):
+async def _profile_button(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     await callback_query.message.edit_text(**await profile_menu(callback_query.from_user.id))
 
@@ -521,10 +548,10 @@ async def _modules(callback_query: CallbackQuery):
 
 
 def modules_menu() -> dict[str, Any]:
-    markup = IMarkup(inline_keyboard=[[IButton(text="🔢 Калькулятор", callback_data="calculator")],
+    markup = IMarkup(inline_keyboard=[[IButton(text="🔢 Калькулятор", callback_data="calculator"),
+                                       IButton(text="🌤 Погода", callback_data="weather")],
                                       [IButton(text="🔗 Генератор QR-кодов", callback_data="qrcode")],
                                       [IButton(text="🗣 Расшифровка ГС", callback_data="audio_transcription")],
-                                      [IButton(text="🌤 Погода", callback_data="weather")],
                                       [IButton(text="◀️  Назад", callback_data="menu")]])
     return {"text": "💬 <b>Maksogram в чате</b>\nФункции, которые работают прямо из любого чата, не нужно вызывать меня",
             "reply_markup": markup, "parse_mode": html}
@@ -1507,14 +1534,15 @@ async def start_program(account_id: int, username: str, phone_number: int, teleg
         raise CreateChatsError(request['message'], f"Произошла ошибка {request['error'].__class__.__name__}: {request['error']}")
     name = ('@' + username) if username else account_id
     next_payment = time_now() + timedelta(days=7)
-    await db.execute(f"INSERT INTO accounts VALUES ({account_id}, '{name}', {phone_number}, {request['my_messages']}, {request['message_changes']}, now())")
+    await db.execute(f"INSERT INTO accounts VALUES ({account_id}, '{name}', {phone_number}, "
+                     f"{request['my_messages']}, {request['message_changes']}, now(), now())")
     await db.execute(f"INSERT INTO settings VALUES ({account_id}, '[]', '[]', true, 6, 'Омск')")
     await db.execute(f"INSERT INTO payment VALUES ({account_id}, 'user', {Variables.fee}, '{next_payment}', true)")
     await db.execute(f"INSERT INTO functions VALUES ({account_id}, '[]')")
     await db.execute(f"INSERT INTO modules VALUES ({account_id}, false, false, false, false, false)")
     await db.execute(f"INSERT INTO statistics VALUES ({account_id}, now(), now(), now())")
     telegram_clients[account_id] = telegram_client
-    asyncio.get_running_loop().create_task(program.Program(telegram_client, account_id, []).run_until_disconnected())
+    asyncio.get_running_loop().create_task(program.Program(telegram_client, account_id, [], time_now()).run_until_disconnected())
 
 
 def referal_link(user_id: int) -> str:

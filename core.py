@@ -22,7 +22,7 @@ from telethon import TelegramClient
 from datetime import datetime, timedelta
 from telethon.tl.functions.photos import GetUserPhotosRequest
 from sys_keys import sessions_path, TOKEN, BOT_ID, USERNAME_BOT
-from aiogram.types import LinkPreviewOptions, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import LinkPreviewOptions, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 
 
 class UserIsNotAuthorized(Exception):
@@ -101,7 +101,9 @@ async def account_on(account_id: int, Program):
         status_users = await db.fetch_all(f"SELECT user_id FROM status_users WHERE account_id={account_id}", one_data=True)
         if any((await db.fetch_one(f"SELECT morning_weather FROM modules WHERE account_id={account_id}")).values()):
             status_users.append(account_id)
-        asyncio.get_running_loop().create_task(Program(telegram_clients[account_id], account_id, status_users).run_until_disconnected())
+        morning_notification = await db.fetch_one(f"SELECT morning_notification FROM accounts WHERE account_id={account_id}", one_data=True)
+        asyncio.get_running_loop().create_task(Program(telegram_clients[account_id], account_id, status_users, morning_notification)
+                                               .run_until_disconnected())
     else:
         raise UserIsNotAuthorized()
 
@@ -176,6 +178,7 @@ def new_telegram_client(phone_number: str) -> TelegramClient:
 
 class Variables:
     version = "2.5"
+    version_string = "2.5.3 (30)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])
@@ -194,7 +197,10 @@ class MaksogramBot:
     IButton = InlineKeyboardButton
 
     @staticmethod
-    async def send_message(chat_id: int, message: str, **kwargs):
+    async def send_message(chat_id: int, message: str, photo=None, **kwargs):
+        if photo:
+            photo = FSInputFile(photo)
+            return await MaksogramBot.bot.send_photo(chat_id, photo=photo, caption=message, **kwargs)
         return await MaksogramBot.bot.send_message(chat_id, str(message), **kwargs)
 
     @staticmethod
