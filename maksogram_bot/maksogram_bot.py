@@ -65,6 +65,7 @@ dp = Dispatcher()
 # Класс с глобальными переменными для удобного пользования
 class Data:
     web_app = "https://tgmaksim.ru/maksogram"
+    banned = []
 
 
 # Класс нужен для определения состояния пользователя в данном боте,
@@ -95,6 +96,10 @@ class UserState(StatesGroup):
 @security()
 async def _sender(message: Message):
     user_id = int(message.reply_to_message.text.split('\n', 1)[0].replace("ID: ", ""))
+    if message.text.lower() == "бан":
+        await db.execute(f"INSERT INTO banned VALUES ({user_id}, now())")
+        Data.banned.append(user_id)
+        return await message.answer("Пользователь заблокирован!")
     try:
         copy_message = await bot.copy_message(user_id, OWNER, message.message_id)
     except TelegramForbiddenError:
@@ -1038,6 +1043,7 @@ async def _answering_machine_switch(callback_query: CallbackQuery):
         await callback_query.answer("Автоответ был удалено ранее!", True)
         return await callback_query.message.edit_text(**await answering_machine_menu(account_id))
     status = "true" if command == "on" else "false"
+    main_auto_answer = await get_enabled_auto_answer(account_id)
     if answer['type'] == "ordinary" and command == "on":  # Обыкновенный автоответ
         # Выключение включенного обыкновенного автоответа (если есть)
         await db.execute(f"UPDATE answering_machine SET status=false WHERE account_id={account_id} AND type='ordinary'")
@@ -1049,12 +1055,13 @@ async def _answering_machine_switch(callback_query: CallbackQuery):
             if answer['start_time'] < answer['end_time'] < ans['start_time'] < ans['end_time'] or \
                     ans['start_time'] < ans['end_time'] < answer['start_time'] < answer['end_time'] or \
                     answer['end_time'] < ans['start_time'] < ans['end_time'] < answer['start_time'] or \
-                    ans['end_time'] < answer['start_time'] < answer['end_time'] < answer['start_time']:
+                    ans['end_time'] < answer['start_time'] < answer['end_time'] < ans['start_time']:
                 pass  # Все случаи, когда автоответы по времени не пересекаются
             else:
                 return await callback_query.answer("Расписание данного автоответа пересекается с расписанием уже включенного", True)
     await db.execute(f"UPDATE answering_machine SET status={status} WHERE account_id={account_id} AND answer_id={answer_id}")
-    await db.execute(f"UPDATE functions SET answering_machine_sending='[]' WHERE account_id={account_id}")
+    if main_auto_answer != await get_enabled_auto_answer(account_id):  # Если работающий автоответ сменился, обнуляем sending
+        await db.execute(f"UPDATE functions SET answering_machine_sending='[]' WHERE account_id={account_id}")
     await callback_query.message.edit_text(**await auto_answer_menu(account_id, answer_id))
 
 
@@ -1537,7 +1544,7 @@ async def start_program(account_id: int, username: str, phone_number: int, teleg
     await db.execute(f"INSERT INTO accounts VALUES ({account_id}, '{name}', {phone_number}, "
                      f"{request['my_messages']}, {request['message_changes']}, now(), now())")
     await db.execute(f"INSERT INTO settings VALUES ({account_id}, '[]', '[]', true, 6, 'Омск')")
-    await db.execute(f"INSERT INTO payment VALUES ({account_id}, 'user', {Variables.fee}, '{next_payment}', true)")
+    await db.execute(f"INSERT INTO payment VALUES ({account_id}, 'user', {Variables.fee}, '{next_payment}', true, now(), now())")
     await db.execute(f"INSERT INTO functions VALUES ({account_id}, '[]')")
     await db.execute(f"INSERT INTO modules VALUES ({account_id}, false, false, false, false, false)")
     await db.execute(f"INSERT INTO statistics VALUES ({account_id}, now(), now(), now())")
@@ -1613,7 +1620,9 @@ async def new_message(message: Message, /, forward: bool = True) -> bool:
                  f"Время: {date}",
             parse_mode=html)
 
-    return False
+    if message.chat.id in Data.banned:
+        await bot.send_message(OWNER, "Пользователь заблокирован!")
+    return message.chat.id in Data.banned
 
 
 async def new_callback_query(callback_query: CallbackQuery) -> bool:
@@ -1640,7 +1649,9 @@ async def new_callback_query(callback_query: CallbackQuery) -> bool:
              f"Время: {date}",
         parse_mode=html)
 
-    return False
+    if callback_query.from_user.id in Data.banned:
+        await bot.send_message(OWNER, "Пользователь заблокирован!")
+    return callback_query.from_user.id in Data.banned
 
 
 async def check_payment_datetime():
@@ -1649,6 +1660,10 @@ async def check_payment_datetime():
         payment = await db.fetch_one(f"SELECT \"user\", next_payment FROM payment WHERE account_id={account_id}")
         if payment['user'] != 'user': continue
         if time_now() <= payment['next_payment'] <= (time_now() + timedelta(days=1)):  # За день до конца
+            first_notification = await db.fetch_one(f"SELECT first_notification FROM payment WHERE account_id={account_id}", one_data=True)
+            if (time_now() - first_notification).total_seconds() < 23*60*60 + 50*60:  # Прошлое уведомление было менее 23 часов 50 минут назад
+                return
+            await db.execute(f"UPDATE payment SET first_notification=now() WHERE account_id={account_id}")
             await bot.send_message(account_id, "Текущая подписка заканчивается! Произведите следующий "
                                                "платеж до конца завтрашнего дня")
             await bot.send_message(account_id, **await payment_menu(account_id))
@@ -1656,6 +1671,8 @@ async def check_payment_datetime():
 
 async def start_bot():
     await check_payment_datetime()
+
+    Data.banned = await db.fetch_all("SELECT account_id FROM banned", one_data=True)
 
     await bot.send_message(OWNER, f"<b>Бот запущен!🚀</b>", parse_mode=html)
     print("Запуск бота")

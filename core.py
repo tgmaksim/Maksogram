@@ -169,8 +169,8 @@ def new_telegram_client(phone_number: str) -> TelegramClient:
         Variables.TelegramApplicationId,
         Variables.TelegramApplicationHash,
         device_model="Maksogram in Chat",
-        system_version="Maksogram v%s" % Variables.version,
-        app_version=Variables.version,
+        system_version="Maksogram platform",
+        app_version=Variables.version_string,
         lang_code="ru",
         system_lang_code="ru"
     )
@@ -178,7 +178,7 @@ def new_telegram_client(phone_number: str) -> TelegramClient:
 
 class Variables:
     version = "2.5"
-    version_string = "2.5.3 (30)"
+    version_string = "2.5.3 (31)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])

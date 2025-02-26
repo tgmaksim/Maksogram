@@ -75,7 +75,7 @@ class LastEvent:
 
 
 class Program:
-    __version__ = Variables.version
+    __version__ = Variables.version_string
 
     async def sleep(self):
         difference = (time_now() - self.last_event.get()).total_seconds()
@@ -450,15 +450,23 @@ class Program:
             if time_last_notification.date() == time.date() and morning[0] <= time_last_notification.hour < morning[1]:
                 return  # Сегодня уже отправлено
             gender = await db.fetch_one(f"SELECT gender FROM settings WHERE account_id={self.id}", one_data=True)
-            if gender is True:  # Мужчина
-                postcard = random.choice(os.listdir(resources_path("good_morning/man")))
-                photo = resources_path(f"good_morning/man/{postcard}")
-            elif gender is False:  # Женщина
-                postcard = random.choice(os.listdir(resources_path("good_morning/woman")))
-                photo = resources_path(f"good_morning/woman/{postcard}")
-            else:
-                photo = None
-            if await db.fetch_one(f"SELECT morning_weather FROM modules WHERE account_id={self.id}", one_data=True):  # Погода по утрам
+            if time.date().month == 2 and time.date().day == 23 and gender is True:  # Поздравление с 23 февраля
+                postcard = random.choice(os.listdir(resources_path("holidays/man")))
+                photo = resources_path(f"holidays/man/{postcard}")
+                await MaksogramBot.send_message(self.id, "С добрым утром! Поздравляю с 23 февраля 😎", photo=photo)
+            elif time.date().month == 3 and time.date().day == 8 and gender is False:  # Поздравление с 8 марта
+                postcard = random.choice(os.listdir(resources_path("holidays/woman")))
+                photo = resources_path(f"holidays/woman/{postcard}")
+                await MaksogramBot.send_message(self.id, "С добрым утром! Поздравляю с 8 марта 🥰", photo=photo)
+            elif await db.fetch_one(f"SELECT morning_weather FROM modules WHERE account_id={self.id}", one_data=True):  # Погода по утрам
+                if gender is True:  # Мужчина
+                    postcard = random.choice(os.listdir(resources_path("good_morning/man")))
+                    photo = resources_path(f"good_morning/man/{postcard}")
+                elif gender is False:  # Женщина
+                    postcard = random.choice(os.listdir(resources_path("good_morning/woman")))
+                    photo = resources_path(f"good_morning/woman/{postcard}")
+                else:
+                    photo = None
                 await MaksogramBot.send_message(self.id, f"Доброе утро! Как спалось? 😉\n\n{await weather(self.id)}",
                                                 photo=photo, parse_mode="HTML")
             self.time_morning_notification = time_now()
@@ -559,7 +567,7 @@ class Program:
                     entities.append(MessageEntityCustomEmoji(entity['offset'], entity['length'], document_id=int(entity['custom_emoji_id'])))
         return await self.client.send_message(message.chat_id, answer['text'], formatting_entities=entities)
 
-    async def new_avatar(self):
+    async def new_avatar_center(self):
         while await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={self.id}", one_data=True):
             for user in await db.fetch_all(f"SELECT user_id, name, count FROM avatars WHERE account_id={self.id}"):
                 count = await count_avatars(self.id, user['user_id'])
@@ -579,11 +587,21 @@ class Program:
                 await db.execute(f"UPDATE avatars SET count={count} WHERE account_id={self.id} AND user_id={user['user_id']}")
             await asyncio.sleep(5*60)
 
+    async def answering_machine_center(self):
+        auto_answer = await get_enabled_auto_answer(self.id)
+        while await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={self.id}", one_data=True):
+            if auto_answer != (new_auto_answer := await get_enabled_auto_answer(self.id)):  # Сменился работающий автоответ
+                auto_answer = new_auto_answer
+                await db.execute(f"UPDATE functions SET answering_machine_sending='[]' WHERE account_id={self.id}")
+            # Ожидание следующей минуты
+            await asyncio.sleep(((time_now() + timedelta(minutes=1)).replace(second=0, microsecond=0) - time_now()).seconds)
+
     async def run_until_disconnected(self):
         await db.execute(f"CREATE TABLE IF NOT EXISTS \"{self.id}_messages\" (chat_id BIGINT NOT NULL, "
                          "message_id INTEGER NOT NULL, saved_message_id INTEGER NOT NULL, reactions TEXT NOT NULL)")
-        await MaksogramBot.send_system_message(f"SavingMessages v{self.__version__} для меня запущен")
-        asyncio.get_running_loop().create_task(self.new_avatar())
+        await MaksogramBot.send_system_message(f"Maksogram v{self.__version__} для меня запущен")
+        asyncio.get_running_loop().create_task(self.new_avatar_center())
+        asyncio.get_running_loop().create_task(self.answering_machine_center())
         try:
             await self.client.run_until_disconnected()
         except (AuthKeyInvalidError, AuthKeyUnregisteredError):

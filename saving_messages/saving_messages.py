@@ -20,7 +20,7 @@ async def main():
         name = await db.fetch_one(f"SELECT name FROM accounts WHERE account_id={account_id}", one_data=True)
         telegram_clients[account_id] = new_telegram_client(f"+{phone_number}")
         is_started: bool = await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={account_id}", one_data=True)
-        payment = await db.fetch_one(f"SELECT \"user\", is_paid, next_payment FROM payment WHERE account_id={account_id}")
+        payment = await db.fetch_one(f"SELECT \"user\", is_paid, next_payment, second_notification FROM payment WHERE account_id={account_id}")
         if payment['user'] == 'user' and payment['is_paid']:
             if payment['next_payment'] <= (time_now() - timedelta(days=1)):  # После дня окончания
                 try:
@@ -32,11 +32,13 @@ async def main():
                     pass
                 continue
             if (time_now() - timedelta(days=1)) <= payment['next_payment'] <= time_now():  # В день окончания
-                try:
-                    await MaksogramBot.send_message(account_id, "Ваша подписка истечет завтра. Продлите ее, чтобы пользоваться Maksogram")
-                    await MaksogramBot.send_system_message(f"Платеж просрочен ({name})")
-                except TelegramForbiddenError:
-                    pass
+                if (time_now() - payment['second_notification']).total_seconds() >= 23*60*60 + 50*60:  # Прошлое уведомление было не менее 23 часов 50 минут назад
+                    await db.execute(f"UPDATE payment SET second_notification=now() WHERE account_id={account_id}")
+                    try:
+                        await MaksogramBot.send_message(account_id, "Ваша подписка истечет завтра. Продлите ее, чтобы пользоваться Maksogram")
+                        await MaksogramBot.send_system_message(f"Платеж просрочен ({name})")
+                    except TelegramForbiddenError:
+                        pass
 
         if not is_started or not payment['is_paid']:
             continue
