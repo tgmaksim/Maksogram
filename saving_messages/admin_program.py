@@ -16,6 +16,7 @@ from telethon import TelegramClient, events
 from .admin import reload_server, upload_file
 from telethon.events.common import EventCommon
 from telethon.errors import ChatForwardsRestrictedError
+from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.functions.account import UpdateStatusRequest
 from telethon.tl.functions.messages import GetCustomEmojiDocumentsRequest
 from core import (
@@ -39,6 +40,7 @@ from telethon.errors.rpcerrorlist import (
 )
 from telethon.tl.types import (
     User,
+    Birthday,
     PeerUser,
     PeerChat,
     PeerChannel,
@@ -88,7 +90,7 @@ class Program:
         self.client = client
         self.last_event = LastEvent()
 
-        self.status_users: dict[int, bool] = {user: None for user in status_users}  # {id: True} -> id в сети
+        self.status_users: dict[int, bool] = {user: None for user in (status_users + [self.id])}  # {id: True} -> id в сети
         self.time_morning_notification: datetime = morning_notification
 
         @client.on(events.NewMessage(func=self.initial_checking_event))
@@ -439,7 +441,7 @@ class Program:
             return
         self.status_users[event.chat_id] = status
 
-        if event.chat_id == self.id:  # Уведомления по утрам
+        if event.chat_id == self.id:  # Уведомления по утрам и поздравления с праздниками
             if status is False:  # Обработка только статуса в сети
                 return
             time_zone: int = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={self.id}", one_data=True)
@@ -450,7 +452,16 @@ class Program:
             if time_last_notification.date() == time.date() and morning[0] <= time_last_notification.hour < morning[1]:
                 return  # Сегодня уже отправлено
             gender = await db.fetch_one(f"SELECT gender FROM settings WHERE account_id={self.id}", one_data=True)
-            if time.date().month == 2 and time.date().day == 23 and gender is True:  # Поздравление с 23 февраля
+            my_birthday: Birthday = (await self.client(GetFullUserRequest(self.id))).full_user.birthday
+            if my_birthday.month == time.month and my_birthday.day == time.day:  # Поздравление в днем рождения
+                postcard = random.choice(os.listdir(resources_path("holidays/birthday")))
+                photo = resources_path(f"holidays/birthday/{postcard}")
+                await MaksogramBot.send_message(self.id, "Доброе утро! С днем рождения 🥳\nВсего самого лучшего! 🎊 🎁", photo=photo)
+            elif time.date().month == 3 and time.date().day == 1:  # Поздравление с первым днем весны
+                postcard = random.choice(os.listdir(resources_path("holidays/1march")))
+                photo = resources_path(f"holidays/1march/{postcard}")
+                await MaksogramBot.send_message(self.id, "Доброе утро!\nС первым днем весны ☀️", photo=photo)
+            elif time.date().month == 2 and time.date().day == 23 and gender is True:  # Поздравление с 23 февраля
                 postcard = random.choice(os.listdir(resources_path("holidays/man")))
                 photo = resources_path(f"holidays/man/{postcard}")
                 await MaksogramBot.send_message(self.id, "С добрым утром! Поздравляю с 23 февраля 😎", photo=photo)
@@ -599,12 +610,11 @@ class Program:
     async def run_until_disconnected(self):
         await db.execute(f"CREATE TABLE IF NOT EXISTS \"{self.id}_messages\" (chat_id BIGINT NOT NULL, "
                          "message_id INTEGER NOT NULL, saved_message_id INTEGER NOT NULL, reactions TEXT NOT NULL)")
-        await MaksogramBot.send_system_message(f"Maksogram v{self.__version__} для меня запущен")
+        await MaksogramBot.send_system_message(f"Maksogram {self.__version__} для меня запущен")
         asyncio.get_running_loop().create_task(self.new_avatar_center())
         asyncio.get_running_loop().create_task(self.answering_machine_center())
         try:
             await self.client.run_until_disconnected()
         except (AuthKeyInvalidError, AuthKeyUnregisteredError):
             await MaksogramBot.send_system_message(f"Удалена сессия у программы!")
-            phone_number = await db.fetch_one(f"SELECT phone_number FROM accounts WHERE account_id={self.id}", one_data=True)
-            await account_off(self.id, f"+{phone_number}")
+            await account_off(self.id)

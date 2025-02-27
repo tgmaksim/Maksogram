@@ -4,10 +4,10 @@ import asyncio
 import aiohttp
 
 from html import escape
-from datetime import timedelta
 from typing import Literal, Any
 from sys_keys import TOKEN, release
 from modules.weather import check_city
+from datetime import timedelta, datetime
 from saving_messages import admin_program, program
 from asyncpg.exceptions import UniqueViolationError
 from create_chats import create_chats, CreateChatsError
@@ -35,6 +35,7 @@ from core import (
     telegram_clients,
     UserIsNotAuthorized,
     new_telegram_client,
+    telegram_client_connect,
     get_enabled_auto_answer,
 )
 
@@ -77,7 +78,6 @@ class UserState(StatesGroup):
 
     time_zone = State('time_zone')
     city = State('city')
-    feedback = State('feedback')
     send_phone_number = State('send_phone_number')
     send_code = State('send_code')
     send_password = State('send_password')
@@ -212,42 +212,21 @@ async def _confirm_mailing(callback_query: CallbackQuery, state: FSMContext):
 
 
 @dp.message(Command('feedback'))
-@security('state')
-async def _start_feedback(message: Message, state: FSMContext):
+@security()
+async def _start_feedback(message: Message):
     if await new_message(message): return
-    await state.set_state(UserState.feedback)
-    markup = IMarkup(inline_keyboard=[[IButton(text="❌", callback_data="stop_feedback")]])
-    await message.answer("Отправьте текст вопроса или предложения. Любое следующее сообщение будет считаться отзывом",
-                         reply_markup=markup)
-
-
-@dp.message(UserState.feedback)
-@security('state')
-async def _feedback(message: Message, state: FSMContext):
-    if await new_message(message, forward=False): return
-    await state.clear()
-    acquaintance = await username_acquaintance(message)
-    if acquaintance:
-        await bot.send_photo(OWNER, photo=FSInputFile(resources_path("feedback.png")),
-                             caption=f"{acquaintance} написал(а) отзыв 👇")
-    else:
-        await bot.send_photo(OWNER,
-                             photo=FSInputFile(resources_path("feedback.png")),
-                             caption=f"ID: {message.chat.id}\n" +
-                                     (f"USERNAME: @{message.from_user.username}\n" if message.from_user.username else "") +
-                                     f"Имя: {message.from_user.first_name}\n" +
-                                     (f"Фамилия: {message.from_user.last_name}\n" if message.from_user.last_name else "") +
-                                     f"Время: {omsk_time(message.date)}")
-    await message.forward(OWNER)
-    await message.answer("Большое спасибо за отзыв!❤️❤️❤️")
-
-
-@dp.callback_query(F.data == "stop_feedback")
-@security('state')
-async def _stop_feedback(callback_query: CallbackQuery, state: FSMContext):
-    if await new_callback_query(callback_query): return
-    await state.clear()
-    await callback_query.message.edit_text("Отправка отзыва отменена")
+    registration_date: datetime = await db.fetch_one(f"SELECT registration_date FROM accounts WHERE account_id={message.chat.id}", one_data=True)
+    if not await db.fetch_one(f"SELECT true FROM accounts WHERE account_id={message.chat.id}", one_data=True):
+        return await message.answer("Вы не подключили бота и не можете оставить отзыв")
+    elif (time_now() - registration_date).total_seconds() < 3*24*60*60:  # С даты регистрации прошло менее 3 дней
+        return await message.answer("Вы зарегистрировались менее 3 дней назад. Попробуйте все функции, "
+                                    "чтобы написать полноценный объективный отзыв")
+    markup = IMarkup(inline_keyboard=[[IButton(text="Написать отзыв", url=f"tg://resolve?domain={channel}&post=375")]])
+    await message.answer(
+        "❗️ Внимание! ❗️\nВаш отзыв не должен содержать нецензурных высказываний и оскорблений. Приветствуются фото- и видеоматериалы\n"
+        "Вы можете предложить новую функцию или выразить свое мнение по поводу работы Maksogram. За честный отзыв вы получите "
+        f"в подарок неделю подписки\n\nВозникшие проблемы просим сразу перенаправлять <a href='t.me/{support}'>тех. поддержке</a>",
+        reply_markup=markup, parse_mode=html, disable_web_page_preview=True)
 
 
 @dp.callback_query(F.data == "send_payment")
@@ -478,10 +457,16 @@ async def profile_menu(account_id: int) -> dict[str, Any]:
     subscription = await db.fetch_one(f"SELECT \"user\", fee, next_payment FROM payment WHERE account_id={account_id}")
     account['registration_date'] = account['registration_date'].strftime("%Y-%m-%d %H:%M")
     subscription['next_payment'] = subscription['next_payment'].strftime("%Y-%m-%d 20:00")  # Время перезапуска
+    my_referal = await db.fetch_one(f"SELECT account_id FROM referals WHERE referal_id={account_id}", one_data=True)
+    if my_referal:
+        my_referal = f'<a href="tg://user?id={my_referal}">{my_referal}</a>'
+    else:
+        my_referal = '<span class="tg-spoiler">сам пришел 🤓</span>'
     if subscription['user'] == 'admin':
         subscription['next_payment'] = "конца жизни 😎"
         subscription['fee'] = "бесплатно"
-    return {"text": f"👁 <b>Профиль</b>\nID: {account_id}\nИмя: {account['name']}\nРегистрация: {account['registration_date']}\n"
+    return {"text": f"👁 <b>Профиль</b>\nID: {account_id}\nИмя: {account['name']}\n"
+                    f"Регистрация: {account['registration_date']}\nМеня пригласил: {my_referal}\n"
                     f"Подписка до {subscription['next_payment']}\nСтоимость: {subscription['fee']}",
             "parse_mode": html, "reply_markup": reply_markup}
 
@@ -611,7 +596,7 @@ async def qrcode_menu(account_id: int) -> dict[str, Any]:
                                       [IButton(text="Как работает генератор?", url=f"{SITE}#генератор-qr")],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
     return {"text": "🔗 <b>Генератор QR-кодов</b>\nГенерирует QR-код с нужной ссылкой. "
-                    f"Тригеры: создай, создать, qr, сгенерировать\n<blockquote>Создай t.me/{channel[1:]}</blockquote>",
+                    f"Тригеры: создай, создать, qr, сгенерировать\n<blockquote>Создай t.me/{channel}</blockquote>",
             "reply_markup": markup, "parse_mode": html, "disable_web_page_preview": True}
 
 
@@ -706,10 +691,8 @@ async def _morning_weather_switch(callback_query: CallbackQuery):
     account_id = callback_query.from_user.id
     match command:
         case "on":
-            telegram_clients[account_id].list_event_handlers()[4][1].chats.add(account_id)
             await db.execute(f"UPDATE modules SET morning_weather=true WHERE account_id={account_id}")  # Включение погоды по утрам
         case "off":
-            telegram_clients[account_id].list_event_handlers()[4][1].chats.remove(account_id)
             await db.execute(f"UPDATE modules SET morning_weather=false WHERE account_id={account_id}")  # Выключение погоды по утрам
     await callback_query.message.edit_text(**await weather_menu(callback_query.message.chat.id))
 
@@ -1274,8 +1257,7 @@ async def _registration(callback_query: CallbackQuery, state: FSMContext):
 async def _off(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     account_id = callback_query.from_user.id
-    phone_number = await db.fetch_one(f"SELECT phone_number FROM accounts WHERE account_id={account_id}", one_data=True)
-    await account_off(account_id, f"+{phone_number}")
+    await account_off(account_id)
     await callback_query.message.edit_text(**await menu(callback_query.message.chat.id))
 
 
@@ -1287,7 +1269,7 @@ async def _on(callback_query: CallbackQuery, state: FSMContext):
     phone_number = await db.fetch_one(f"SELECT phone_number FROM accounts WHERE account_id={account_id}", one_data=True)
     is_started = await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={account_id}", one_data=True)
     is_paid = await db.fetch_one(f"SELECT is_paid FROM payment WHERE account_id={account_id}", one_data=True)
-    if is_started is False:  # Зарегистрирован, но отключен
+    if is_started is False:  # Зарегистрирован, но не запущен
         if is_paid is False:  # Просрочен платеж
             payment_message = await payment_menu(account_id)
             await callback_query.message.edit_text("Ваша подписка истекла. Продлите ее, чтобы пользоваться Maksogram\n"
@@ -1296,6 +1278,9 @@ async def _on(callback_query: CallbackQuery, state: FSMContext):
             return await bot.send_message(OWNER, f"Платеж просрочен. Программа не запущена ({name})")
         try:
             await account_on(account_id, (admin_program if callback_query.message.chat.id == OWNER else program).Program)
+        except ConnectionError as e:  # Соединение не установлено
+            await callback_query.answer("Произошла ошибка... Попробуйте еще раз или дождитесь исправления неполадки")
+            raise e
         except UserIsNotAuthorized:  # Удалена сессия
             await state.set_state(UserState.relogin)
             await callback_query.answer("Удалена Telegram-сессия!")
@@ -1342,12 +1327,18 @@ async def _relogin(message: Message, state: FSMContext):
         await message.answer("Неправильный код! Попробуйте еще раз (только кнопкой!) 👇")
         await bot.send_message(OWNER, "Неправильный код")
     except Exception as e:
-        await message.answer("Произошла ошибка при попытке входа. Мы уже работает над ее решением!")
+        await message.answer("Произошла ошибка при попытке входа. Мы уже работает над ее решением!", reply_markup=ReplyKeyboardRemove())
         await bot.send_message(OWNER, f"⚠️ Ошибка (sign_in) ⚠️\n\nПроизошла ошибка {e.__class__.__name__}: {e}")
     else:
         await state.clear()
-        await account_on(account_id, (admin_program if message.chat.id == OWNER else program).Program)
-        await message.answer("Maksogram запущен!", reply_markup=ReplyKeyboardRemove())
+        try:
+            await account_on(account_id, (admin_program if message.chat.id == OWNER else program).Program)
+        except (ConnectionError, UserIsNotAuthorized) as e:
+            await message.answer("Произошла ошибка... Дождитесь ее решения, и желательно ничего не трогайте :)",
+                                 reply_markup=ReplyKeyboardRemove())
+            raise e
+        else:
+            await message.answer("Maksogram запущен!", reply_markup=ReplyKeyboardRemove())
 
 
 @dp.message(UserState.relogin_with_password)
@@ -1368,12 +1359,18 @@ async def _relogin_with_password(message: Message, state: FSMContext):
     except errors.PasswordHashInvalidError:
         await message.answer("Пароль неверный, попробуйте снова!")
     except Exception as e:
-        await message.answer("Произошла ошибка при попытке входа. Мы уже работает над ее решением!")
+        await message.answer("Произошла ошибка при попытке входа. Мы уже работает над ее решением!", reply_markup=ReplyKeyboardRemove())
         await bot.send_message(OWNER, f"⚠️ Ошибка (sign_in) ⚠️\n\nПроизошла ошибка {e.__class__.__name__}: {e}")
     else:
         await state.clear()
-        await account_on(account_id, (admin_program if message.chat.id == OWNER else program).Program)
-        await message.answer("Maksogram запущен!", reply_markup=ReplyKeyboardRemove())
+        try:
+            await account_on(account_id, (admin_program if message.chat.id == OWNER else program).Program)
+        except (ConnectionError, UserIsNotAuthorized) as e:
+            await message.answer("Произошла ошибка... Дождитесь ее решения, и желательно ничего не трогайте :)",
+                                 reply_markup=ReplyKeyboardRemove())
+            raise e
+        else:
+            await message.answer("Maksogram запущен!", reply_markup=ReplyKeyboardRemove())
 
 
 @dp.message(UserState.send_phone_number)
@@ -1389,20 +1386,18 @@ async def _contact(message: Message, state: FSMContext):
         return await message.reply("Вы не отправили контакт!")
     if message.chat.id != message.contact.user_id:
         return await message.reply("Это не ваш номер! Пожалуйста, воспользуйтесь кнопкой")
-    await state.set_state(UserState.send_code)
-    phone_number = '+' + message.contact.phone_number
+    phone_number = f'+{message.contact.phone_number}'
     telegram_client = new_telegram_client(phone_number)
+    if not await telegram_client_connect(telegram_client):
+        await state.clear()
+        await message.answer("Произошла ошибка... Попробуйте начать сначала :)", reply_markup=ReplyKeyboardRemove())
+        raise ConnectionError("За десять попыток соединение не установлено")
+    await state.set_state(UserState.send_code)
     await state.update_data(telegram_client=telegram_client, phone_number=phone_number)
     markup = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Отправить код", web_app=WebAppInfo(url=f"https://tgmaksim.ru/maksogram/code"))],
                                            [KeyboardButton(text="Отмена")]], resize_keyboard=True)
     await message.answer("Осталось отправить код для входа (<b>только кнопкой!</b>). Напоминаю, что мы не собираем "
                          f"никаких данных, а по любым вопросам можете обращаться в @{support}", reply_markup=markup, parse_mode=html)
-    await telegram_client.connect()
-    for i in range(10):
-        if telegram_client.is_connected():
-            await telegram_client.send_code_request(phone_number)
-            break
-        await asyncio.sleep(1)  # Ожидание соединения
 
 
 @dp.message(UserState.send_code)
@@ -1437,7 +1432,7 @@ async def _login(message: Message, state: FSMContext):
         await message.answer("Неправильный код! Попробуйте еще раз (только кнопкой!) 👇")
         await bot.send_message(OWNER, "Неправильный код")
     except Exception as e:
-        await message.answer("Произошла ошибка при попытке входа. Мы уже работает над ее решением!")
+        await message.answer("Произошла ошибка при попытке входа. Мы уже работает над ее решением!", reply_markup=ReplyKeyboardRemove())
         await bot.send_message(OWNER, f"⚠️ Ошибка (sign_in) ⚠️\n\nПроизошла ошибка {e.__class__.__name__}: {e}")
     else:
         await state.clear()
@@ -1459,7 +1454,6 @@ async def _login(message: Message, state: FSMContext):
                                  next_payment > CURRENT_TIMESTAMP THEN 
                                  next_payment ELSE CURRENT_TIMESTAMP END) + INTERVAL '30 days'), 
                                  is_paid=true WHERE account_id={referal}""")  # перемещение даты оплаты на 30 дней вперед
-                await db.execute(f"DELETE FROM referals WHERE referal_id={message.chat.id}")
                 await bot.send_message(referal, "По вашей реферальной ссылке зарегистрировался пользователь. "
                                                 "Вы получили месяц подписки в подарок!")
             await loading.delete()
@@ -1490,7 +1484,7 @@ async def _login_with_password(message: Message, state: FSMContext):
         await message.answer("Пароль неверный, попробуйте снова!")
     except Exception as e:
         await state.clear()
-        await message.answer("Произошла ошибка, обратитесь в поддержку...")
+        await message.answer("Произошла ошибка при попытке входа. Мы уже работает над ее решением!", reply_markup=ReplyKeyboardRemove())
         await bot.send_message(OWNER, f"⚠️Ошибка⚠️\n\nПроизошла ошибка {e.__class__.__name__}: {e}")
     else:
         await state.clear()
@@ -1512,7 +1506,6 @@ async def _login_with_password(message: Message, state: FSMContext):
                                  next_payment > CURRENT_TIMESTAMP THEN 
                                  next_payment ELSE CURRENT_TIMESTAMP END) + INTERVAL '30 days'), 
                                  is_paid=true WHERE account_id={referal}""")  # перемещение даты оплаты на 30 дней вперед
-                await db.execute(f"DELETE FROM referals WHERE referal_id={message.chat.id}")
                 await bot.send_message(referal, "По вашей реферальной ссылке зарегистрировался пользователь. "
                                                 "Вы получили месяц подписки в подарок!")
             await loading.delete()
@@ -1574,7 +1567,10 @@ async def developer_command(message: Message) -> bool:
     return message.chat.id != OWNER
 
 
-async def new_message(message: Message, /, forward: bool = True) -> bool:
+async def new_message(message: Message) -> bool:
+    if message.chat.id == OWNER:
+        return False
+
     if message.content_type == "text":
         content = message.text
     elif message.content_type == "web_app_data":
@@ -1584,7 +1580,7 @@ async def new_message(message: Message, /, forward: bool = True) -> bool:
     elif message.content_type == "users_shared":
         content = f"user {message.users_shared.user_ids[0]}"
     else:
-        content = f"'{message.content_type}'"
+        content = f"'{str(message.content_type).lower().replace('contenttype.', '')}'"
     id = str(message.chat.id)
     username = message.from_user.username
     first_name = message.from_user.first_name
@@ -1593,32 +1589,17 @@ async def new_message(message: Message, /, forward: bool = True) -> bool:
     acquaintance = await username_acquaintance(message)
     acquaintance = f"<b>Знакомый: {acquaintance}</b>\n" if acquaintance else ""
 
-    if message.chat.id == OWNER:
-        return False
-
-    if forward and (message.entities and message.entities[0].type != 'bot_command'):  # Сообщение с форматированием
-        await bot.send_message(
-            OWNER,
-            text=f"ID: {id}\n"
-                 f"{acquaintance}" +
-                 (f"USERNAME: @{username}\n" if username else "") +
-                 f"Имя: {escape(first_name)}\n" +
-                 (f"Фамилия: {escape(last_name)}\n" if last_name else "") +
-                 f"Время: {date}",
-            parse_mode=html)
-        await message.forward(OWNER)
-    elif forward:
-        await bot.send_message(
-            OWNER,
-            text=f"ID: {id}\n"
-                 f"{acquaintance}" +
-                 (f"USERNAME: @{username}\n" if username else "") +
-                 f"Имя: {escape(first_name)}\n" +
-                 (f"Фамилия: {escape(last_name)}\n" if last_name else "") +
-                 (f"<code>{escape(content)}</code>\n"
-                  if not content.startswith("/") or len(content.split()) > 1 else f"{escape(content)}\n") +
-                 f"Время: {date}",
-            parse_mode=html)
+    await bot.send_message(
+        OWNER,
+        text=f"ID: {id}\n"
+             f"{acquaintance}" +
+             (f"USERNAME: @{username}\n" if username else "") +
+             f"Имя: {escape(first_name)}\n" +
+             (f"Фамилия: {escape(last_name)}\n" if last_name else "") +
+             (f"<code>{escape(content)}</code>\n"
+              if not content.startswith("/") or len(content.split()) > 1 else f"{escape(content)}\n") +
+             f"Время: {date}",
+        parse_mode=html)
 
     if message.chat.id in Data.banned:
         await bot.send_message(OWNER, "Пользователь заблокирован!")
@@ -1626,6 +1607,9 @@ async def new_message(message: Message, /, forward: bool = True) -> bool:
 
 
 async def new_callback_query(callback_query: CallbackQuery) -> bool:
+    if callback_query.from_user.id == OWNER:
+        return False
+
     id = str(callback_query.message.chat.id)
     username = callback_query.from_user.username
     first_name = callback_query.from_user.first_name
@@ -1635,9 +1619,6 @@ async def new_callback_query(callback_query: CallbackQuery) -> bool:
     acquaintance = await username_acquaintance(callback_query.message)
     acquaintance = f"<b>Знакомый: {acquaintance}</b>\n" if acquaintance else ""
 
-    if callback_query.from_user.id == OWNER:
-        return False
-
     await bot.send_message(
         OWNER,
         text=f"ID: {id}\n"
@@ -1645,7 +1626,7 @@ async def new_callback_query(callback_query: CallbackQuery) -> bool:
              (f"USERNAME: @{username}\n" if username else "") +
              f"Имя: {escape(first_name)}\n" +
              (f"Фамилия: {escape(last_name)}\n" if last_name else "") +
-             f"CALLBACK_DATA: {callback_data}\n"
+             f"Кнопка: {callback_data}\n"
              f"Время: {date}",
         parse_mode=html)
 

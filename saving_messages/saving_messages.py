@@ -45,6 +45,10 @@ async def main():
 
         try:
             await account_on(account_id, (admin_program if account_id == OWNER else program).Program)
+        except ConnectionError as e:
+            await MaksogramBot.send_message(account_id, "Произошла ошибка при запуске Maksogram, скоро все будет исправлено. "
+                                                        "Желательно ничего не трогать :)")
+            raise e
         except UserIsNotAuthorized:
             await db.execute(f"UPDATE settings SET is_started=false WHERE account_id={account_id}")
             try:

@@ -1,8 +1,8 @@
 OWNER = 5128609241
-support = "tgmaksim_ru_company"
+support = "tgmaksim_company"
 SITE = "https://tgmaksim.ru/проекты/maksogram"
 subscribe = "https://t.me/+F5YW1gV3gdhjNjVi"
-channel = "@tgmaksim_ru"
+channel = "tgmaksim_ru"
 morning = 5, 12
 
 html = "HTML"
@@ -82,7 +82,27 @@ async def count_avatars(account_id: int, user_id: int) -> int:
     return len((await telegram_clients[account_id](GetUserPhotosRequest(user_id, 0, 0, 128))).photos)
 
 
-async def account_off(account_id: int, phone_number: str):
+async def check_connection(telegram_client: TelegramClient) -> bool:
+    try:
+        await telegram_client.is_user_authorized()
+    except ConnectionError:
+        return False
+    else:
+        return True
+
+
+async def telegram_client_connect(telegram_client: TelegramClient) -> bool:
+    await telegram_client.connect()
+    for i in range(5):
+        if await check_connection(telegram_client):
+            return True
+        await telegram_client.connect()
+        await asyncio.sleep(1)
+    return False  # Если за пять попыток соединение не установлено...
+
+
+async def account_off(account_id: int):
+    phone_number = f"+{await db.fetch_one(f'SELECT phone_number FROM accounts WHERE account_id={account_id}', one_data=True)}"
     await db.execute(f"UPDATE settings SET is_started=false WHERE account_id={account_id}")
     telegram_client, telegram_clients[account_id] = telegram_clients[account_id], new_telegram_client(phone_number)
     if telegram_client.is_connected():
@@ -90,17 +110,13 @@ async def account_off(account_id: int, phone_number: str):
 
 
 async def account_on(account_id: int, Program):
-    if not telegram_clients[account_id].is_connected():
-        await telegram_clients[account_id].connect()
-        for i in range(10):
-            if telegram_clients[account_id].is_connected():
-                break
-            await asyncio.sleep(1)
-    if await telegram_clients[account_id].is_user_authorized():
+    telegram_client = telegram_clients[account_id]
+    if not await check_connection(telegram_client):  # Требуется соединение
+        if not await telegram_client_connect(telegram_client):
+            raise ConnectionError("За десять попыток соединение не установлено")
+    if await telegram_client.is_user_authorized():
         await db.execute(f"UPDATE settings SET is_started=true WHERE account_id={account_id}")
         status_users = await db.fetch_all(f"SELECT user_id FROM status_users WHERE account_id={account_id}", one_data=True)
-        if any((await db.fetch_one(f"SELECT morning_weather FROM modules WHERE account_id={account_id}")).values()):
-            status_users.append(account_id)
         morning_notification = await db.fetch_one(f"SELECT morning_notification FROM accounts WHERE account_id={account_id}", one_data=True)
         asyncio.get_running_loop().create_task(Program(telegram_clients[account_id], account_id, status_users, morning_notification)
                                                .run_until_disconnected())
@@ -169,8 +185,8 @@ def new_telegram_client(phone_number: str) -> TelegramClient:
         Variables.TelegramApplicationId,
         Variables.TelegramApplicationHash,
         device_model="Maksogram in Chat",
-        system_version="Maksogram platform",
-        app_version=Variables.version_string,
+        system_version="Maksogram platform v2",
+        app_version=Variables.version_string.replace(" ", "-").replace("(", "").replace(")", ""),
         lang_code="ru",
         system_lang_code="ru"
     )
@@ -178,7 +194,7 @@ def new_telegram_client(phone_number: str) -> TelegramClient:
 
 class Variables:
     version = "2.5"
-    version_string = "2.5.3 (31)"
+    version_string = "2.5.3 (32)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])
