@@ -1,0 +1,373 @@
+import re
+import time
+
+from typing import Any
+from core import (
+    db,
+    html,
+    security,
+    json_encode,
+    get_enabled_auto_answer,
+)
+
+from aiogram import F
+from aiogram.fsm.context import FSMContext
+from aiogram.types import Message, CallbackQuery
+from aiogram.types import KeyboardButton as KButton
+from aiogram.types import ReplyKeyboardMarkup as KMarkup
+from aiogram.types import InlineKeyboardMarkup as IMarkup
+from aiogram.types import InlineKeyboardButton as IButton
+from .core import (
+    dp,
+    bot,
+    UserState,
+    new_message,
+    new_callback_query,
+)
+
+
+@dp.callback_query(F.data == "answering_machine")
+@security()
+async def _answering_machine(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    await callback_query.message.edit_text(**await answering_machine_menu(callback_query.message.chat.id))
+
+
+async def answering_machine_menu(account_id: int) -> dict[str, Any]:
+    buttons = []
+    answers = await db.fetch_all(f"SELECT answer_id, status, type, start_time, end_time, text FROM answering_machine "
+                                 f"WHERE account_id={account_id}")  # Автоответы
+    enabled_answer = await get_enabled_auto_answer(account_id)
+    for answer in answers:
+        text = (str(answer['text'])[:28] + "...") if len(str(answer['text'])) > 28 else str(answer['text'])
+        indicator = ""
+        if answer['answer_id'] == enabled_answer:  # Автоответ активен
+            if answer['type'] == 'timetable':  # Автоответ по расписанию
+                indicator = "⏰ "
+            elif answer['type'] == 'ordinary':  # Обычный автоответ
+                indicator = "🟢 "
+        buttons.append([IButton(text=f"{indicator}{text}", callback_data=f"answering_machine_menu{answer['answer_id']}")])
+    buttons.append([IButton(text="➕ Создать новый ответ", callback_data="new_answering_machine")])
+    buttons.append([IButton(text="◀️  Назад", callback_data="menu")])
+    markup = IMarkup(inline_keyboard=buttons)
+    return {
+        "text": "🤖 <b>Автоответчик</b>\n<blockquote expandable><b>Подробнее об автоответчике</b>\n"
+                "Автоответчик бывает <b>обыкновенным</b> и <b>по расписанию</b>\n\nОбыкновенный автоответ работает при включении\n"
+                "Автоответ по расписанию имеет временные рамки, в течение которых будет работать\n\nОдновременно могут "
+                "работать сразу <b>несколько</b> автоответов по расписанию, но их время работы не должно пересекаться\n\n"
+                "Если включен обыкновенный автоответ и один (несколько) временной, то работать будет "
+                "<b>только обыкновенный</b></blockquote>",
+        "reply_markup": markup, "parse_mode": html}
+
+
+@dp.callback_query(F.data == "new_answering_machine")
+@security('state')
+async def _new_answering_machine_start(callback_query: CallbackQuery, state: FSMContext):
+    if await new_callback_query(callback_query): return
+    if await db.fetch_one(f"SELECT COUNT(*) FROM answering_machine WHERE account_id={callback_query.from_user.id}", one_data=True) >= 5:
+        # Количество автоответов уже достигло максимума
+        return await callback_query.answer("У вас максимальное количество автоответов", True)
+    await state.set_state(UserState.answering_machine)
+    markup = KMarkup(keyboard=[[KButton(text="Отмена")]], resize_keyboard=True)
+    message_id = (await callback_query.message.answer("Напишите <b>текст</b>, который я отправлю в случае необходимости",
+                                                      parse_mode=html, reply_markup=markup)).message_id
+    await state.update_data(message_id=message_id)
+    await callback_query.message.delete()
+
+
+@dp.message(UserState.answering_machine)
+@security('state')
+async def _new_answering_machine(message: Message, state: FSMContext):
+    if await new_message(message): return
+    message_id = (await state.get_data())['message_id']
+    await state.clear()
+    if message.content_type != "text":
+        await message.answer("<b>Ваше сообщение не является текстом</b>", parse_mode=html,
+                             reply_markup=(await answering_machine_menu(message.chat.id))['reply_markup'])
+    elif len(message.text) > 512:
+        await message.answer("<b>Ваше сообщение слишком длинное</b>", parse_mode=html,
+                             reply_markup=(await answering_machine_menu(message.chat.id))['reply_markup'])
+    elif message.text != "Отмена":
+        answer_id = int(time.time()) - 1737828000  # 1737828000 - 2025/01/26 00:00 (день активного обновления автоответчика)
+        entities = json_encode([entity.model_dump() for entity in message.entities or []])
+        # Новый автоответ
+        await db.execute(f"INSERT INTO answering_machine VALUES ({message.chat.id}, {answer_id}, "
+                         f"false, 'ordinary', NULL, NULL, $1, '{entities}')", message.text)
+        await message.answer(**await auto_answer_menu(message.chat.id, answer_id))
+    else:
+        await message.answer(**await answering_machine_menu(message.chat.id))
+    await bot.delete_messages(chat_id=message.chat.id, message_ids=[message.message_id, message_id])
+
+
+@dp.callback_query(F.data.startswith("answering_machine_menu"))
+@security()
+async def _answering_machine_menu(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    answer_id = int(callback_query.data.replace("answering_machine_menu", ""))
+    await callback_query.message.edit_text(**await auto_answer_menu(callback_query.message.chat.id, answer_id))
+
+
+async def auto_answer_menu(account_id: int, answer_id: int):
+    # Включенный автоответ и нужный автоответ
+    answer = await db.fetch_one(f"SELECT status, type, start_time, end_time, text, entities FROM answering_machine "
+                                f"WHERE account_id={account_id} AND answer_id={answer_id}")
+    if answer is None:  # Автоответ не найден
+        return await answering_machine_menu(account_id)
+    time_button = IButton(text="⏰ Расписание", callback_data=f"answering_machine_time{answer_id}")
+    is_timetable = answer['type'] == 'timetable'
+    if is_timetable:
+        time_zone = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={account_id}", one_data=True)
+        hours_start_time = str((answer['start_time'].hour + time_zone) % 24).rjust(2, "0")
+        minutes_start_time = str(answer['start_time'].minute).rjust(2, "0")
+        hours_end_time = str((answer['end_time'].hour + time_zone) % 24).rjust(2, "0")
+        minutes_end_time = str(answer['end_time'].minute).rjust(2, "0")
+        timetable = f"{hours_start_time}:{minutes_start_time} — {hours_end_time}:{minutes_end_time}"
+        time_button = IButton(text=f"⏰ {timetable}", callback_data=f"answering_machine_time{answer_id}")
+    status_button = IButton(text="🔴 Выключить автоответ", callback_data=f"answering_machine_off_{answer_id}") if answer['status'] \
+        else IButton(text="🟢 Включить автоответ", callback_data=f"answering_machine_on_{answer_id}")
+    markup = IMarkup(inline_keyboard=[[status_button],
+                                      [IButton(text="✏️ Текст", callback_data=f"answering_machine_edit_text{answer_id}"),
+                                       time_button],
+                                      [IButton(text="🚫 Удалить автоответ", callback_data=f"answering_machine_del_answer{answer_id}")],
+                                      [IButton(text="◀️  Назад", callback_data="answering_machine")]])
+    return {"text": str(answer['text']), "entities": answer['entities'], "reply_markup": markup}
+
+
+@dp.callback_query(F.data.startswith("answering_machine_del_answer"))
+@security()
+async def _answering_machine_del_answer(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    answer_id = int(callback_query.data.replace("answering_machine_del_answer", ""))
+    account_id = callback_query.from_user.id
+    await db.execute(f"DELETE FROM answering_machine WHERE account_id={account_id} AND answer_id={answer_id}")  # Удаление автоответа
+    await callback_query.message.edit_text(**await answering_machine_menu(callback_query.message.chat.id))
+
+
+@dp.callback_query(F.data.startswith("answering_machine_on").__or__(F.data.startswith("answering_machine_off")))
+@security()
+async def _answering_machine_switch(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    command, answer_id = callback_query.data.replace("answering_machine_", "").split("_")
+    account_id = callback_query.from_user.id
+    answer = await db.fetch_one(f"SELECT type, start_time, end_time FROM answering_machine "
+                                f"WHERE account_id={account_id} AND answer_id={answer_id}")
+    if answer is None:  # Автоответ не найден
+        await callback_query.answer("Автоответ был удалено ранее!", True)
+        return await callback_query.message.edit_text(**await answering_machine_menu(account_id))
+    status = "true" if command == "on" else "false"
+    main_auto_answer = await get_enabled_auto_answer(account_id)
+    if answer['type'] == "ordinary" and command == "on":  # Обыкновенный автоответ
+        # Выключение включенного обыкновенного автоответа (если есть)
+        await db.execute(f"UPDATE answering_machine SET status=false WHERE account_id={account_id} AND type='ordinary'")
+        await callback_query.answer("Включенный ранее автоответ был выключен")
+    elif answer['type'] == "timetable" and command == "on":  # Автоответ по расписанию
+        # Автоответы по расписанию не должны пересекаться во времени
+        for ans in await db.fetch_all(f"SELECT start_time, end_time FROM answering_machine WHERE account_id={account_id} "
+                                      f"AND type='timetable' AND status=true AND answer_id!={answer_id}"):
+            if answer['start_time'] < answer['end_time'] < ans['start_time'] < ans['end_time'] or \
+                    ans['start_time'] < ans['end_time'] < answer['start_time'] < answer['end_time'] or \
+                    answer['end_time'] < ans['start_time'] < ans['end_time'] < answer['start_time'] or \
+                    ans['end_time'] < answer['start_time'] < answer['end_time'] < ans['start_time']:
+                pass  # Все случаи, когда автоответы по времени не пересекаются
+            else:
+                return await callback_query.answer("Расписание данного автоответа пересекается с расписанием уже включенного", True)
+    await db.execute(f"UPDATE answering_machine SET status={status} WHERE account_id={account_id} AND answer_id={answer_id}")
+    if main_auto_answer != await get_enabled_auto_answer(account_id):  # Если работающий автоответ сменился, обнуляем sending
+        await db.execute(f"UPDATE functions SET answering_machine_sending='[]' WHERE account_id={account_id}")
+    await callback_query.message.edit_text(**await auto_answer_menu(account_id, answer_id))
+
+
+@dp.callback_query(F.data.startswith("answering_machine_edit_text"))
+@security('state')
+async def _answering_machine_edit_text_start(callback_query: CallbackQuery, state: FSMContext):
+    if await new_callback_query(callback_query): return
+    answer_id = int(callback_query.data.replace("answering_machine_edit_text", ""))
+    await state.set_state(UserState.answering_machine_edit_text)
+    markup = KMarkup(keyboard=[[KButton(text="Отмена")]], resize_keyboard=True)
+    message_id = (await callback_query.message.answer("Напишите <b>текст</b>, который я отправлю в случае необходимости",
+                                                      parse_mode=html, reply_markup=markup)).message_id
+    await state.update_data(message_id=message_id, answer_id=answer_id)
+    await callback_query.message.delete()
+
+
+@dp.message(UserState.answering_machine_edit_text)
+@security('state')
+async def _answering_machine_edit_text(message: Message, state: FSMContext):
+    if await new_message(message): return
+    data = await state.get_data()
+    message_id = data['message_id']
+    answer_id = data['answer_id']
+    await state.clear()
+    account_id = message.chat.id
+    if not await db.fetch_one(f"SELECT true FROM answering_machine WHERE account_id={account_id} AND answer_id={answer_id}"):
+        await message.answer(**await answering_machine_menu(account_id))  # Автоответ не найден
+    elif message.content_type != "text":
+        await message.answer("<b>Ваше сообщение не является текстом</b>", parse_mode=html,
+                             reply_markup=(await auto_answer_menu(message.chat.id, answer_id))['reply_markup'])
+    elif len(message.text) > 512:
+        await message.answer("<b>Ваше сообщение слишком длинное</b>", parse_mode=html,
+                             reply_markup=(await auto_answer_menu(message.chat.id, answer_id))['reply_markup'])
+    elif message.text != "Отмена":
+        entities = json_encode([entity.model_dump() for entity in message.entities or []])
+        await db.execute(f"UPDATE answering_machine SET text=$1, entities='{entities}' "
+                         f"WHERE account_id={account_id} AND answer_id={answer_id}", message.text)  # Изменение автоответа
+        await message.answer(**await auto_answer_menu(account_id, answer_id))
+    else:
+        await message.answer(**await auto_answer_menu(account_id, answer_id))
+    await bot.delete_messages(chat_id=message.chat.id, message_ids=[message_id, message.message_id])
+
+
+@dp.callback_query(F.data.startswith("answering_machine_time"))
+@security()
+async def _answering_machine_time(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    answer_id = int(callback_query.data.replace("answering_machine_time", ""))
+    await callback_query.message.edit_text(**await time_auto_answer_menu(callback_query.from_user.id, answer_id))
+
+
+async def time_auto_answer_menu(account_id: int, answer_id: int) -> dict[str, Any]:
+    answer = await db.fetch_one(f"SELECT type, start_time, end_time FROM answering_machine "
+                                f"WHERE account_id={account_id} AND answer_id={answer_id}")
+    if answer['type'] == "ordinary":  # Обыкновенный автоответ — расписание отсутствует
+        reply_markup = IMarkup(inline_keyboard=
+                               [[IButton(text="⏰ Выбрать время", callback_data=f"answering_machine_edit_timetable{answer_id}")],
+                                [IButton(text="◀️  Назад", callback_data=f"answering_machine_menu{answer_id}")]])
+        return {"text": f"Вы можете добавить расписание, чтобы я отвечал только в нужное время",
+                "reply_markup": reply_markup, "parse_mode": html}
+    elif answer['type'] == "timetable":  # Автоответ с расписанием
+        reply_markup = IMarkup(inline_keyboard=[[IButton(text="➡️ Начало", callback_data=f"answering_machine_edit_start_time_{answer_id}"),
+                                                IButton(text="Окончание ⬅️", callback_data=f"answering_machine_edit_end_time_{answer_id}")],
+                                                [IButton(text="❌ Удалить расписание", callback_data=f"answering_machine_del_time{answer_id}")],
+                                                [IButton(text="◀️  Назад", callback_data=f"answering_machine_menu{answer_id}")]])
+        time_zone = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={account_id}", one_data=True)
+        hours_start_time = str((answer['start_time'].hour + time_zone) % 24).rjust(2, "0")
+        minutes_start_time = str(answer['start_time'].minute).rjust(2, "0")
+        hours_end_time = str((answer['end_time'].hour + time_zone) % 24).rjust(2, "0")
+        minutes_end_time = str(answer['end_time'].minute).rjust(2, "0")
+        return {"text": f"Вы можете изменить или удалить расписание автоответа\n"
+                        f"{hours_start_time}:{minutes_start_time} — {hours_end_time}:{minutes_end_time}",
+                "reply_markup": reply_markup, "parse_mode": html}
+
+
+@dp.callback_query(F.data.startswith("answering_machine_edit_timetable"))
+@security('state')
+async def _answering_machine_edit_timetable_start(callback_query: CallbackQuery, state: FSMContext):
+    if await new_callback_query(callback_query): return
+    answer_id = int(callback_query.data.replace("answering_machine_edit_timetable", ""))
+    await state.set_state(UserState.answering_machine_edit_timetable)
+    markup = KMarkup(keyboard=[[KButton(text="Отмена")]], resize_keyboard=True)
+    message_id = (await callback_query.message.answer("Напишите <b>время</b>, в течение которого будет работать автоответ\n"
+                                                      "Например: 22:00 - 6:00", parse_mode=html, reply_markup=markup)).message_id
+    await state.update_data(message_id=message_id, answer_id=answer_id)
+    await callback_query.message.delete()
+
+
+@dp.message(UserState.answering_machine_edit_timetable)
+@security('state')
+async def _answering_machine_edit_timetable(message: Message, state: FSMContext):
+    if await new_message(message): return
+    data = await state.get_data()
+    answer_id = data['answer_id']
+    message_id = data['message_id']
+    await state.clear()
+    account_id = message.chat.id
+    if not await db.fetch_one(f"SELECT true FROM answering_machine WHERE account_id={account_id} AND answer_id={answer_id}"):
+        await message.answer(**await answering_machine_menu(account_id))  # Автоответ не найден
+    elif message.content_type != "text":
+        await message.answer("<b>Ваше сообщение не является текстом</b>", parse_mode=html,
+                             reply_markup=(await time_auto_answer_menu(message.chat.id, answer_id))['reply_markup'])
+    elif message.text != "Отмена":
+        text = message.text.replace(" ", "")
+        if not re.fullmatch(r'\d{1,2}:\d{1,2}-\d{1,2}:\d{1,2}', text):  # Некорректный формат
+            await message.answer("<b>Некорректный формат расписания</b>", parse_mode=html,
+                                 reply_markup=(await time_auto_answer_menu(message.chat.id, answer_id))['reply_markup'])
+        else:
+            time_zone = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={account_id}", one_data=True)
+            start_time, end_time = text.split("-")
+            hours_start_time, minutes_start_time = map(int, start_time.split(":"))
+            hours_start_time = (hours_start_time - time_zone) % 24
+            hours_end_time, minutes_end_time = map(int, end_time.split(":"))
+            hours_end_time = (hours_end_time - time_zone) % 24
+            if (hours_start_time, minutes_start_time) == (hours_end_time, minutes_end_time):  # Одинаковые start_time и end_time
+                await message.answer("<b>Некорректный формат расписания</b>", parse_mode=html,
+                                     reply_markup=(await time_auto_answer_menu(message.chat.id, answer_id))['reply_markup'])
+            else:
+                await db.execute(f"UPDATE answering_machine SET status=false, type='timetable', "
+                                 f"start_time='{hours_start_time}:{minutes_start_time}', "
+                                 f"end_time='{hours_end_time}:{minutes_end_time}' "
+                                 f"WHERE account_id={account_id} AND answer_id={answer_id}")
+                await message.answer(**await time_auto_answer_menu(account_id, answer_id))
+    else:
+        await message.answer(**await time_auto_answer_menu(message.chat.id, answer_id))
+    await bot.delete_messages(chat_id=message.chat.id, message_ids=[message_id, message.message_id])
+
+
+@dp.callback_query(F.data.startswith("answering_machine_edit_start_time").__or__(F.data.startswith("answering_machine_edit_end_time")))
+@security('state')
+async def _answering_machine_edit_time_start(callback_query: CallbackQuery, state: FSMContext):
+    if await new_callback_query(callback_query): return
+    type_time = "_".join(callback_query.data.split("_")[3:5])  # start_time или end_time
+    answer_id = int(callback_query.data.split("_")[-1])
+    await state.set_state(UserState.answering_machine_edit_time)
+    markup = KMarkup(keyboard=[[KButton(text="Отмена")]], resize_keyboard=True)
+    if type_time == "start_time":
+        text = "Напишите <b>начало</b> работы автоответа\nНапример: 22:00"
+    else:
+        text = "Напишите <b>окончание</b> работы автоответа\nНапример: 06:00"
+    message_id = (await callback_query.message.answer(text, parse_mode=html, reply_markup=markup)).message_id
+    await state.update_data(message_id=message_id, answer_id=answer_id, type_time=type_time)
+    await callback_query.message.delete()
+
+
+@dp.message(UserState.answering_machine_edit_time)
+@security('state')
+async def _answering_machine_edit_time(message: Message, state: FSMContext):
+    if await new_message(message): return
+    data = await state.get_data()
+    answer_id = data['answer_id']
+    message_id = data['message_id']
+    type_time = data['type_time']
+    await state.clear()
+    account_id = message.chat.id
+    if not await db.fetch_one(f"SELECT true FROM answering_machine WHERE account_id={account_id} AND answer_id={answer_id}"):
+        await message.answer(**await answering_machine_menu(account_id))  # Автоответ не найден
+    elif message.content_type != "text":
+        await message.answer("<b>Ваше сообщение не является текстом</b>", parse_mode=html,
+                             reply_markup=(await time_auto_answer_menu(message.chat.id, answer_id))['reply_markup'])
+    elif message.text != "Отмена":
+        text = message.text.replace(" ", "")
+        if not re.fullmatch(r'\d{1,2}:\d{1,2}', text):  # Некорректный формат
+            await message.answer("<b>Некорректный формат времени</b>", parse_mode=html,
+                                 reply_markup=(await time_auto_answer_menu(message.chat.id, answer_id))['reply_markup'])
+        else:
+            other_type_time = "start_time" if type_time == "end_time" else "end_time"
+            other_time = await db.fetch_one(f"SELECT {other_type_time} FROM answering_machine "
+                                            f"WHERE account_id={account_id} AND answer_id={answer_id}", one_data=True)
+            time_zone = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={account_id}", one_data=True)
+            hours, minutes = map(int, text.split(":"))
+            hours = (hours - time_zone) % 24
+            if (hours, minutes) == tuple(map(int, other_time.strftime("%H:%M").split(":"))):
+                await message.answer("<b>Начало и окончание расписания совпадают</b>", parse_mode=html,
+                                     reply_markup=(await time_auto_answer_menu(message.chat.id, answer_id))['reply_markup'])
+            else:
+                await db.execute(f"UPDATE answering_machine SET status=false, {type_time}='{hours}:{minutes}' "
+                                 f"WHERE account_id={account_id} AND answer_id={answer_id}")
+                await message.answer(**await time_auto_answer_menu(account_id, answer_id))
+    else:
+        await message.answer(**await time_auto_answer_menu(message.chat.id, answer_id))
+    await bot.delete_messages(chat_id=message.chat.id, message_ids=[message_id, message.message_id])
+
+
+@dp.callback_query(F.data.startswith("answering_machine_del_time"))
+@security()
+async def _answering_machine_del_time(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    answer_id = int(callback_query.data.replace("answering_machine_del_time", ""))
+    account_id = callback_query.from_user.id
+    await db.execute(f"UPDATE answering_machine SET status=false, type='ordinary', start_time=NULL, end_time=NULL "
+                     f"WHERE account_id={account_id} AND answer_id={answer_id}")
+    await callback_query.message.edit_text(**await auto_answer_menu(account_id, answer_id))
+
+
+def answering_machine_initial():
+    pass  # Чтобы PyCharm не ругался
