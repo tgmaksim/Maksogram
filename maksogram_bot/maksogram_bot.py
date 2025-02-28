@@ -1392,6 +1392,7 @@ async def _contact(message: Message, state: FSMContext):
         await state.clear()
         await message.answer("Произошла ошибка... Попробуйте начать сначала :)", reply_markup=ReplyKeyboardRemove())
         raise ConnectionError("За десять попыток соединение не установлено")
+    await telegram_client.send_code_request(phone_number)
     await state.set_state(UserState.send_code)
     await state.update_data(telegram_client=telegram_client, phone_number=phone_number)
     markup = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Отправить код", web_app=WebAppInfo(url=f"https://tgmaksim.ru/maksogram/code"))],
