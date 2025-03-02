@@ -15,9 +15,9 @@ import asyncio
 import sys_keys
 import traceback
 
+from aiogram import Bot
 from typing import Union, Any
 from database import Database
-from aiogram import Bot, Dispatcher
 from telethon import TelegramClient
 from datetime import datetime, timedelta
 from telethon.tl.functions.photos import GetUserPhotosRequest
@@ -194,7 +194,7 @@ def new_telegram_client(phone_number: str) -> TelegramClient:
 
 class Variables:
     version = "2.5"
-    version_string = "2.5.3 (34)"
+    version_string = "2.5.4 (35)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])

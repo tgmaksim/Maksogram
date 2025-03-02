@@ -5,7 +5,6 @@ from core import (
     db,
     html,
     OWNER,
-    time_now,
     omsk_time,
     zip_int_data,
 )
@@ -18,6 +17,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
     Message,
     WebAppInfo,
+    InlineQuery,
     CallbackQuery,
 )
 
@@ -68,12 +68,11 @@ def referal_link(user_id: int) -> str:
     return "r" + zip_int_data(user_id)
 
 
-async def username_acquaintance(message: Message, default: Literal[None, 'first_name'] = None):
-    id = message.chat.id
+async def username_acquaintance(id: int, first_name: str, default: Literal[None, 'first_name'] = None):
     user = await db.fetch_one(f"SELECT name FROM acquaintances WHERE id={id}", one_data=True)
     if user is not None or default != 'first_name':
         return user
-    return message.from_user.first_name
+    return first_name
 
 
 async def developer_command(message: Message) -> bool:
@@ -105,7 +104,7 @@ async def new_message(message: Message) -> bool:
     first_name = message.from_user.first_name
     last_name = message.from_user.last_name
     date = str(omsk_time(message.date))
-    acquaintance = await username_acquaintance(message)
+    acquaintance = await username_acquaintance(message.chat.id, first_name)
     acquaintance = f"<b>Знакомый: {acquaintance}</b>\n" if acquaintance else ""
 
     await bot.send_message(
@@ -134,8 +133,7 @@ async def new_callback_query(callback_query: CallbackQuery) -> bool:
     first_name = callback_query.from_user.first_name
     last_name = callback_query.from_user.last_name
     callback_data = callback_query.data
-    date = str(time_now())
-    acquaintance = await username_acquaintance(callback_query.message)
+    acquaintance = await username_acquaintance(callback_query.from_user.id, first_name)
     acquaintance = f"<b>Знакомый: {acquaintance}</b>\n" if acquaintance else ""
 
     await bot.send_message(
@@ -145,10 +143,36 @@ async def new_callback_query(callback_query: CallbackQuery) -> bool:
              (f"USERNAME: @{username}\n" if username else "") +
              f"Имя: {escape(first_name)}\n" +
              (f"Фамилия: {escape(last_name)}\n" if last_name else "") +
-             f"Кнопка: {callback_data}\n"
-             f"Время: {date}",
+             f"Кнопка: {callback_data}",
         parse_mode=html)
 
     if callback_query.from_user.id in Data.banned:
         await bot.send_message(OWNER, "Пользователь заблокирован!")
     return callback_query.from_user.id in Data.banned
+
+
+async def new_inline_query(inline_query: InlineQuery):
+    if inline_query.from_user.id == OWNER:
+        return
+
+    id = str(inline_query.from_user.id)
+    username = inline_query.from_user.username
+    first_name = inline_query.from_user.first_name
+    last_name = inline_query.from_user.last_name
+    query = inline_query.query
+    acquaintance = await username_acquaintance(inline_query.from_user.id, first_name)
+    acquaintance = f"<b>Знакомый: {acquaintance}</b>\n" if acquaintance else ""
+
+    await bot.send_message(
+        OWNER,
+        text=f"ID: {id}\n"
+             f"{acquaintance}" +
+             (f"USERNAME: @{username}\n" if username else "") +
+             f"Имя: {escape(first_name)}\n" +
+             (f"Фамилия: {escape(last_name)}\n" if last_name else "") +
+             f"Поиск: {query}",
+        parse_mode=html)
+
+    if inline_query.from_user.id in Data.banned:
+        await bot.send_message(OWNER, "Пользователь заблокирован!")
+    return inline_query.from_user.id in Data.banned

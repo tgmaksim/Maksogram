@@ -70,5 +70,5 @@ async def main(account_id: int) -> str:
     weather = await get_weather(city)
     if weather is None:
         await MaksogramBot.send_system_message("⚠️Ошибка в погоде⚠️\nКод запроса не равен 200")
-        return "Произошла ошибка..."
-    return f"<b>Погода в городе {city}</b>\n{weather}"
+        return f"<b>Погода в городе {city}</b>\nПроизошла ошибка..."
+    return f"<b>Погода в городе {city}</b>\n\n{weather}"

@@ -24,6 +24,8 @@ from . core import (
 )
 
 # Инициализация обработчиков событий aiogram
+from . inline_mode import inline_mode_initial
+inline_mode_initial()
 from . admin import admin_initial
 admin_initial()
 from . menu import menu_initial
@@ -50,7 +52,7 @@ async def _start_feedback(message: Message):
     elif (time_now() - registration_date).total_seconds() < 3*24*60*60:  # С даты регистрации прошло менее 3 дней
         return await message.answer("Вы зарегистрировались менее 3 дней назад. Попробуйте все функции, "
                                     "чтобы написать полноценный объективный отзыв")
-    markup = IMarkup(inline_keyboard=[[IButton(text="Написать отзыв", url=f"tg://resolve?domain={channel}&post=375")]])
+    markup = IMarkup(inline_keyboard=[[IButton(text="Написать отзыв", url=f"tg://resolve?domain={channel}&post=375&comment=512")]])
     await message.answer(
         "❗️ Внимание! ❗️\nВаш отзыв не должен содержать нецензурных высказываний и оскорблений. Приветствуются фото- и видеоматериалы\n"
         "Вы можете предложить новую функцию или выразить свое мнение по поводу работы Maksogram. За честный отзыв вы получите "

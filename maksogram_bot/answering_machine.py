@@ -36,7 +36,7 @@ async def _answering_machine(callback_query: CallbackQuery):
 async def answering_machine_menu(account_id: int) -> dict[str, Any]:
     buttons = []
     answers = await db.fetch_all(f"SELECT answer_id, status, type, start_time, end_time, text FROM answering_machine "
-                                 f"WHERE account_id={account_id}")  # Автоответы
+                                 f"WHERE account_id={account_id} ORDER BY answer_id")  # Автоответы
     enabled_answer = await get_enabled_auto_answer(account_id)
     for answer in answers:
         text = (str(answer['text'])[:28] + "...") if len(str(answer['text'])) > 28 else str(answer['text'])

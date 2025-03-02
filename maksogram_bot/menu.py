@@ -78,9 +78,11 @@ async def _start(message: Message, state: FSMContext):
         markup = IMarkup(inline_keyboard=[[IButton(text="⚙️ Меню и настройки", callback_data="menu")]])
     else:
         markup = IMarkup(inline_keyboard=[[IButton(text="🚀 Запустить бота", callback_data="menu")]])
-    await message.answer(f"Привет, {escape(await username_acquaintance(message, 'first_name'))} 👋\n"
-                         f"<a href='{SITE}'>Обзор всех функций</a> 👇",
-                         parse_mode=html, reply_markup=markup, link_preview_options=preview_options())
+    acquaintance = await username_acquaintance(message.chat.id, message.from_user.first_name, 'first_name')
+    start_message = await message.answer(f"Привет, {escape(acquaintance)} 👋\n"
+                                         f"<a href='{SITE}'>Обзор всех функций</a> 👇",
+                                         parse_mode=html, reply_markup=markup, link_preview_options=preview_options())
+    params = message.text.replace("/start ", "").split()
     if message.text.startswith('/start r'):
         friend_id = unzip_int_data(message.text.replace('/start r', ''))
         if message.chat.id == friend_id:
@@ -97,7 +99,17 @@ async def _start(message: Message, state: FSMContext):
             await bot.send_message(friend_id, "По вашей реферальной ссылке зарегистрировался новый пользователь. Если он "
                                               "подключит бота, то вы получите месяц подписки в подарок")
             await bot.send_message(OWNER, f"Регистрация по реферальной ссылке #r{friend_id}")
+    elif "menu" in params:
+        await start_message.edit_text(**await menu(message.chat.id))
     await service_message.delete()
+
+
+@dp.message(Command('inline_mode'))
+@security()
+async def _inline_mode(message: Message):
+    if await new_message(message): return
+    markup = IMarkup(inline_keyboard=[[IButton(text="Открыть", switch_inline_query_current_chat="")]])
+    await message.answer("<b>Встроенный режим</b>", parse_mode=html, reply_markup=markup)
 
 
 @dp.message(Command('help'))
