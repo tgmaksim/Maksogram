@@ -163,17 +163,18 @@ async def _answering_machine_switch(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     command, answer_id = callback_query.data.replace("answering_machine_", "").split("_")
     account_id = callback_query.from_user.id
-    answer = await db.fetch_one(f"SELECT type, start_time, end_time, weekdays FROM answering_machine "
+    answer = await db.fetch_one(f"SELECT status, type, start_time, end_time, weekdays FROM answering_machine "
                                 f"WHERE account_id={account_id} AND answer_id={answer_id}")
     if answer is None:  # Автоответ не найден
         await callback_query.answer("Автоответ был удалено ранее!", True)
         return await callback_query.message.edit_text(**await answering_machine_menu(account_id))
+    if (command == "on") == answer['status']:  # Статус совпадает с нужным
+        return await callback_query.message.edit_text(**await auto_answer_menu(account_id, answer_id))
     status = "true" if command == "on" else "false"
     main_auto_answer = await get_enabled_auto_answer(account_id)
     if answer['type'] == "ordinary" and command == "on":  # Обыкновенный автоответ
         # Выключение включенного обыкновенного автоответа (если есть)
         await db.execute(f"UPDATE answering_machine SET status=false WHERE account_id={account_id} AND type='ordinary'")
-        await callback_query.answer("Включенный ранее автоответ был выключен")
     elif answer['type'] == "timetable" and command == "on":  # Автоответ по расписанию
         # Автоответы по расписанию не должны пересекаться во времени
         for ans in await db.fetch_all(f"SELECT start_time, end_time, weekdays FROM answering_machine WHERE account_id={account_id} "
