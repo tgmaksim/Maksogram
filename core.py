@@ -128,14 +128,28 @@ async def get_enabled_auto_answer(account_id: int) -> Union[int, None]:
     # Если включен обыкновенный автоответ, то он будет главным, в противном случае - включенный автоответ по расписанию (если есть)
     enabled_ordinary_auto_answer = await db.fetch_one(f"SELECT answer_id FROM answering_machine WHERE account_id={account_id} AND "
                                                        f"type='ordinary' AND status=true", one_data=True)
+    if enabled_ordinary_auto_answer:
+        return enabled_ordinary_auto_answer
+
     time_zone: int = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={account_id}", one_data=True)
-    now = str(time_now().time())
-    weekday = str((time_now() + timedelta(hours=time_zone)).weekday())
-    enabled_timetable_auto_answer = await db.fetch_one(
-        f"SELECT answer_id FROM answering_machine WHERE account_id={account_id} AND type='timetable' AND weekdays @> '{weekday}' "
-        f"AND status=true AND (start_time < end_time AND start_time <= '{now}' AND end_time >= '{now}' OR "
-        f"start_time > end_time AND (start_time <= '{now}' OR end_time >= '{now}'))", one_data=True)
-    return enabled_ordinary_auto_answer or enabled_timetable_auto_answer  # Обыкновенный автоответ первостепеннее
+    now = time_now() + timedelta(hours=time_zone)
+    weekday = now.weekday()
+    tomorrow_weekday = (weekday + 1) % 7
+    timetable_auto_answers = await db.fetch_all("SELECT answer_id, start_time, end_time, weekdays FROM answering_machine WHERE "
+                                                f"account_id={account_id} AND type='timetable' AND status=true")
+    for answer in timetable_auto_answers:
+        answer['start_time'] = answer['start_time'].replace(hour=(answer['start_time'].hour + time_zone) % 24)
+        answer['end_time'] = answer['end_time'].replace(hour=(answer['end_time'].hour + time_zone) % 24)
+        if answer['start_time'] < answer['end_time']:
+            if answer['start_time'] <= now.time() <= answer['end_time'] and weekday in answer['weekdays']:
+                return answer['answer_id']
+        else:  # answer['start_time'] > answer['end_time']
+            if answer['start_time'] <= now.time():  # До полуночи
+                if tomorrow_weekday in answer['weekdays']:
+                    return answer['answer_id']
+            elif now.time() <= answer['end_time']:  # После полуночи
+                if weekday in answer['weekdays']:
+                    return answer['answer_id']
 
 
 def security(*arguments):
@@ -196,7 +210,7 @@ def new_telegram_client(phone_number: str) -> TelegramClient:
 
 class Variables:
     version = "2.5"
-    version_string = "2.5.4 (36)"
+    version_string = "2.5.4 (37)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])
