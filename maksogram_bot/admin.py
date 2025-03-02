@@ -1,3 +1,4 @@
+import os
 import aiohttp
 import asyncio
 
@@ -57,6 +58,7 @@ async def _admin(message: Message):
     await message.answer("Команды разработчика:\n"
                          "/reload - перезапустить программу\n"
                          "/stop - остановить программу\n"
+                         "/critical_stop - экстренная остановка\n"
                          "/mailing - рассылка")
 
 
@@ -91,9 +93,17 @@ async def _stop(message: Message):
                 token = (await response.json())['token']
                 await session.post(f"https://api-ms.netangels.ru/api/v1/hosting/background-processes/{Variables.ProcessId}/stop",
                                    headers={"Authorization": f"Bearer {token}"})
-    else:
-        await dp.stop_polling()
-        asyncio.get_event_loop().stop()
+    await dp.stop_polling()
+    asyncio.get_event_loop().stop()
+
+
+@dp.message(Command('critical_stop'))
+@security()
+async def _critical_stop(message: Message):
+    if await developer_command(message): return
+    await message.answer("<b>Критическая остановка</b>", parse_mode=html)
+    print("Критическая остановка")
+    os._exit(0)
 
 
 @dp.message(Command('mailing'))

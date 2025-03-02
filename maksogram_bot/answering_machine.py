@@ -26,6 +26,16 @@ from .core import (
 )
 
 
+def get_weekdays_string_by_list(weekdays: list[int]) -> str:
+    dictionary = {0: "пн", 1: "вт", 2: "ср", 3: "чт", 4: "пт", 5: "сб", 6: "вс"}
+    return " ".join([dictionary[weekday] for weekday in weekdays])
+
+
+def get_weekdays_list_by_string(weekdays: str) -> list[int]:
+    dictionary = {"пн": 0, "вт": 1, "ср": 2, "чт": 3, "пт": 4, "сб": 5, "вс": 6}
+    return list({dictionary[weekday] for weekday in weekdays.replace(" ", "").split(",")})
+
+
 @dp.callback_query(F.data == "answering_machine")
 @security()
 async def _answering_machine(callback_query: CallbackQuery):
@@ -35,7 +45,7 @@ async def _answering_machine(callback_query: CallbackQuery):
 
 async def answering_machine_menu(account_id: int) -> dict[str, Any]:
     buttons = []
-    answers = await db.fetch_all(f"SELECT answer_id, status, type, start_time, end_time, text FROM answering_machine "
+    answers = await db.fetch_all(f"SELECT answer_id, type, text FROM answering_machine "
                                  f"WHERE account_id={account_id} ORDER BY answer_id")  # Автоответы
     enabled_answer = await get_enabled_auto_answer(account_id)
     for answer in answers:
@@ -92,7 +102,7 @@ async def _new_answering_machine(message: Message, state: FSMContext):
         entities = json_encode([entity.model_dump() for entity in message.entities or []])
         # Новый автоответ
         await db.execute(f"INSERT INTO answering_machine VALUES ({message.chat.id}, {answer_id}, "
-                         f"false, 'ordinary', NULL, NULL, $1, '{entities}')", message.text)
+                         f"false, 'ordinary', NULL, NULL, NULL, $1, '{entities}')", message.text)
         await message.answer(**await auto_answer_menu(message.chat.id, answer_id))
     else:
         await message.answer(**await answering_machine_menu(message.chat.id))
@@ -109,11 +119,12 @@ async def _answering_machine_menu(callback_query: CallbackQuery):
 
 async def auto_answer_menu(account_id: int, answer_id: int):
     # Включенный автоответ и нужный автоответ
-    answer = await db.fetch_one(f"SELECT status, type, start_time, end_time, text, entities FROM answering_machine "
+    answer = await db.fetch_one(f"SELECT status, type, start_time, end_time, weekdays, text, entities FROM answering_machine "
                                 f"WHERE account_id={account_id} AND answer_id={answer_id}")
     if answer is None:  # Автоответ не найден
         return await answering_machine_menu(account_id)
     time_button = IButton(text="⏰ Расписание", callback_data=f"answering_machine_time{answer_id}")
+    weekdays_button = IButton(text="🗓 Выбрать дни", callback_data=f"answering_machine_weekdays{answer_id}")
     is_timetable = answer['type'] == 'timetable'
     if is_timetable:
         time_zone = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={account_id}", one_data=True)
@@ -123,11 +134,14 @@ async def auto_answer_menu(account_id: int, answer_id: int):
         minutes_end_time = str(answer['end_time'].minute).rjust(2, "0")
         timetable = f"{hours_start_time}:{minutes_start_time} — {hours_end_time}:{minutes_end_time}"
         time_button = IButton(text=f"⏰ {timetable}", callback_data=f"answering_machine_time{answer_id}")
+
+        weekdays = get_weekdays_string_by_list(answer['weekdays'])
+        weekdays_button = IButton(text=f"🗓 {weekdays}", callback_data=f"answering_machine_weekdays{answer_id}")
     status_button = IButton(text="🔴 Выключить автоответ", callback_data=f"answering_machine_off_{answer_id}") if answer['status'] \
         else IButton(text="🟢 Включить автоответ", callback_data=f"answering_machine_on_{answer_id}")
     markup = IMarkup(inline_keyboard=[[status_button],
                                       [IButton(text="✏️ Текст", callback_data=f"answering_machine_edit_text{answer_id}"),
-                                       time_button],
+                                       time_button], [weekdays_button],
                                       [IButton(text="🚫 Удалить автоответ", callback_data=f"answering_machine_del_answer{answer_id}")],
                                       [IButton(text="◀️  Назад", callback_data="answering_machine")]])
     return {"text": str(answer['text']), "entities": answer['entities'], "reply_markup": markup}
@@ -149,7 +163,7 @@ async def _answering_machine_switch(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     command, answer_id = callback_query.data.replace("answering_machine_", "").split("_")
     account_id = callback_query.from_user.id
-    answer = await db.fetch_one(f"SELECT type, start_time, end_time FROM answering_machine "
+    answer = await db.fetch_one(f"SELECT type, start_time, end_time, weekdays FROM answering_machine "
                                 f"WHERE account_id={account_id} AND answer_id={answer_id}")
     if answer is None:  # Автоответ не найден
         await callback_query.answer("Автоответ был удалено ранее!", True)
@@ -162,13 +176,15 @@ async def _answering_machine_switch(callback_query: CallbackQuery):
         await callback_query.answer("Включенный ранее автоответ был выключен")
     elif answer['type'] == "timetable" and command == "on":  # Автоответ по расписанию
         # Автоответы по расписанию не должны пересекаться во времени
-        for ans in await db.fetch_all(f"SELECT start_time, end_time FROM answering_machine WHERE account_id={account_id} "
+        for ans in await db.fetch_all(f"SELECT start_time, end_time, weekdays FROM answering_machine WHERE account_id={account_id} "
                                       f"AND type='timetable' AND status=true AND answer_id!={answer_id}"):
             if answer['start_time'] < answer['end_time'] < ans['start_time'] < ans['end_time'] or \
                     ans['start_time'] < ans['end_time'] < answer['start_time'] < answer['end_time'] or \
                     answer['end_time'] < ans['start_time'] < ans['end_time'] < answer['start_time'] or \
                     ans['end_time'] < answer['start_time'] < answer['end_time'] < ans['start_time']:
                 pass  # Все случаи, когда автоответы по времени не пересекаются
+            elif len(set(ans['weekdays'] + answer['weekdays'])) == len(ans['weekdays'] + answer['weekdays']):
+                pass  # Автоответы пересекаются по времени, но работают в разные дни
             else:
                 return await callback_query.answer("Расписание данного автоответа пересекается с расписанием уже включенного", True)
     await db.execute(f"UPDATE answering_machine SET status={status} WHERE account_id={account_id} AND answer_id={answer_id}")
@@ -217,16 +233,16 @@ async def _answering_machine_edit_text(message: Message, state: FSMContext):
     await bot.delete_messages(chat_id=message.chat.id, message_ids=[message_id, message.message_id])
 
 
-@dp.callback_query(F.data.startswith("answering_machine_time"))
+@dp.callback_query(F.data.startswith("answering_machine_time").__or__(F.data.startswith("answering_machine_weekdays")))
 @security()
 async def _answering_machine_time(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
-    answer_id = int(callback_query.data.replace("answering_machine_time", ""))
+    answer_id = int(callback_query.data.replace("answering_machine_time", "").replace("answering_machine_weekdays", ""))
     await callback_query.message.edit_text(**await time_auto_answer_menu(callback_query.from_user.id, answer_id))
 
 
 async def time_auto_answer_menu(account_id: int, answer_id: int) -> dict[str, Any]:
-    answer = await db.fetch_one(f"SELECT type, start_time, end_time FROM answering_machine "
+    answer = await db.fetch_one(f"SELECT type, start_time, end_time, weekdays FROM answering_machine "
                                 f"WHERE account_id={account_id} AND answer_id={answer_id}")
     if answer['type'] == "ordinary":  # Обыкновенный автоответ — расписание отсутствует
         reply_markup = IMarkup(inline_keyboard=
@@ -237,6 +253,7 @@ async def time_auto_answer_menu(account_id: int, answer_id: int) -> dict[str, An
     elif answer['type'] == "timetable":  # Автоответ с расписанием
         reply_markup = IMarkup(inline_keyboard=[[IButton(text="➡️ Начало", callback_data=f"answering_machine_edit_start_time_{answer_id}"),
                                                 IButton(text="Окончание ⬅️", callback_data=f"answering_machine_edit_end_time_{answer_id}")],
+                                                [IButton(text="🗓 Дни недели", callback_data=f"answering_machine_edit_weekdays{answer_id}")],
                                                 [IButton(text="❌ Удалить расписание", callback_data=f"answering_machine_del_time{answer_id}")],
                                                 [IButton(text="◀️  Назад", callback_data=f"answering_machine_menu{answer_id}")]])
         time_zone = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={account_id}", one_data=True)
@@ -244,8 +261,9 @@ async def time_auto_answer_menu(account_id: int, answer_id: int) -> dict[str, An
         minutes_start_time = str(answer['start_time'].minute).rjust(2, "0")
         hours_end_time = str((answer['end_time'].hour + time_zone) % 24).rjust(2, "0")
         minutes_end_time = str(answer['end_time'].minute).rjust(2, "0")
+        weekdays = get_weekdays_string_by_list(answer['weekdays'])
         return {"text": f"Вы можете изменить или удалить расписание автоответа\n"
-                        f"{hours_start_time}:{minutes_start_time} — {hours_end_time}:{minutes_end_time}",
+                        f"{hours_start_time}:{minutes_start_time} — {hours_end_time}:{minutes_end_time}\nДни работы: {weekdays}",
                 "reply_markup": reply_markup, "parse_mode": html}
 
 
@@ -294,7 +312,7 @@ async def _answering_machine_edit_timetable(message: Message, state: FSMContext)
             else:
                 await db.execute(f"UPDATE answering_machine SET status=false, type='timetable', "
                                  f"start_time='{hours_start_time}:{minutes_start_time}', "
-                                 f"end_time='{hours_end_time}:{minutes_end_time}' "
+                                 f"end_time='{hours_end_time}:{minutes_end_time}', weekdays='{list(range(7))}' "
                                  f"WHERE account_id={account_id} AND answer_id={answer_id}")
                 await message.answer(**await time_auto_answer_menu(account_id, answer_id))
     else:
@@ -358,13 +376,55 @@ async def _answering_machine_edit_time(message: Message, state: FSMContext):
     await bot.delete_messages(chat_id=message.chat.id, message_ids=[message_id, message.message_id])
 
 
+@dp.callback_query(F.data.startswith("answering_machine_edit_weekdays"))
+@security('state')
+async def _answering_machine_edit_weekdays(callback_query: CallbackQuery, state: FSMContext):
+    if await new_callback_query(callback_query): return
+    answer_id = int(callback_query.data.replace("answering_machine_edit_weekdays", ""))
+    await state.set_state(UserState.answering_machine_edit_weekdays)
+    markup = KMarkup(keyboard=[[KButton(text="Отмена")]], resize_keyboard=True)
+    text = "Напишите <b>дни недели</b> работы автоответа через запятую\nНапример: пн, вт, ср, чт, пт"
+    message_id = (await callback_query.message.answer(text, parse_mode=html, reply_markup=markup)).message_id
+    await state.update_data(message_id=message_id, answer_id=answer_id)
+    await callback_query.message.delete()
+
+
+@dp.message(UserState.answering_machine_edit_weekdays)
+@security('state')
+async def _answering_machine_edit_time(message: Message, state: FSMContext):
+    if await new_message(message): return
+    data = await state.get_data()
+    answer_id = data['answer_id']
+    message_id = data['message_id']
+    await state.clear()
+    account_id = message.chat.id
+    if not await db.fetch_one(f"SELECT true FROM answering_machine WHERE account_id={account_id} AND answer_id={answer_id}"):
+        await message.answer(**await answering_machine_menu(account_id))  # Автоответ не найден
+    elif message.content_type != "text":
+        await message.answer("<b>Ваше сообщение не является текстом</b>", parse_mode=html,
+                             reply_markup=(await time_auto_answer_menu(message.chat.id, answer_id))['reply_markup'])
+    elif message.text != "Отмена":
+        try:
+            weekdays = get_weekdays_list_by_string(message.text.lower())
+        except KeyError:
+            await message.answer("<b>Некорректный формат дней</b>", parse_mode=html,
+                                 reply_markup=(await time_auto_answer_menu(message.chat.id, answer_id))['reply_markup'])
+        else:
+            await db.execute(f"UPDATE answering_machine SET status=false, weekdays='{weekdays}' "
+                             f"WHERE account_id={account_id} AND answer_id={answer_id}")
+            await message.answer(**await time_auto_answer_menu(account_id, answer_id))
+    else:
+        await message.answer(**await time_auto_answer_menu(message.chat.id, answer_id))
+    await bot.delete_messages(chat_id=message.chat.id, message_ids=[message_id, message.message_id])
+
+
 @dp.callback_query(F.data.startswith("answering_machine_del_time"))
 @security()
 async def _answering_machine_del_time(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     answer_id = int(callback_query.data.replace("answering_machine_del_time", ""))
     account_id = callback_query.from_user.id
-    await db.execute(f"UPDATE answering_machine SET status=false, type='ordinary', start_time=NULL, end_time=NULL "
+    await db.execute(f"UPDATE answering_machine SET status=false, type='ordinary', start_time=NULL, end_time=NULL, weekdays=NULL "
                      f"WHERE account_id={account_id} AND answer_id={answer_id}")
     await callback_query.message.edit_text(**await auto_answer_menu(account_id, answer_id))
 

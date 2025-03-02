@@ -23,7 +23,7 @@ async def reload_server():  # перезагрузка сервера (сайт�
             if status_site:  # если сайт reminder.tgmaksim.ru включен
                 await session.put("https://api-ms.netangels.ru/api/v1/hosting/virtualhosts/297559/restart/",
                                   headers={"Authorization": f"Bearer {token}"})
-            await session.put("https://api-ms.netangels.ru/api/v1/hosting/virtualhosts/276599/restart/",
+            await session.put("https://api-ms.netangels.ru/api/v1/hosting/virtualhosts/314184/restart/",
                               headers={"Authorization": f"Bearer {token}"})
 
 

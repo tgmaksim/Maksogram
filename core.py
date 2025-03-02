@@ -128,9 +128,11 @@ async def get_enabled_auto_answer(account_id: int) -> Union[int, None]:
     # Если включен обыкновенный автоответ, то он будет главным, в противном случае - включенный автоответ по расписанию (если есть)
     enabled_ordinary_auto_answer = await db.fetch_one(f"SELECT answer_id FROM answering_machine WHERE account_id={account_id} AND "
                                                        f"type='ordinary' AND status=true", one_data=True)
+    time_zone: int = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={account_id}", one_data=True)
     now = str(time_now().time())
+    weekday = str((time_now() + timedelta(hours=time_zone)).weekday())
     enabled_timetable_auto_answer = await db.fetch_one(
-        f"SELECT answer_id FROM answering_machine WHERE account_id={account_id} AND type='timetable' "
+        f"SELECT answer_id FROM answering_machine WHERE account_id={account_id} AND type='timetable' AND weekdays @> '{weekday}' "
         f"AND status=true AND (start_time < end_time AND start_time <= '{now}' AND end_time >= '{now}' OR "
         f"start_time > end_time AND (start_time <= '{now}' OR end_time >= '{now}'))", one_data=True)
     return enabled_ordinary_auto_answer or enabled_timetable_auto_answer  # Обыкновенный автоответ первостепеннее
@@ -194,7 +196,7 @@ def new_telegram_client(phone_number: str) -> TelegramClient:
 
 class Variables:
     version = "2.5"
-    version_string = "2.5.4 (35)"
+    version_string = "2.5.4 (36)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])

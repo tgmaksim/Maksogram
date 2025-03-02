@@ -51,6 +51,7 @@ class UserState(StatesGroup):
     answering_machine_edit_text = State('answering_machine_edit_text')
     answering_machine_edit_timetable = State('answering_machine_edit_timetable')
     answering_machine_edit_time = State('answering_machine_edit_time')
+    answering_machine_edit_weekdays = State('answering_machine_edit_weekdays')
     avatar = State('avatar')
 
 
