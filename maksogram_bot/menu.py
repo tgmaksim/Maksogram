@@ -8,10 +8,7 @@ from core import (
     SITE,
     OWNER,
     security,
-    Variables,
-    MaksogramBot,
     unzip_int_data,
-    resources_path,
     preview_options,
 )
 
@@ -29,43 +26,14 @@ from .core import (
     Data,
     UserState,
     new_message,
-    referal_link,
     new_callback_query,
     username_acquaintance,
 )
 from aiogram.types import (
     Message,
     WebAppInfo,
-    FSInputFile,
     CallbackQuery,
 )
-
-
-@dp.message(Command('version'))
-@security()
-async def _version(message: Message):
-    if await new_message(message): return
-    await message.answer(f"Версия: {Variables.version_string}\n<a href='{SITE}/{Variables.version}'>Обновление</a> 👇",
-                         parse_mode=html, link_preview_options=preview_options(Variables.version))
-
-
-@dp.message(Command('friends'))
-@security()
-async def _friends(message: Message):
-    if await new_message(message): return
-    if not await db.fetch_one(f"SELECT true FROM accounts WHERE account_id={message.chat.id}", one_data=True):
-        return await message.answer("Вы не подключили бота, у вас еще нет реферальной ссылки!")
-    url = f"tg://resolve?domain={MaksogramBot.username}&start={referal_link(message.chat.id)}"
-    await message.answer(
-        "<b>Реферальная программа\n</b>"
-        "Приглашайте своих знакомых и получайте в подарок месяц подписки за каждого друга. "
-        "Пригласить друга можно, отправив сообщение 👇", parse_mode=html)
-    markup = IMarkup(inline_keyboard=[[IButton(text="Попробовать бесплатно", url=url)]])
-    await message.answer_photo(
-        FSInputFile(resources_path("logo.jpg")),
-        f"Привет! Я хочу тебе посоветовать отличного <a href='{url}'>бота</a>. "
-        "Он сохранит все твои сообщения и подскажет, когда кто-то их удалит, изменит, прочитает или поставит реакцию. "
-        "Также в нем есть множество других полезных функций", parse_mode=html, reply_markup=markup, disable_web_page_preview=True)
 
 
 @dp.message(CommandStart())
@@ -102,36 +70,6 @@ async def _start(message: Message, state: FSMContext):
     elif "menu" in params:
         await start_message.edit_text(**await menu(message.chat.id))
     await service_message.delete()
-
-
-@dp.message(Command('inline_mode'))
-@security()
-async def _inline_mode(message: Message):
-    if await new_message(message): return
-    markup = IMarkup(inline_keyboard=[[IButton(text="Открыть", switch_inline_query_current_chat="")]])
-    await message.answer("<b>Встроенный режим</b>", parse_mode=html, reply_markup=markup)
-
-
-@dp.message(Command('help'))
-@security()
-async def _help(message: Message):
-    if await new_message(message): return
-    await help(message)
-
-
-@dp.callback_query(F.data == "help")
-@security()
-async def _help_button(callback_query: CallbackQuery):
-    if await new_callback_query(callback_query): return
-    await callback_query.message.edit_reply_markup()
-    await help(callback_query.message)
-
-
-async def help(message: Message):
-    await message.answer("/menu - меню функций\n"
-                         "/settings - настройки\n"
-                         "/feedback - оставить отзыв или предложение\n"
-                         "/friends - реферальная программа\n", parse_mode=html)
 
 
 @dp.message(Command('menu'))

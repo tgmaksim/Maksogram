@@ -1,25 +1,31 @@
-from datetime import timedelta, datetime
+from datetime import timedelta
 from core import (
     db,
     html,
+    SITE,
     OWNER,
-    channel,
-    support,
     time_now,
     security,
+    Variables,
+    support_link,
+    MaksogramBot,
+    resources_path,
+    feedback_button,
+    preview_options,
 )
 
 from aiogram import F
 from aiogram.filters.command import Command
-from aiogram.types import Message, CallbackQuery
 from aiogram.types import InlineKeyboardMarkup as IMarkup
 from aiogram.types import InlineKeyboardButton as IButton
+from aiogram.types import Message, CallbackQuery, FSInputFile
 from . core import (
     dp,
     bot,
     Data,
     new_message,
     payment_menu,
+    referal_link,
     new_callback_query,
 )
 
@@ -42,22 +48,80 @@ from . login import login_initial
 login_initial()
 
 
+@dp.message(Command('version'))
+@security()
+async def _version(message: Message):
+    if await new_message(message): return
+    await message.answer(f"Версия: {Variables.version_string}\n<a href='{SITE}/{Variables.version}'>Обновление</a> 👇",
+                         parse_mode=html, link_preview_options=preview_options(Variables.version))
+
+
+@dp.message(Command('friends'))
+@security()
+async def _friends(message: Message):
+    if await new_message(message): return
+    if not await db.fetch_one(f"SELECT true FROM accounts WHERE account_id={message.chat.id}", one_data=True):
+        return await message.answer("Вы не подключили бота, у вас еще нет реферальной ссылки!")
+    url = f"tg://resolve?domain={MaksogramBot.username}&start={referal_link(message.chat.id)}"
+    await message.answer(
+        "<b>Реферальная программа</b>\n"
+        "Приглашайте своих знакомых и получайте в подарок месяц подписки за каждого друга. "
+        "Пригласить друга можно, отправив сообщение 👇", parse_mode=html)
+    markup = IMarkup(inline_keyboard=[[IButton(text="Попробовать бесплатно", url=url)]])
+    await message.answer_photo(
+        FSInputFile(resources_path("logo.jpg")),
+        f"Привет! Я хочу тебе посоветовать отличного <a href='{url}'>бота</a>. "
+        "С его помощью можно смотреть удаленные и измененные сообщения. Ты будешь первым(ой) узнавать о новой аватарке друга, "
+        "сможешь расшифровывать гс без Telegram Premium и настраивать автоответчик, когда очень занят(а). "
+        "Также в нем есть множество других полезных функций", parse_mode=html, reply_markup=markup, disable_web_page_preview=True)
+
+
 @dp.message(Command('feedback'))
 @security()
-async def _start_feedback(message: Message):
+async def _feedback(message: Message):
     if await new_message(message): return
-    registration_date: datetime = await db.fetch_one(f"SELECT registration_date FROM accounts WHERE account_id={message.chat.id}", one_data=True)
     if not await db.fetch_one(f"SELECT true FROM accounts WHERE account_id={message.chat.id}", one_data=True):
-        return await message.answer("Вы не подключили бота и не можете оставить отзыв")
-    elif (time_now() - registration_date).total_seconds() < 3*24*60*60:  # С даты регистрации прошло менее 3 дней
-        return await message.answer("Вы зарегистрировались менее 3 дней назад. Попробуйте все функции, "
-                                    "чтобы написать полноценный объективный отзыв")
-    markup = IMarkup(inline_keyboard=[[IButton(text="Написать отзыв", url=f"tg://resolve?domain={channel}&post=375&comment=512")]])
-    await message.answer(
-        "❗️ Внимание! ❗️\nВаш отзыв не должен содержать нецензурных высказываний и оскорблений. Приветствуются фото- и видеоматериалы\n"
-        "Вы можете предложить новую функцию или выразить свое мнение по поводу работы Maksogram. За честный отзыв вы получите "
-        f"в подарок неделю подписки\n\nВозникшие проблемы просим сразу перенаправлять <a href='t.me/{support}'>тех. поддержке</a>",
-        reply_markup=markup, parse_mode=html, disable_web_page_preview=True)
+        button_text = "Посмотреть отзывы"
+        message_text = "Хотите узнать, что думаю о Maksogram его пользователи?"
+    else:
+        button_text = "Написать отзыв"
+        message_text = \
+            "❗️ Внимание! ❗️\nВаш отзыв не должен содержать нецензурных высказываний и оскорблений. Приветствуются фото и видео\n"\
+            "Вы можете предложить новую функцию или выразить свое мнение по поводу работы Maksogram. За честный отзыв вы получите "\
+            f"в подарок неделю подписки\n\nВозникшие проблемы просим сразу перенаправлять {support_link}"
+    markup = IMarkup(inline_keyboard=[[IButton(text=button_text, url=feedback_button)]])
+    await message.answer(message_text, reply_markup=markup, parse_mode=html, disable_web_page_preview=True)
+
+
+@dp.message(Command('inline_mode'))
+@security()
+async def _inline_mode(message: Message):
+    if await new_message(message): return
+    markup = IMarkup(inline_keyboard=[[IButton(text="Открыть", switch_inline_query_current_chat="")]])
+    await message.answer("<b>Встроенный режим</b>", parse_mode=html, reply_markup=markup)
+
+
+@dp.message(Command('help'))
+@security()
+async def _help(message: Message):
+    if await new_message(message): return
+    await help(message)
+
+
+@dp.callback_query(F.data == "help")
+@security()
+async def _help_button(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    await callback_query.message.edit_reply_markup()
+    await help(callback_query.message)
+
+
+async def help(message: Message):
+    await message.answer("/menu - меню функций\n"
+                         "/settings - настройки\n"
+                         "/feedback - отзывы о Maksogram\n"
+                         "/friends - реферальная программа\n"
+                         "/version - обзор прошлого обновления", parse_mode=html)
 
 
 @dp.callback_query(F.data == "send_payment")

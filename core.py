@@ -1,8 +1,13 @@
 OWNER = 5128609241
 support = "tgmaksim_company"
+support_link = f"<a href='tg://resolve?domain={support}'>тех. поддержке</a>"
 SITE = "https://tgmaksim.ru/проекты/maksogram"
 subscribe = "https://t.me/+F5YW1gV3gdhjNjVi"
 channel = "tgmaksim_ru"
+feedback_post = 375
+feedback_comment = 510
+feedback_button = f"tg://resolve?domain={channel}&post={feedback_post}&comment={feedback_comment}"
+feedback_link = f"<a href='{feedback_button}'>отзывы</a>"
 morning = 5, 12
 
 html = "HTML"
@@ -210,7 +215,7 @@ def new_telegram_client(phone_number: str) -> TelegramClient:
 
 class Variables:
     version = "2.5"
-    version_string = "2.5.4 (38)"
+    version_string = "2.5.4 (39)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])

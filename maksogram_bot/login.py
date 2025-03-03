@@ -4,6 +4,7 @@ from datetime import timedelta
 from core import (
     db,
     html,
+    SITE,
     OWNER,
     support,
     security,
@@ -11,6 +12,8 @@ from core import (
     Variables,
     account_on,
     account_off,
+    support_link,
+    feedback_link,
     unzip_int_data,
     telegram_clients,
     UserIsNotAuthorized,
@@ -24,11 +27,13 @@ from saving_messages import admin_program, program
 from create_chats import CreateChatsError, create_chats
 
 from aiogram import F
-from .menu import menu
+from . menu import menu
 from aiogram.fsm.context import FSMContext
 from aiogram.types import KeyboardButton as KButton
 from aiogram.types import ReplyKeyboardRemove as KRemove
 from aiogram.types import ReplyKeyboardMarkup as KMarkup
+from aiogram.types import InlineKeyboardMarkup as IMarkup
+from aiogram.types import InlineKeyboardButton as IButton
 from aiogram.types import Message, CallbackQuery, WebAppInfo
 from .core import (
     dp,
@@ -47,7 +52,7 @@ async def _registration(callback_query: CallbackQuery, state: FSMContext):
     await state.set_state(UserState.send_phone_number)
     markup = KMarkup(keyboard=[[KButton(text="Отправить номер телефона", request_contact=True)],
                                [KButton(text="Отмена")]], resize_keyboard=True)
-    await callback_query.message.answer("Начнем настройку Maksogram для твоего аккаунта. Отправь свой номер телефона",
+    await callback_query.message.answer("Чтобы Maksogram уведомлял об удалении и изменении сообщения, нужно войти в аккаунт",
                                         reply_markup=markup)
     await callback_query.message.delete()
 
@@ -83,7 +88,7 @@ async def _on(callback_query: CallbackQuery, state: FSMContext):
             raise e
         except UserIsNotAuthorized:  # Удалена сессия
             await state.set_state(UserState.relogin)
-            await callback_query.answer("Удалена Telegram-сессия!")
+            await callback_query.answer("Вы удалили Maksogram из списка устройств")
             markup = KMarkup(keyboard=[[
                 KButton(text="Отправить код", web_app=WebAppInfo(url="https://tgmaksim.ru/maksogram/code"))],
                 [KButton(text="Отмена")]], resize_keyboard=True)
@@ -102,9 +107,8 @@ async def _relogin(message: Message, state: FSMContext):
     if await new_message(message): return
     if message.text == "Отмена":
         await state.clear()
-        return await message.answer("Если вы считаете, что мы собираем какие-либо данные, то зайдите на наш сайт и "
-                                    "посмотрите открытый исходный код бота, который постоянно обновляется в "
-                                    "сторону улучшений и безопасности", reply_markup=KRemove())
+        return await message.answer("Почему вы больше не хотите пользоваться Maksogram? Если у вас есть вопрос, то вы можете "
+                                    f"задать его {support_link}", reply_markup=KRemove(), disable_web_page_preview=True)
     if message.content_type != "web_app_data":
         await state.clear()
         return await message.answer("Код можно отправлять только через кнопку! Telegram блокирует вход при отправке кода "
@@ -147,9 +151,8 @@ async def _relogin_with_password(message: Message, state: FSMContext):
     if await new_message(message): return
     if message.text == "Отмена":
         await state.clear()
-        return await message.answer("Если вы считаете, что мы собираем какие-либо данные, то зайдите на наш сайт и "
-                                    "посмотрите открытый исходный код бота, который постоянно обновляется в "
-                                    "сторону улучшений и безопасности", reply_markup=KRemove())
+        return await message.answer("Почему вы больше не хотите пользоваться Maksogram? Если у вас есть вопрос, то вы можете "
+                                    f"задать его {support_link}>", reply_markup=KRemove(), disable_web_page_preview=True)
     if message.content_type != "text":
         return await message.answer("Отправьте пароль от вашего аккаунта")
     account_id = message.chat.id
@@ -178,9 +181,9 @@ async def _contact(message: Message, state: FSMContext):
     if await new_message(message): return
     if message.text == "Отмена":
         await state.clear()
-        return await message.answer("Если вы считаете, что мы собираем какие-либо данные, то зайдите на наш сайт и "
-                                    "посмотрите открытый исходный код бота, который постоянно обновляется в "
-                                    "сторону улучшений и безопасности", reply_markup=KRemove())
+        return await message.answer(f"Мы понимаем ваши опасения по поводу безопасности. Вы можете почитать {feedback_link}, "
+                                    f"чтобы убедиться в том, что с вашим аккаунтом все будет в порядке. Если есть вопрос, можете "
+                                    f"задать его {support_link}", parse_mode=html, reply_markup=KRemove(), disable_web_page_preview=True)
     if message.content_type != "contact":
         return await message.reply("Вы не отправили контакт!")
     if message.chat.id != message.contact.user_id:
@@ -206,9 +209,9 @@ async def _login(message: Message, state: FSMContext):
     if await new_message(message): return
     if message.text == "Отмена":
         await state.clear()
-        return await message.answer("Если вы считаете, что мы собираем какие-либо данные, то зайдите на наш сайт и "
-                                    "посмотрите открытый исходный код бота, который постоянно обновляется в "
-                                    "сторону улучшений и безопасности", reply_markup=KRemove())
+        return await message.answer(f"Мы понимаем ваши опасения по поводу безопасности. Вы можете почитать {feedback_link}, "
+                                    f"чтобы убедиться в том, что с вашим аккаунтом все будет в порядке. Если есть вопрос, можете "
+                                    f"задать его {support_link}", parse_mode=html, reply_markup=KRemove(), disable_web_page_preview=True)
     if message.content_type != "web_app_data":
         await state.clear()
         return await message.answer("Код можно отправлять только через кнопку! Telegram блокирует вход при отправке "
@@ -257,10 +260,12 @@ async def _login(message: Message, state: FSMContext):
                 await bot.send_message(referal, "По вашей реферальной ссылке зарегистрировался пользователь. "
                                                 "Вы получили месяц подписки в подарок!")
             await loading.delete()
-            await message.answer("Maksogram запущен 🚀\nВ канале \"Мои сообщения\" будут храниться все ваши сообщения, в "
-                                 "комментариях к постам будет информация о изменении и удалении\n"
-                                 "Пробная подписка заканчивается через неделю")
-            await message.answer(**await menu(message.chat.id))
+            await message.answer("Maksogram запущен 🚀\nВ канале <b>Мои сообщения</b> будут храниться все ваши сообщения, в "
+                                 "комментариях будет информация о изменении, реакциях и удалении\n"
+                                 f"Полный обзор функция доступен на <b><a href='{SITE}'>сайте</a></b>\n"
+                                 "Пробная подписка заканчивается через неделю", parse_mode=html, disable_web_page_preview=True)
+            await message.answer("<b>Меню функций и настройки</b>", parse_mode=html,
+                                 reply_markup=IMarkup(inline_keyboard=[[IButton(text="⚙️ Меню и настройки", callback_data="menu")]]))
             await bot.send_message(OWNER, "Создание чатов завершено успешно!")
 
 
@@ -270,9 +275,9 @@ async def _login_with_password(message: Message, state: FSMContext):
     if await new_message(message): return
     if message.text == "Отмена":
         await state.clear()
-        return await message.answer("Если вы считаете, что мы собираем какие-либо данные, то зайдите на наш сайт и "
-                                    "посмотрите открытый исходный код бота, который постоянно обновляется в "
-                                    "сторону улучшений и безопасности", reply_markup=KRemove())
+        return await message.answer(f"Мы понимаем ваши опасения по поводу безопасности. Вы можете почитать {feedback_link}, "
+                                    f"чтобы убедиться в том, что с вашим аккаунтом все будет в порядке. Если есть вопрос, можете "
+                                    f"задать его {support_link}", parse_mode=html, reply_markup=KRemove(), disable_web_page_preview=True)
     if message.content_type != "text":
         return await message.answer("Отправьте пароль от вашего аккаунта")
     data = await state.get_data()
@@ -309,10 +314,12 @@ async def _login_with_password(message: Message, state: FSMContext):
                 await bot.send_message(referal, "По вашей реферальной ссылке зарегистрировался пользователь. "
                                                 "Вы получили месяц подписки в подарок!")
             await loading.delete()
-            await message.answer("Maksogram запущен 🚀\nВ канале \"Мои сообщения\" будут храниться все ваши сообщения, в "
-                                 "комментариях к постам будет информация о изменении и удалении\n"
-                                 "Пробная подписка заканчивается через неделю")
-            await message.answer(**await menu(message.chat.id))
+            await message.answer("Maksogram запущен 🚀\nВ канале <b>Мои сообщения</b> будут храниться все ваши сообщения, в "
+                                 "комментариях будет информация о изменении, реакциях и удалении\n"
+                                 f"Полный обзор функция доступен на <b><a href='{SITE}'>сайте</a></b>\n"
+                                 "Пробная подписка заканчивается через неделю", parse_mode=html, disable_web_page_preview=True)
+            await message.answer("<b>Меню функций и настройки</b>", parse_mode=html,
+                                 reply_markup=IMarkup(inline_keyboard=[[IButton(text="⚙️ Меню и настройки", callback_data="menu")]]))
             await bot.send_message(OWNER, "Создание чатов завершено успешно!")
 
 
