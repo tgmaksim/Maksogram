@@ -38,6 +38,7 @@ class UserState(StatesGroup):
     class Admin(StatesGroup):
         mailing = State('mailing')
         confirm_mailing = State('confirm_mailing')
+        login = State('login')
 
     time_zone = State('time_zone')
     city = State('city')
@@ -53,6 +54,9 @@ class UserState(StatesGroup):
     answering_machine_edit_time = State('answering_machine_edit_time')
     answering_machine_edit_weekdays = State('answering_machine_edit_weekdays')
     avatar = State('avatar')
+    security_email = State('security_email')
+    confirm_security_email = State('confirm_security_email')
+    security_new_agent = State('security_new_agent')
 
 
 async def payment_menu(account_id: int) -> dict[str, Any]:

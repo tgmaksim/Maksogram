@@ -102,7 +102,7 @@ async def _new_answering_machine(message: Message, state: FSMContext):
         entities = json_encode([entity.model_dump() for entity in message.entities or []])
         # Новый автоответ
         await db.execute(f"INSERT INTO answering_machine VALUES ({message.chat.id}, {answer_id}, "
-                         f"false, 'ordinary', NULL, NULL, NULL, $1, '{entities}')", message.text)
+                         f"false, 'ordinary', NULL, NULL, NULL, $1, '{entities}', false)", message.text)
         await message.answer(**await auto_answer_menu(message.chat.id, answer_id))
     else:
         await message.answer(**await answering_machine_menu(message.chat.id))
@@ -119,7 +119,7 @@ async def _answering_machine_menu(callback_query: CallbackQuery):
 
 async def auto_answer_menu(account_id: int, answer_id: int):
     # Включенный автоответ и нужный автоответ
-    answer = await db.fetch_one(f"SELECT status, type, start_time, end_time, weekdays, text, entities FROM answering_machine "
+    answer = await db.fetch_one(f"SELECT status, type, start_time, end_time, weekdays, text, entities, contacts FROM answering_machine "
                                 f"WHERE account_id={account_id} AND answer_id={answer_id}")
     if answer is None:  # Автоответ не найден
         return await answering_machine_menu(account_id)
@@ -137,12 +137,16 @@ async def auto_answer_menu(account_id: int, answer_id: int):
 
         weekdays = get_weekdays_string_by_list(answer['weekdays'])
         weekdays_button = IButton(text=f"🗓 {weekdays}", callback_data=f"answering_machine_weekdays{answer_id}")
-    status_button = IButton(text="🔴 Выключить автоответ", callback_data=f"answering_machine_off_{answer_id}") if answer['status'] \
-        else IButton(text="🟢 Включить автоответ", callback_data=f"answering_machine_on_{answer_id}")
-    markup = IMarkup(inline_keyboard=[[status_button],
+    status_button = IButton(text="🔴 Выключить", callback_data=f"answering_machine_off_{answer_id}") if answer['status'] \
+        else IButton(text="🟢 Включить", callback_data=f"answering_machine_on_{answer_id}")
+    contacts = IButton(text="🤝 Только контактам (включено)", callback_data=f"answering_machine_contacts_off_{answer_id}") \
+        if answer['contacts'] else IButton(text="🤝 Только контактам (выключено)", callback_data=f"answering_machine_contacts_on_{answer_id}")
+    markup = IMarkup(inline_keyboard=[[status_button,
+                                       IButton(text="🚫 Удалить", callback_data=f"answering_machine_del_answer{answer_id}")],
                                       [IButton(text="✏️ Текст", callback_data=f"answering_machine_edit_text{answer_id}"),
-                                       time_button], [weekdays_button],
-                                      [IButton(text="🚫 Удалить автоответ", callback_data=f"answering_machine_del_answer{answer_id}")],
+                                       time_button],
+                                      [weekdays_button],
+                                      [contacts],
                                       [IButton(text="◀️  Назад", callback_data="answering_machine")]])
     return {"text": str(answer['text']), "entities": answer['entities'], "reply_markup": markup}
 
@@ -189,6 +193,10 @@ async def _answering_machine_switch(callback_query: CallbackQuery):
             else:
                 return await callback_query.answer("Расписание данного автоответа пересекается с расписанием уже включенного", True)
     await db.execute(f"UPDATE answering_machine SET status={status} WHERE account_id={account_id} AND answer_id={answer_id}")
+    if await db.fetch_all(f"SELECT true FROM answering_machine WHERE status=true AND account_id={account_id}", one_data=True):
+        await db.execute(f"UPDATE statistics SET answering_machine=NULL WHERE account_id={account_id}")
+    else:
+        await db.execute(f"UPDATE statistics SET answering_machine=now() WHERE account_id={account_id}")
     if main_auto_answer != await get_enabled_auto_answer(account_id):  # Если работающий автоответ сменился, обнуляем sending
         await db.execute(f"UPDATE functions SET answering_machine_sending='[]' WHERE account_id={account_id}")
     await callback_query.message.edit_text(**await auto_answer_menu(account_id, answer_id))
@@ -427,6 +435,23 @@ async def _answering_machine_del_time(callback_query: CallbackQuery):
     account_id = callback_query.from_user.id
     await db.execute(f"UPDATE answering_machine SET status=false, type='ordinary', start_time=NULL, end_time=NULL, weekdays=NULL "
                      f"WHERE account_id={account_id} AND answer_id={answer_id}")
+    await callback_query.message.edit_text(**await auto_answer_menu(account_id, answer_id))
+
+
+@dp.callback_query(F.data.startswith("answering_machine_contacts"))
+@security()
+async def _answering_machine_contacts_switch(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    command, answer_id = callback_query.data.replace("answering_machine_contacts_", "").split("_")
+    account_id = callback_query.from_user.id
+    answer = await db.fetch_one(f"SELECT contacts FROM answering_machine WHERE account_id={account_id} AND answer_id={answer_id}")
+    if answer is None:
+        await callback_query.answer("Автоответ был удален ранее!", True)
+        return await callback_query.message.edit_text(**await answering_machine_menu(account_id))
+    if (command == "on") == answer['contacts']:
+        return await callback_query.message.edit_text(**await auto_answer_menu(account_id, answer_id))
+    contacts = "true" if command == "on" else "false"
+    await db.execute(f"UPDATE answering_machine SET contacts={contacts} WHERE account_id={account_id} AND answer_id={answer_id}")
     await callback_query.message.edit_text(**await auto_answer_menu(account_id, answer_id))
 
 

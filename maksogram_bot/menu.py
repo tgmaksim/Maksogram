@@ -101,7 +101,8 @@ async def menu(account_id: int) -> dict[str, Any]:
                                            IButton(text="🤖 Автоответчик", callback_data="answering_machine")],
                                           [IButton(text="🌐 Друг в сети", callback_data="status_users"),
                                            IButton(text="💬 Maksogram в чате", callback_data="modules")],
-                                          [IButton(text="⚙️ Настройки", callback_data="settings")],
+                                          [IButton(text="⚙️ Настройки", callback_data="settings"),
+                                           ],  # IButton(text="🛡 Защита аккаунта", callback_data="security")
                                           [IButton(text="ℹ️ Памятка по функциям", url=SITE)]])
     return {"text": "⚙️ Maksogram — меню ⚙️", "reply_markup": markup}
 
@@ -177,7 +178,13 @@ async def profile_menu(account_id: int) -> dict[str, Any]:
     if my_referal:
         my_referal = f'<a href="tg://user?id={my_referal}">{my_referal}</a>'
     else:
-        my_referal = '<span class="tg-spoiler">сам пришел 🤓</span>'
+        gender = await db.fetch_one(f"SELECT gender FROM settings WHERE account_id={account_id}", one_data=True)
+        if gender is True:  # мужчина
+            my_referal = '<span class="tg-spoiler">сам пришел 🤓</span>'
+        elif gender is False:  # женщина
+            my_referal = '<span class="tg-spoiler">сама пришла 🤓</span>'
+        else:
+            my_referal = '<span class="tg-spoiler">сам(а) пришел(ла) 🤓</span>'
     if subscription['user'] == 'admin':
         subscription['next_payment'] = "конца жизни 😎"
         subscription['fee'] = "бесплатно"

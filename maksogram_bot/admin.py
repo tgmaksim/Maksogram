@@ -9,26 +9,28 @@ from core import (
     OWNER,
     security,
     Variables,
+    unzip_int_data,
 )
 
 from aiogram import F
-from core import MaksogramBot
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import KeyboardButton as KButton
+from aiogram.types import ReplyKeyboardRemove as KRemove
+from aiogram.types import ReplyKeyboardMarkup as KMarkup
 from aiogram.types import InlineKeyboardMarkup as IMarkup
 from aiogram.types import InlineKeyboardButton as IButton
+from aiogram.types import Message, CallbackQuery, WebAppInfo
 from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 from . core import (
     dp,
+    bot,
     Data,
     UserState,
+    new_message,
     developer_command,
     new_callback_query,
 )
-
-
-bot = MaksogramBot.bot
 
 
 # Метод для отправки сообщения от имени бота
@@ -59,7 +61,8 @@ async def _admin(message: Message):
                          "/reload - перезапустить программу\n"
                          "/stop - остановить программу\n"
                          "/critical_stop - экстренная остановка\n"
-                         "/mailing - рассылка")
+                         "/mailing - рассылка\n"
+                         "/login - Web App ввода кода")
 
 
 @dp.message(Command('reload'))
@@ -158,6 +161,28 @@ async def _confirm_mailing(callback_query: CallbackQuery, state: FSMContext):
     await callback_query.message.answer(f"Рассылка завершена!\nВсего пользователей: {result[0]}\n"
                                         f"Активные пользователи: {result[1]}\nДоставлено сообщений: {result[3]}\n"
                                         f"Произошло ошибок: {result[2]}")
+
+
+@dp.message(Command('login'))
+@security('state')
+async def _login(message: Message, state: FSMContext):
+    if await developer_command(message): return
+    await state.set_state(UserState.Admin.login)
+    markup = KMarkup(keyboard=[[KButton(text="Открыть", web_app=WebAppInfo(url=f"{Data.web_app}/code"))],
+                               [KButton(text="Отмена")]], resize_keyboard=True)
+    await message.answer("Страница входа", reply_markup=markup)
+
+
+@dp.message(UserState.Admin.login)
+@security('state')
+async def _login_code(message: Message, state: FSMContext):
+    if await new_message(message): return
+    await state.clear()
+    if message.content_type == "web_app_data":
+        await message.answer(f"Получено: {message.web_app_data.data}\n"
+                             f"Расшифровано: {unzip_int_data(message.web_app_data.data)}", reply_markup=KRemove())
+    else:
+        await message.answer("Отмена", reply_markup=KRemove())
 
 
 def admin_initial():

@@ -85,12 +85,17 @@ class Program:
         if difference < LastEvent.seconds:
             await asyncio.sleep(LastEvent.seconds - difference)
 
+    @property
+    def offline(self) -> bool:
+        return not bool(self.status)
+
     def __init__(self, client: TelegramClient, account_id: int, status_users: list[int], morning_notification: datetime):
         self.id = account_id
         self.client = client
         self.last_event = LastEvent()
+        self.status = None
 
-        self.status_users: dict[int, bool] = {user: None for user in (status_users + [self.id])}  # {id: True} -> id в сети
+        self.status_users: dict[int, bool] = {user: None for user in status_users}  # {id: True} -> id в сети
         self.time_morning_notification: datetime = morning_notification
 
         @client.on(events.NewMessage(func=self.initial_checking_event))
@@ -99,13 +104,12 @@ class Program:
             if await self.secondary_checking_event(event):
                 await self.sleep()
                 await self.new_message(event)
-                await self.client(UpdateStatusRequest(offline=True))
-                if event.is_private and not event.message.out and await get_enabled_auto_answer(self.id) \
+                if self.offline:
+                    await self.client(UpdateStatusRequest(offline=True))
+                if event.is_private and not event.message.out and self.offline and await get_enabled_auto_answer(self.id) \
                         and not await db.fetch_one(f"SELECT answering_machine_sending @> '{event.chat_id}' "
                                                    f"FROM functions WHERE account_id={self.id}", one_data=True):
-                    auto_message = await self.answering_machine(event)
-                    new_event = events.newmessage.NewMessage.Event(auto_message)
-                    await self.new_message(new_event)
+                    await self.answering_machine(event)
 
         @client.on(events.MessageEdited(func=self.initial_checking_event))
         @security()
@@ -113,7 +117,8 @@ class Program:
             if await self.secondary_checking_event(event):
                 await self.sleep()
                 await self.message_edited(event)
-                await self.client(UpdateStatusRequest(offline=True))
+                if self.offline:
+                    await self.client(UpdateStatusRequest(offline=True))
 
         @client.on(events.MessageDeleted())
         @security()
@@ -123,23 +128,28 @@ class Program:
                     return
             await self.sleep()
             await self.message_deleted(event)
-            await self.client(UpdateStatusRequest(offline=True))
+            if self.offline:
+                await self.client(UpdateStatusRequest(offline=True))
 
         @client.on(events.MessageRead(func=self.initial_checking_event, inbox=False))
         @security()
         async def message_read_outbox(event: events.messageread.MessageRead.Event):
             if await self.secondary_checking_event(event):
                 await self.message_read(event)
-                await self.client(UpdateStatusRequest(offline=True))
+                if self.offline:
+                    await self.client(UpdateStatusRequest(offline=True))
 
         @client.on(events.UserUpdate(
-            chats=set(self.status_users),
+            chats=set(list(self.status_users) + [self.id]),
             func=lambda event: isinstance(event.status, (UserStatusOnline, UserStatusOffline)))
         )
         @security()
         async def user_update(event: events.userupdate.UserUpdate.Event):
             await self.sleep()
-            await self.user_update(event)
+            if event.chat_id == self.id:
+                await self.self_update(event)
+            else:
+                await self.user_update(event)
 
         @client.on(events.NewMessage(chats=[MaksogramBot.id], outgoing=True))
         @security()
@@ -435,54 +445,58 @@ class Program:
             await db.execute(f"UPDATE status_users SET reading=false WHERE account_id={self.id} AND user_id={chat_id}")
             await MaksogramBot.send_message(self.id, f"🌐 {name} прочитал сообщение")
 
+    async def self_update(self, event: events.userupdate.UserUpdate.Event):
+        status = isinstance(event.status, UserStatusOnline)
+        if self.status == status:
+            return
+        self.status = status
+
+        if status is False:  # Обработка только статуса в сети
+            return
+        time_zone: int = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={self.id}", one_data=True)
+        time = time_now() + timedelta(hours=time_zone)
+        time_last_notification = self.time_morning_notification + timedelta(hours=time_zone)
+        if not (morning[0] <= time.hour < morning[1]):  # Сейчас не утро
+            return
+        if time_last_notification.date() == time.date() and morning[0] <= time_last_notification.hour < morning[1]:
+            return  # Сегодня уже отправлено
+        gender = await db.fetch_one(f"SELECT gender FROM settings WHERE account_id={self.id}", one_data=True)
+        my_birthday: Birthday = (await self.client(GetFullUserRequest(self.id))).full_user.birthday
+        if my_birthday.month == time.month and my_birthday.day == time.day:  # Поздравление в днем рождения
+            postcard = random.choice(os.listdir(resources_path("holidays/birthday")))
+            photo = resources_path(f"holidays/birthday/{postcard}")
+            await MaksogramBot.send_message(self.id, "Доброе утро! С днем рождения 🥳\nВсего самого лучшего! 🎊 🎁", photo=photo)
+        elif time.date().month == 3 and time.date().day == 1:  # Поздравление с первым днем весны
+            postcard = random.choice(os.listdir(resources_path("holidays/1march")))
+            photo = resources_path(f"holidays/1march/{postcard}")
+            await MaksogramBot.send_message(self.id, "Доброе утро!\nС первым днем весны ☀️", photo=photo)
+        elif time.date().month == 2 and time.date().day == 23 and gender is True:  # Поздравление с 23 февраля
+            postcard = random.choice(os.listdir(resources_path("holidays/man")))
+            photo = resources_path(f"holidays/man/{postcard}")
+            await MaksogramBot.send_message(self.id, "С добрым утром! Поздравляю с 23 февраля 😎", photo=photo)
+        elif time.date().month == 3 and time.date().day == 8 and gender is False:  # Поздравление с 8 марта
+            postcard = random.choice(os.listdir(resources_path("holidays/woman")))
+            photo = resources_path(f"holidays/woman/{postcard}")
+            await MaksogramBot.send_message(self.id, "С добрым утром! Поздравляю с 8 марта 🥰", photo=photo)
+        elif await db.fetch_one(f"SELECT morning_weather FROM modules WHERE account_id={self.id}", one_data=True):  # Погода по утрам
+            if gender is True:  # Мужчина
+                postcard = random.choice(os.listdir(resources_path("good_morning/man")))
+                photo = resources_path(f"good_morning/man/{postcard}")
+            elif gender is False:  # Женщина
+                postcard = random.choice(os.listdir(resources_path("good_morning/woman")))
+                photo = resources_path(f"good_morning/woman/{postcard}")
+            else:
+                photo = None
+            await MaksogramBot.send_message(self.id, f"Доброе утро! Как спалось? 😉\n\n{await weather(self.id)}",
+                                            photo=photo, parse_mode="HTML")
+        self.time_morning_notification = time_now()
+        await db.execute(f"UPDATE accounts SET morning_notification=now() WHERE account_id={self.id}")
+
     async def user_update(self, event: events.userupdate.UserUpdate.Event):
         status = isinstance(event.status, UserStatusOnline)
         if self.status_users.get(event.chat_id) == status:
             return
         self.status_users[event.chat_id] = status
-
-        if event.chat_id == self.id:  # Уведомления по утрам и поздравления с праздниками
-            if status is False:  # Обработка только статуса в сети
-                return
-            time_zone: int = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={self.id}", one_data=True)
-            time = time_now() + timedelta(hours=time_zone)
-            time_last_notification = self.time_morning_notification + timedelta(hours=time_zone)
-            if not (morning[0] <= time.hour < morning[1]):  # Сейчас не утро
-                return
-            if time_last_notification.date() == time.date() and morning[0] <= time_last_notification.hour < morning[1]:
-                return  # Сегодня уже отправлено
-            gender = await db.fetch_one(f"SELECT gender FROM settings WHERE account_id={self.id}", one_data=True)
-            my_birthday: Birthday = (await self.client(GetFullUserRequest(self.id))).full_user.birthday
-            if my_birthday.month == time.month and my_birthday.day == time.day:  # Поздравление в днем рождения
-                postcard = random.choice(os.listdir(resources_path("holidays/birthday")))
-                photo = resources_path(f"holidays/birthday/{postcard}")
-                await MaksogramBot.send_message(self.id, "Доброе утро! С днем рождения 🥳\nВсего самого лучшего! 🎊 🎁", photo=photo)
-            elif time.date().month == 3 and time.date().day == 1:  # Поздравление с первым днем весны
-                postcard = random.choice(os.listdir(resources_path("holidays/1march")))
-                photo = resources_path(f"holidays/1march/{postcard}")
-                await MaksogramBot.send_message(self.id, "Доброе утро!\nС первым днем весны ☀️", photo=photo)
-            elif time.date().month == 2 and time.date().day == 23 and gender is True:  # Поздравление с 23 февраля
-                postcard = random.choice(os.listdir(resources_path("holidays/man")))
-                photo = resources_path(f"holidays/man/{postcard}")
-                await MaksogramBot.send_message(self.id, "С добрым утром! Поздравляю с 23 февраля 😎", photo=photo)
-            elif time.date().month == 3 and time.date().day == 8 and gender is False:  # Поздравление с 8 марта
-                postcard = random.choice(os.listdir(resources_path("holidays/woman")))
-                photo = resources_path(f"holidays/woman/{postcard}")
-                await MaksogramBot.send_message(self.id, "С добрым утром! Поздравляю с 8 марта 🥰", photo=photo)
-            elif await db.fetch_one(f"SELECT morning_weather FROM modules WHERE account_id={self.id}", one_data=True):  # Погода по утрам
-                if gender is True:  # Мужчина
-                    postcard = random.choice(os.listdir(resources_path("good_morning/man")))
-                    photo = resources_path(f"good_morning/man/{postcard}")
-                elif gender is False:  # Женщина
-                    postcard = random.choice(os.listdir(resources_path("good_morning/woman")))
-                    photo = resources_path(f"good_morning/woman/{postcard}")
-                else:
-                    photo = None
-                await MaksogramBot.send_message(self.id, f"Доброе утро! Как спалось? 😉\n\n{await weather(self.id)}",
-                                                photo=photo, parse_mode="HTML")
-            self.time_morning_notification = time_now()
-            await db.execute(f"UPDATE accounts SET morning_notification=now() WHERE account_id={self.id}")
-            return
 
         function = await db.fetch_one(f"SELECT online, offline FROM status_users WHERE account_id={self.id} AND user_id={event.chat_id}")
         online = function['online'] and status is True
@@ -552,11 +566,13 @@ class Program:
     async def answering_machine(self, event: events.newmessage.NewMessage.Event):
         message: Message = event.message
         answer_id = await get_enabled_auto_answer(self.id)
-        answer = await db.fetch_one(f"SELECT text, entities FROM answering_machine WHERE answer_id={answer_id} AND account_id={self.id}")
+        answer = await db.fetch_one(f"SELECT contacts, text, entities FROM answering_machine "
+                                    f"WHERE answer_id={answer_id} AND account_id={self.id}")
         if not answer: return
+        if answer['contacts'] and not (await self.client.get_entity(message.chat_id)).contact:
+            return
         await db.execute(f"UPDATE functions SET answering_machine_sending=answering_machine_sending || '{message.chat_id}' "
                          f"WHERE account_id={self.id}")
-        await db.execute(f"UPDATE statistics SET answering_machine=now() WHERE account_id={self.id}")
         entities = []
         for entity in answer['entities']:
             match entity['type']:

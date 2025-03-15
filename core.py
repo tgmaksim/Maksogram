@@ -19,14 +19,17 @@ import string
 import asyncio
 import sys_keys
 import traceback
+import aiosmtplib
 
 from aiogram import Bot
 from typing import Union, Any
 from database import Database
+from email.header import Header
 from telethon import TelegramClient
+from email.mime.text import MIMEText
 from datetime import datetime, timedelta
 from telethon.tl.functions.photos import GetUserPhotosRequest
-from sys_keys import sessions_path, TOKEN, BOT_ID, USERNAME_BOT
+from sys_keys import sessions_path, TOKEN, BOT_ID, USERNAME_BOT, email
 from aiogram.types import LinkPreviewOptions, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 
 
@@ -213,9 +216,23 @@ def new_telegram_client(phone_number: str) -> TelegramClient:
     )
 
 
+async def send_email_message(to: str, subject: str, text: str, *, subtype: str = 'plain'):
+    msg = MIMEText(text, subtype, 'utf-8')
+    msg['Subject'] = Header(subject, 'utf-8')
+    msg['From'] = email['user']
+    msg['To'] = to
+
+    smtp = aiosmtplib.SMTP(hostname=email['host'], port=25, start_tls=False)
+    await smtp.connect()
+    await smtp.starttls()
+    await smtp.login(email['user'], email['password'])
+    await smtp.send_message(msg)
+    await smtp.quit()
+
+
 class Variables:
     version = "2.5"
-    version_string = "2.5.4 (39)"
+    version_string = "2.6.0 (40)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])

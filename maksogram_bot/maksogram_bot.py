@@ -46,6 +46,8 @@ from . answering_machine import answering_machine_initial
 answering_machine_initial()
 from . login import login_initial
 login_initial()
+from . security import security_initial
+security_initial()
 
 
 @dp.message(Command('version'))

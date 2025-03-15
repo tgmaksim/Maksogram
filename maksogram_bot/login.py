@@ -6,7 +6,6 @@ from core import (
     html,
     SITE,
     OWNER,
-    support,
     security,
     time_now,
     Variables,
@@ -38,6 +37,7 @@ from aiogram.types import Message, CallbackQuery, WebAppInfo
 from .core import (
     dp,
     bot,
+    Data,
     UserState,
     new_message,
     payment_menu,
@@ -50,10 +50,11 @@ from .core import (
 async def _registration(callback_query: CallbackQuery, state: FSMContext):
     if await new_callback_query(callback_query): return
     await state.set_state(UserState.send_phone_number)
-    markup = KMarkup(keyboard=[[KButton(text="Отправить номер телефона", request_contact=True)],
+    markup = KMarkup(keyboard=[[KButton(text="Начать регистрацию", request_contact=True)],
                                [KButton(text="Отмена")]], resize_keyboard=True)
-    await callback_query.message.answer("Чтобы Maksogram уведомлял об удалении и изменении сообщения, нужно войти в аккаунт",
-                                        reply_markup=markup)
+    await callback_query.message.answer("Чтобы Maksogram уведомлял об удалении и изменении сообщений, нужно войти в аккаунт. "
+                                        f"Понимаем ваши опасения по поводу безопасности: вы можете почитать {feedback_link} или "
+                                        f"написать {support_link}", parse_mode=html, reply_markup=markup, disable_web_page_preview=True)
     await callback_query.message.delete()
 
 
@@ -90,7 +91,7 @@ async def _on(callback_query: CallbackQuery, state: FSMContext):
             await state.set_state(UserState.relogin)
             await callback_query.answer("Вы удалили Maksogram из списка устройств")
             markup = KMarkup(keyboard=[[
-                KButton(text="Отправить код", web_app=WebAppInfo(url="https://tgmaksim.ru/maksogram/code"))],
+                KButton(text="Войти в аккаунт", web_app=WebAppInfo(url=f"{Data.web_app}/code"))],
                 [KButton(text="Отмена")]], resize_keyboard=True)
             await callback_query.message.answer("Вы удалили сессию Telegram, Maksogram больше не имеет доступа "
                                                 "к вашему аккаунту. Пришлите код для повторного входа (<b>только кнопкой!</b>)",
@@ -152,7 +153,7 @@ async def _relogin_with_password(message: Message, state: FSMContext):
     if message.text == "Отмена":
         await state.clear()
         return await message.answer("Почему вы больше не хотите пользоваться Maksogram? Если у вас есть вопрос, то вы можете "
-                                    f"задать его {support_link}>", reply_markup=KRemove(), disable_web_page_preview=True)
+                                    f"задать его {support_link}", reply_markup=KRemove(), disable_web_page_preview=True)
     if message.content_type != "text":
         return await message.answer("Отправьте пароль от вашего аккаунта")
     account_id = message.chat.id
@@ -188,7 +189,7 @@ async def _contact(message: Message, state: FSMContext):
         return await message.reply("Вы не отправили контакт!")
     if message.chat.id != message.contact.user_id:
         return await message.reply("Это не ваш номер! Пожалуйста, воспользуйтесь кнопкой")
-    phone_number = f'+{message.contact.phone_number}'
+    phone_number = f'+{int(message.contact.phone_number)}'
     telegram_client = new_telegram_client(phone_number)
     if not await telegram_client_connect(telegram_client):
         await state.clear()
@@ -197,10 +198,10 @@ async def _contact(message: Message, state: FSMContext):
     await telegram_client.send_code_request(phone_number)
     await state.set_state(UserState.send_code)
     await state.update_data(telegram_client=telegram_client, phone_number=phone_number)
-    markup = KMarkup(keyboard=[[KButton(text="Отправить код", web_app=WebAppInfo(url=f"https://tgmaksim.ru/maksogram/code"))],
+    markup = KMarkup(keyboard=[[KButton(text="Войти в аккаунт", web_app=WebAppInfo(url=f"{Data.web_app}/code"))],
                                [KButton(text="Отмена")]], resize_keyboard=True)
     await message.answer("Осталось отправить код для входа (<b>только кнопкой!</b>). Напоминаю, что мы не собираем "
-                         f"никаких данных, а по любым вопросам можете обращаться в @{support}", reply_markup=markup, parse_mode=html)
+                         f"никаких данных, а по любым вопросам можете обращаться к {support_link}", reply_markup=markup, parse_mode=html)
 
 
 @dp.message(UserState.send_code)
@@ -262,7 +263,7 @@ async def _login(message: Message, state: FSMContext):
             await loading.delete()
             await message.answer("Maksogram запущен 🚀\nВ канале <b>Мои сообщения</b> будут храниться все ваши сообщения, в "
                                  "комментариях будет информация о изменении, реакциях и удалении\n"
-                                 f"Полный обзор функция доступен на <b><a href='{SITE}'>сайте</a></b>\n"
+                                 f"<b><a href='{SITE}'>Полный обзор функций</a></b>\n"
                                  "Пробная подписка заканчивается через неделю", parse_mode=html, disable_web_page_preview=True)
             await message.answer("<b>Меню функций и настройки</b>", parse_mode=html,
                                  reply_markup=IMarkup(inline_keyboard=[[IButton(text="⚙️ Меню и настройки", callback_data="menu")]]))
@@ -316,7 +317,7 @@ async def _login_with_password(message: Message, state: FSMContext):
             await loading.delete()
             await message.answer("Maksogram запущен 🚀\nВ канале <b>Мои сообщения</b> будут храниться все ваши сообщения, в "
                                  "комментариях будет информация о изменении, реакциях и удалении\n"
-                                 f"Полный обзор функция доступен на <b><a href='{SITE}'>сайте</a></b>\n"
+                                 f"<b><a href='{SITE}'>Полный обзор функций</a></b>\n"
                                  "Пробная подписка заканчивается через неделю", parse_mode=html, disable_web_page_preview=True)
             await message.answer("<b>Меню функций и настройки</b>", parse_mode=html,
                                  reply_markup=IMarkup(inline_keyboard=[[IButton(text="⚙️ Меню и настройки", callback_data="menu")]]))
@@ -336,6 +337,8 @@ async def start_program(account_id: int, username: str, phone_number: int, teleg
     await db.execute(f"INSERT INTO functions VALUES ({account_id}, '[]')")
     await db.execute(f"INSERT INTO modules VALUES ({account_id}, false, false, false, false, false)")
     await db.execute(f"INSERT INTO statistics VALUES ({account_id}, now(), now(), now())")
+    await db.execute(f"INSERT INTO security VALUES ({account_id}, false, false, NULL, '[]')")
+    await db.execute(f"INSERT INTO confirm_email VALUES ({account_id}, NULL, NULL)")
     telegram_clients[account_id] = telegram_client
     asyncio.get_running_loop().create_task(program.Program(telegram_client, account_id, [], time_now()).run_until_disconnected())
 

@@ -26,12 +26,6 @@ class Preview:
     url: str
 
 
-async def get_previews(search: str) -> list[Preview]:
-    previews = await db.fetch_all("SELECT preview_id, photo_url, title, description, message_text, url FROM previews "
-                                  "WHERE lower(title) LIKE $1 ORDER BY preview_id", f"%{search.lower()}%")
-    return [Preview(**preview) for preview in previews]
-
-
 @dp.inline_query()
 @security()
 async def _review(inline_query: InlineQuery):
@@ -56,6 +50,12 @@ async def _review(inline_query: InlineQuery):
             )))
 
     await inline_query.answer(results=results, button=button, cache_time=0, is_personal=True)
+
+
+async def get_previews(search: str) -> list[Preview]:
+    previews = await db.fetch_all("SELECT preview_id, photo_url, title, description, message_text, url FROM previews "
+                                  "WHERE lower(title) LIKE $1 ORDER BY preview_id", f"%{search.lower()}%")
+    return [Preview(**preview) for preview in previews]
 
 
 def inline_mode_initial():
