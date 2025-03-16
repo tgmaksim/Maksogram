@@ -425,14 +425,11 @@ class Program:
         name = await self.chat_name(chat_id)
         if await db.fetch_one(f"SELECT reading FROM status_users WHERE account_id={self.id} AND user_id={chat_id}", one_data=True):
             await db.execute(f"UPDATE status_users SET reading=false WHERE account_id={self.id} AND user_id={chat_id}")
-            await MaksogramBot.send_message(self.id, f"🌐 {name} прочитал сообщение")
+            await MaksogramBot.send_message(self.id, f"🌐 {name} прочитал сообщение", reply_markup=MaksogramBot.IMarkup(
+                inline_keyboard=[[MaksogramBot.IButton(text="Настройки", callback_data=f"status_user_menu{self.id}")]]))
 
-    async def self_update(self, event: events.userupdate.UserUpdate.Event):
+    async def check_awake(self, event: events.userupdate.UserUpdate.Event) -> Union[datetime, None]:
         status = isinstance(event.status, UserStatusOnline)
-        if self.status == status:
-            return
-        self.status = status
-
         if status is False:  # Обработка только статуса в сети
             return
         time_zone: int = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={self.id}", one_data=True)
@@ -442,7 +439,36 @@ class Program:
             return
         if time_last_notification.date() == time.date() and morning[0] <= time_last_notification.hour < morning[1]:
             return  # Сегодня уже отправлено
+        return time
+
+    async def self_update(self, event: events.userupdate.UserUpdate.Event):
+        status = isinstance(event.status, UserStatusOnline)
+        if self.status == status:
+            return
+        self.status = status
+
+        time = await self.check_awake(event)
         gender = await db.fetch_one(f"SELECT gender FROM settings WHERE account_id={self.id}", one_data=True)
+
+        functions = await db.fetch_all(f"SELECT account_id, online, offline, awake, name FROM status_users WHERE user_id={self.id}")
+        for function in functions:
+            awake = status is True and function['awake']
+            online = function['online'] and status is True
+            offline = function['offline'] and status is False
+            if online or offline:
+                status_str = "в сети" if status else "вышел(а) из сети"
+            elif awake and time:
+                if gender is True: status_str = "проснулся"
+                elif gender is False: status_str = "проснулась"
+                else: status_str = "проснулся(лась)"
+            else: continue
+            name = function['name']
+            await MaksogramBot.send_message(function['account_id'], f"🌐 {name} {status_str}", reply_markup=MaksogramBot.IMarkup(
+                inline_keyboard=[[MaksogramBot.IButton(text="Настройки", callback_data=f"status_user_menu{self.id}")]]))
+
+        if not time:  # Уведомление не требуется
+            return
+
         my_birthday: Birthday = (await self.client(GetFullUserRequest(self.id))).full_user.birthday
         if my_birthday.month == time.month and my_birthday.day == time.day:  # Поздравление в днем рождения
             postcard = random.choice(os.listdir(resources_path("holidays/birthday")))
@@ -473,21 +499,38 @@ class Program:
                                             photo=photo, parse_mode="HTML")
         self.time_morning_notification = time_now()
         await db.execute(f"UPDATE accounts SET morning_notification=now() WHERE account_id={self.id}")
+        await db.execute(f"UPDATE status_users SET awake=now() WHERE user_id={event.chat_id}")
 
     async def user_update(self, event: events.userupdate.UserUpdate.Event):
         status = isinstance(event.status, UserStatusOnline)
         if self.status_users.get(event.chat_id) == status:
             return
+
+        if await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={event.chat_id}", one_data=True):
+            return
+
         self.status_users[event.chat_id] = status
 
-        function = await db.fetch_one(f"SELECT online, offline FROM status_users WHERE account_id={self.id} AND user_id={event.chat_id}")
+        function = await db.fetch_one(f"SELECT online, offline, awake FROM status_users WHERE account_id={self.id} AND user_id={event.chat_id}")
+        awake = status is True and function['awake']
         online = function['online'] and status is True
         offline = function['offline'] and status is False
         if online or offline:
-            name = await self.chat_name(event.chat_id)
             status_str = "в сети" if status else "вышел(а) из сети"
-            await MaksogramBot.send_message(self.id, f"🌐 {name} {status_str}", reply_markup=MaksogramBot.IMarkup(
-                inline_keyboard=[[MaksogramBot.IButton(text="Настройки", callback_data=f"status_user_menu{event.chat_id}")]]))
+        elif awake:
+            time_zone: int = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={self.id}", one_data=True)
+            time = time_now() + timedelta(hours=time_zone)
+            time_last_notification = awake + timedelta(hours=time_zone)
+            if not (morning[0] <= time.hour < morning[1]):  # Сейчас не утро
+                return
+            if time_last_notification.date() == time.date() and morning[0] <= time_last_notification.hour < morning[1]:
+                return  # Сегодня уже отправлено
+            await db.execute(f"UPDATE status_users SET awake=now() WHERE account_id={self.id} AND user_id={event.chat_id}")
+            status_str = "проснулся(лась)"
+        else: return
+        name = await self.chat_name(event.chat_id)
+        await MaksogramBot.send_message(self.id, f"🌐 {name} {status_str}", reply_markup=MaksogramBot.IMarkup(
+            inline_keyboard=[[MaksogramBot.IButton(text="Настройки", callback_data=f"status_user_menu{event.chat_id}")]]))
 
     async def system_bot(self, event: events.newmessage.NewMessage.Event):
         message: Message = event.message

@@ -56,26 +56,25 @@ async def status_user_menu(account_id: int, user_id: int) -> dict[str, Any]:
     def command(parameter: bool):
         return "off" if parameter else "on"
 
-    user = await db.fetch_one(f"SELECT name, online, offline, reading FROM status_users WHERE account_id={account_id} AND "
+    user = await db.fetch_one(f"SELECT name, online, offline, reading, awake FROM status_users WHERE account_id={account_id} AND "
                               f"user_id={user_id}")  # Данные о друге в сети
     if user is None:
         return await status_users_menu(account_id)
     markup = IMarkup(inline_keyboard=[
-        [IButton(text=f"{status(user['online'])} Появление в сети",
-                 callback_data=f"status_user_online_{command(user['online'])}_{user_id}")],
-        [IButton(text=f"{status(user['offline'])} Выход из сети",
-                 callback_data=f"status_user_offline_{command(user['offline'])}_{user_id}")],
-        [IButton(text=f"{status(user['reading'])} Чтение моего сообщения",
-                 callback_data=f"status_user_reading_{command(user['reading'])}_{user_id}")],
+        [IButton(text=f"{status(user['online'])} Онлайн", callback_data=f"status_user_online_{command(user['online'])}_{user_id}"),
+         IButton(text=f"{status(user['offline'])} Оффлайн", callback_data=f"status_user_offline_{command(user['offline'])}_{user_id}")],
+        [IButton(text=f"{status(user['awake'])} Проснется 💤", callback_data=f"status_user_awake_{command(user['awake'])}_{user_id}")],
+        [IButton(text=f"{status(user['reading'])} Чтение моего сообщения", callback_data=f"status_user_reading_{command(user['reading'])}_{user_id}")],
         [IButton(text="🚫 Удалить пользователя", callback_data=f"status_user_del{user_id}")],
         [IButton(text="◀️  Назад", callback_data="status_users")]])
-    return {"text": f"🌐 <b>Друг в сети</b>\nКогда <b>{user['name']}</b> выйдет/зайдет в сеть или прочитает сообщение, я сообщу",
-            "parse_mode": html, "reply_markup": markup}
+    return {"text": f"🌐 <b>Друг в сети</b>\nКогда <b>{user['name']}</b> будет онлайн/оффлайн, проснется или прочитает сообщение, "
+                    "я сообщу", "parse_mode": html, "reply_markup": markup}
 
 
 @dp.callback_query(F.data.startswith("status_user_online_on").__or__(F.data.startswith("status_user_online_off")).__or__(
                    F.data.startswith("status_user_offline_on")).__or__(F.data.startswith("status_user_offline_off")).__or__(
-                   F.data.startswith("status_user_reading_on")).__or__(F.data.startswith("status_user_reading_off")))
+                   F.data.startswith("status_user_reading_on")).__or__(F.data.startswith("status_user_reading_off")).__or__(
+                   F.data.startswith("status_user_awake_on")).__or__(F.data.startswith("status_user_awake_off")))
 @security()
 async def _status_user_switch(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
@@ -84,8 +83,12 @@ async def _status_user_switch(callback_query: CallbackQuery):
     user = await db.fetch_one(f"SELECT true FROM status_users WHERE account_id={account_id} AND user_id={user_id}", one_data=True)
     if user is None:  # Пользователь удален из списка друзей в сети
         return await callback_query.message.edit_text(**await status_users_menu(account_id))
-    await db.execute(f"UPDATE status_users SET {function_status_user}={'true' if command == 'on' else 'false'} WHERE "
-                     f"account_id={account_id} AND user_id={user_id}")  # Вкл/выкл нужной функции друга в сети
+    if function_status_user == "awake":
+        await db.execute(f"UPDATE status_users SET {function_status_user}={'now()' if command == 'on' else 'NULL'} WHERE "
+                         f"account_id={account_id} AND user_id={user_id}")  # Вкл/выкл функции
+    else:
+        await db.execute(f"UPDATE status_users SET {function_status_user}={'true' if command == 'on' else 'false'} WHERE "
+                         f"account_id={account_id} AND user_id={user_id}")  # Вкл/выкл нужной функции друга в сети
     await callback_query.message.edit_text(**await status_user_menu(account_id, int(user_id)))
 
 
@@ -93,7 +96,7 @@ async def _status_user_switch(callback_query: CallbackQuery):
 @security('state')
 async def _new_status_user_start(callback_query: CallbackQuery, state: FSMContext):
     if await new_callback_query(callback_query): return
-    if await db.fetch_one(f"SELECT COUNT(*) FROM status_users WHERE account_id={callback_query.from_user.id}", one_data=True) >= 2:
+    if await db.fetch_one(f"SELECT COUNT(*) FROM status_users WHERE account_id={callback_query.from_user.id}", one_data=True) >= 3:
         # Количество друзей в сети уже достигло максимума
         return await callback_query.answer("У вас максимальное количество!", True)
     await state.set_state(UserState.status_user)
@@ -121,7 +124,7 @@ async def _new_status_user(message: Message, state: FSMContext):
             name = user.first_name + (f" {user.last_name}" if user.last_name else "")
             name = (name[:30] + "...") if len(name) > 30 else name
             telegram_clients[account_id].list_event_handlers()[4][1].chats.add(user_id)
-            await db.execute(f"INSERT INTO status_users VALUES ({account_id}, {user_id}, $1, false, false, false)", name)  # Добавление друга в сети
+            await db.execute(f"INSERT INTO status_users VALUES ({account_id}, {user_id}, $1, false, false, false, NULL)", name)
             await message.answer(**await status_user_menu(message.chat.id, user_id))
     else:
         await message.answer(**await status_users_menu(message.chat.id))

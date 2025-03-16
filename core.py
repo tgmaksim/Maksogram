@@ -8,7 +8,7 @@ feedback_post = 375
 feedback_comment = 510
 feedback_button = f"tg://resolve?domain={channel}&post={feedback_post}&comment={feedback_comment}"
 feedback_link = f"<a href='{feedback_button}'>отзывы</a>"
-morning = 5, 12
+morning = 5, 13
 
 html = "HTML"
 s1, s2 = "{}"
@@ -231,8 +231,8 @@ async def send_email_message(to: str, subject: str, text: str, *, subtype: str =
 
 
 class Variables:
-    version = "2.5"
-    version_string = "2.6.0 (40)"
+    version = "2.6"
+    version_string = "2.6.0 (41)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])
