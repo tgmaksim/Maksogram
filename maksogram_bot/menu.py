@@ -98,11 +98,11 @@ async def menu(account_id: int) -> dict[str, Any]:
     else:
         markup = IMarkup(inline_keyboard=[[IButton(text="🔴 Выключить Maksogram", callback_data="off")],
                                           [IButton(text="📸 Новая аватарка", callback_data="avatars"),
-                                           IButton(text="🤖 Автоответчик", callback_data="answering_machine")],
+                                           IButton(text="🎁 Новый подарок", callback_data="gifts")],
                                           [IButton(text="🌐 Друг в сети", callback_data="status_users"),
-                                           IButton(text="💬 Maksogram в чате", callback_data="modules")],
+                                           IButton(text="🤖 Автоответчик", callback_data="answering_machine")],
                                           [IButton(text="⚙️ Настройки", callback_data="settings"),
-                                           ],  # IButton(text="🛡 Защита аккаунта", callback_data="security")
+                                           IButton(text="💬 Maksogram в чате", callback_data="modules")],  # IButton(text="🛡 Защита аккаунта", callback_data="security")
                                           [IButton(text="ℹ️ Памятка по функциям", url=SITE)]])
     return {"text": "⚙️ Maksogram — меню ⚙️", "reply_markup": markup}
 

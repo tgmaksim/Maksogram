@@ -1,4 +1,5 @@
 from typing import Any
+from asyncpg.exceptions import UniqueViolationError
 from core import (
     db,
     html,
@@ -73,7 +74,10 @@ async def _new_avatar(message: Message, state: FSMContext):
             user = await telegram_clients[account_id].get_entity(user_id)
             name = user.first_name + (f" {user.last_name}" if user.last_name else "")
             count = await count_avatars(account_id, user_id)
-            await db.execute(f"INSERT INTO avatars VALUES ({account_id}, {user_id}, $1, {count})", name)  # Добавление новой аватарки
+            try:
+                await db.execute(f"INSERT INTO avatars VALUES ({account_id}, {user_id}, $1, {count})", name)  # Добавление новой аватарки
+            except UniqueViolationError:  # Уже есть
+                pass
             await message.answer(**await avatar_menu(message.chat.id, user_id))
     else:
         await message.answer(**await avatars_menu(message.chat.id))

@@ -24,6 +24,8 @@ from core import (
     security,
     time_now,
     Variables,
+    get_gifts,
+    json_encode,
     account_off,
     MaksogramBot,
     count_avatars,
@@ -356,8 +358,8 @@ class Program:
             is_premium = await self.is_premium()
             reactions, entities = await self.get_reactions(event, is_premium=is_premium)
             reactions_str, _ = await self.get_reactions(event)
-            await db.execute(f"UPDATE \"{self.id}_messages\" SET reactions='{reactions_str}' "
-                             f"WHERE chat_id={message.chat_id} AND message_id={message.id}")
+            await db.execute(f"UPDATE \"{self.id}_messages\" SET reactions=$1 "
+                             f"WHERE chat_id={message.chat_id} AND message_id={message.id}", reactions_str)
             reactions = reactions if reactions else "Реакции убраны"
             await self.client.send_message(await self.my_messages, reactions,
                                            formatting_entities=entities, comment_to=saved_message_id)
@@ -616,6 +618,7 @@ class Program:
                     entities.append(MessageEntityCustomEmoji(entity['offset'], entity['length'], document_id=int(entity['custom_emoji_id'])))
         return await self.client.send_message(message.chat_id, answer['text'], formatting_entities=entities)
 
+    @security()
     async def new_avatar_center(self):
         while await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={self.id}", one_data=True):
             for user in await db.fetch_all(f"SELECT user_id, name, count FROM avatars WHERE account_id={self.id}"):
@@ -623,19 +626,16 @@ class Program:
                 if user['count'] > count:
                     await MaksogramBot.send_message(
                         self.id, f"📸 <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> удалил(а) аватарку",
-                        reply_markup=MaksogramBot.IMarkup(
-                            inline_keyboard=[[MaksogramBot.IButton(text="🔴 Выключить", callback_data=f"avatar_del{user['user_id']}")]]),
                         parse_mode="html")
                 elif user['count'] < count:
                     await MaksogramBot.send_message(
                         self.id, f"📸 <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> добавил(а) аватарку",
-                        reply_markup=MaksogramBot.IMarkup(
-                            inline_keyboard=[[MaksogramBot.IButton(text="🔴 Выключить", callback_data=f"avatar_del{user['user_id']}")]]),
                         parse_mode="html")
                 else: continue
                 await db.execute(f"UPDATE avatars SET count={count} WHERE account_id={self.id} AND user_id={user['user_id']}")
             await asyncio.sleep(5*60)
 
+    @security()
     async def answering_machine_center(self):
         auto_answer = await get_enabled_auto_answer(self.id)
         while await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={self.id}", one_data=True):
@@ -645,6 +645,42 @@ class Program:
             # Ожидание следующей минуты
             await asyncio.sleep(((time_now() + timedelta(minutes=1)).replace(second=0, microsecond=0) - time_now()).seconds)
 
+    @security()
+    async def gifts_center(self):
+        while await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={self.id}", one_data=True):
+            for user in await db.fetch_all(f"SELECT user_id, name, gifts FROM gifts WHERE account_id={self.id}"):
+                gifts = await get_gifts(self.id, user['user_id'])
+                for gift in gifts.values():
+                    if user['gifts'].get(gift.id):  # Подарок присутствует
+                        if gift.unique is True and user['gifts'][gift.id]['unique'] is False:  # Подарок стал уникальным
+                            link = f"t.me/nft/{gift.slug}"
+                            await MaksogramBot.send_message(
+                                self.id, f"🎁 <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> улучшил(а) "
+                                         f"<a href='{link}'>подарок</a>", parse_mode="html")
+                        del user['gifts'][gift.id]
+                    else:  # Подарок появился
+                        giver = (f"@{gift.giver['username']}" if gift.giver['username'] else
+                                 f"<a href='tg://user?id={gift.giver['user_id']}'>{gift.giver['name']}</a>") \
+                            if gift.giver else "не известно"
+                        gift_str = "лимитированный подарок" if gift.limited else "подарок"
+                        if gift.unique is False:  # Неуникальный подарок
+                            await MaksogramBot.send_message(
+                                self.id, f"🎁 <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> получил(а) {gift_str}\n"
+                                         f"От кого: {giver}\nСтоимость: {gift.stars} 🌟", parse_mode="html")
+                        else:  # Уникальный подарок
+                            link = f"t.me/nft/{gift.slug}"
+                            await MaksogramBot.send_message(
+                                self.id, f"🎁 <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> получил(а) "
+                                         f"<a href='{link}'>подарок</a>\nОт кого: {giver}", parse_mode="html")
+                if count_hidden_gifts := len(user['gifts']):  # Исчезнувшие подарки (скрытые, переданные)
+                    gift_str = "подарок" if count_hidden_gifts == 1 else f"{count_hidden_gifts} подарков"
+                    await MaksogramBot.send_message(
+                        self.id, f"🎁 <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> скрыл(а) {gift_str}",
+                        parse_mode="html")
+                gifts_json = json_encode({gift.id: gift.__dict__ for gift in gifts.values()})
+                await db.execute(f"UPDATE gifts SET gifts=$1 WHERE account_id={self.id} AND user_id={user['user_id']}", gifts_json)
+            await asyncio.sleep(5*60)
+
     async def run_until_disconnected(self):
         await db.execute(f"CREATE TABLE IF NOT EXISTS \"{self.id}_messages\" (chat_id BIGINT NOT NULL, "
                          "message_id INTEGER NOT NULL, saved_message_id INTEGER NOT NULL, reactions TEXT NOT NULL)")
@@ -652,6 +688,7 @@ class Program:
         await MaksogramBot.send_system_message(f"Maksogram {self.__version__} для {name} запущен")
         asyncio.get_running_loop().create_task(self.new_avatar_center())
         asyncio.get_running_loop().create_task(self.answering_machine_center())
+        asyncio.get_running_loop().create_task(self.gifts_center())
         try:
             await self.client.run_until_disconnected()
         except (AuthKeyInvalidError, AuthKeyUnregisteredError):

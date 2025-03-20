@@ -48,6 +48,8 @@ from . login import login_initial
 login_initial()
 from . security import security_initial
 security_initial()
+from . gifts import gifts_initial
+gifts_initial()
 
 
 @dp.message(Command('version'))

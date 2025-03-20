@@ -25,12 +25,26 @@ from aiogram import Bot
 from typing import Union, Any
 from database import Database
 from email.header import Header
+from dataclasses import dataclass
 from telethon import TelegramClient
 from email.mime.text import MIMEText
 from datetime import datetime, timedelta
+from telethon.tl.types import StarGiftUnique
+from telethon.tl.types.payments import SavedStarGifts
 from telethon.tl.functions.photos import GetUserPhotosRequest
+from telethon.tl.functions.payments import GetSavedStarGiftsRequest
 from sys_keys import sessions_path, TOKEN, BOT_ID, USERNAME_BOT, email
 from aiogram.types import LinkPreviewOptions, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+
+
+@dataclass
+class Gift:
+    id: str
+    unique: bool
+    giver: dict[str, int]
+    limited: bool
+    stars: int
+    slug: str
 
 
 class UserIsNotAuthorized(Exception):
@@ -88,6 +102,25 @@ class db:
 
 async def count_avatars(account_id: int, user_id: int) -> int:
     return len((await telegram_clients[account_id](GetUserPhotosRequest(user_id, 0, 0, 128))).photos)
+
+
+async def get_gifts(account_id: int, user_id: int) -> Union[dict[str, Gift], None]:
+    result = {}
+    saved_gifts: SavedStarGifts = (await telegram_clients[account_id](GetSavedStarGiftsRequest(peer=user_id, offset="", limit=32)))
+    if saved_gifts.count > 32:
+        return None
+    for saved_gift in saved_gifts.gifts:
+        gift = saved_gift.gift
+        giver = None
+        if saved_gift.from_id:
+            giver_user = [user for user in saved_gifts.users if user.id == saved_gift.from_id.user_id][0]
+            giver = {"user_id": giver_user.id, "name": f"{giver_user.first_name} {giver_user.last_name}".strip(),
+                     "username": giver_user.username}
+        if isinstance(gift, StarGiftUnique):
+            result[str(gift.id)] = Gift(str(gift.id), True, giver, None, None, gift.slug)
+        else:
+            result[str(gift.id)] = Gift(str(gift.id), False, giver, gift.limited, gift.stars, None)
+    return result
 
 
 async def check_connection(telegram_client: TelegramClient) -> bool:
@@ -232,7 +265,7 @@ async def send_email_message(to: str, subject: str, text: str, *, subtype: str =
 
 class Variables:
     version = "2.6"
-    version_string = "2.6.0 (41)"
+    version_string = "2.6.1 (42)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])

@@ -54,6 +54,7 @@ class UserState(StatesGroup):
     answering_machine_edit_time = State('answering_machine_edit_time')
     answering_machine_edit_weekdays = State('answering_machine_edit_weekdays')
     avatar = State('avatar')
+    gift = State('gift')
     security_email = State('security_email')
     confirm_security_email = State('confirm_security_email')
     security_new_agent = State('security_new_agent')

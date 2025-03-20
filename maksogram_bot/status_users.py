@@ -1,4 +1,5 @@
 from typing import Any
+from asyncpg.exceptions import UniqueViolationError
 from core import (
     db,
     html,
@@ -124,7 +125,10 @@ async def _new_status_user(message: Message, state: FSMContext):
             name = user.first_name + (f" {user.last_name}" if user.last_name else "")
             name = (name[:30] + "...") if len(name) > 30 else name
             telegram_clients[account_id].list_event_handlers()[4][1].chats.add(user_id)
-            await db.execute(f"INSERT INTO status_users VALUES ({account_id}, {user_id}, $1, false, false, false, NULL)", name)
+            try:
+                await db.execute(f"INSERT INTO status_users VALUES ({account_id}, {user_id}, $1, false, false, false, NULL)", name)
+            except UniqueViolationError:  # Уже есть
+                pass
             await message.answer(**await status_user_menu(message.chat.id, user_id))
     else:
         await message.answer(**await status_users_menu(message.chat.id))
