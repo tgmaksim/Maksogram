@@ -15,10 +15,10 @@ from datetime import timedelta, datetime
 from telethon import TelegramClient, events
 from .admin import reload_server, upload_file
 from telethon.events.common import EventCommon
-from telethon.errors import ChatForwardsRestrictedError
 from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.functions.account import UpdateStatusRequest
 from telethon.tl.functions.messages import GetCustomEmojiDocumentsRequest
+from telethon.errors import ChatForwardsRestrictedError, FileReferenceExpiredError
 from core import (
     db,
     morning,
@@ -280,6 +280,28 @@ class Program:
             else:
                 await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться погодой? Данная функция отключена у вас! "
                                                          "Вы можете включить ее в настройках\n/menu_chat (Maksogram в чате)")
+
+        if message.media and message.media.ttl_seconds:  # Самоуничтожающееся медиа
+            if message.file.size / 2**20 <= 10 or message.video_note or \
+                    message.voice and message.voice.attributes[0].duration <= 480:  # меньше 10 МБ, или кружок, или гс (до 8 минут)
+                file_id = message.photo.id if message.photo else message.document.id
+                ext = "png" if message.photo else message.file.ext
+                path = resources_path(f"ttl_media/{self.id}.{file_id}.{ext}")
+                try:
+                    await self.client.download_media(message, path)
+                except FileReferenceExpiredError:  # Уже удалено
+                    return await MaksogramBot.send_message(self.id, "Я не успел сохранить самоуничтожающееся медиа, "
+                                                                    "потому что вы его быстро посмотрели...")
+                saved_message: Message = await self.client.send_file(await self.my_messages, path, caption=message.text,
+                                                                     video_note=message.video_note, voice_note=message.voice)
+                link_to_message = f"t.me/c/{str(await self.my_messages)[4:]}/{saved_message.id}"  # Сис. канал
+                await MaksogramBot.send_message(self.id, f"Сохранено <a href='{link_to_message}'>самоуничтожающееся медиа</a>",
+                                                parse_mode="html")
+                return os.remove(path)
+            else:
+                peer = await self.chat_name(message.chat_id)
+                return await MaksogramBot.send_message(self.id, f"В чате с {peer} замечено самоуничтожающееся медиа. Я не смог "
+                                                                "его сохранить, т. к. по размеру оно превышает 10 МБ")
 
         try:
             saved_message = await self.client.forward_messages(await self.my_messages, message)
