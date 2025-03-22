@@ -49,7 +49,9 @@ from telethon.tl.types import (
     ReactionEmoji,
     UserStatusOnline,
     UserStatusOffline,
+    MessageMediaPhoto,
     ReactionCustomEmoji,
+    MessageMediaDocument,
 
     MessageEntityUrl,
     MessageEntityBold,
@@ -281,7 +283,8 @@ class Program:
                 await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться погодой? Данная функция отключена у вас! "
                                                          "Вы можете включить ее в настройках\n/menu_chat (Maksogram в чате)")
 
-        if message.media and message.media.ttl_seconds:  # Самоуничтожающееся медиа
+        TTL_MEDIA = Union[MessageMediaPhoto, MessageMediaDocument]
+        if isinstance(message.media, TTL_MEDIA) and message.media.ttl_seconds:  # Самоуничтожающееся медиа
             if message.file.size / 2**20 <= 10 or message.video_note or \
                     message.voice and message.voice.attributes[0].duration <= 480:  # меньше 10 МБ, или кружок, или гс (до 8 минут)
                 file_id = message.photo.id if message.photo else message.document.id
