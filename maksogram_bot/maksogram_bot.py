@@ -64,8 +64,6 @@ async def _version(message: Message):
 @security()
 async def _friends(message: Message):
     if await new_message(message): return
-    if not await db.fetch_one(f"SELECT true FROM accounts WHERE account_id={message.chat.id}", one_data=True):
-        return await message.answer("Вы не подключили бота, у вас еще нет реферальной ссылки!")
     url = f"tg://resolve?domain={MaksogramBot.username}&start={referal_link(message.chat.id)}"
     await message.answer(
         "<b>Реферальная программа</b>\n"

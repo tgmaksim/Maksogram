@@ -195,7 +195,11 @@ async def _contact(message: Message, state: FSMContext):
         await state.clear()
         await message.answer("Произошла ошибка... Попробуйте начать сначала :)", reply_markup=KRemove())
         raise ConnectionError("За десять попыток соединение не установлено")
-    await telegram_client.send_code_request(phone_number)
+    try:
+        await telegram_client.send_code_request(phone_number)
+    except ConnectionError:
+        await message.answer("Произошла временная ошибка... Попробуйте начать сначала :)", reply_markup=KRemove())
+        return await bot.send_message(OWNER, "Произошла ошибка ConnectionError, пользователю предложено начать сначала")
     await state.set_state(UserState.send_code)
     await state.update_data(telegram_client=telegram_client, phone_number=phone_number)
     markup = KMarkup(keyboard=[[KButton(text="Войти в аккаунт", web_app=WebAppInfo(url=f"{Data.web_app}/code"))],

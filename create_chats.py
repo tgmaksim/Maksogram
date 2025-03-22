@@ -12,6 +12,7 @@ from telethon.tl.types import (
     InputPeerUser,
     InputNotifyPeer,
     InputPeerChannel,
+    TextWithEntities,
     InputChatUploadedPhoto,
     InputPeerNotifySettings,
 )
@@ -93,8 +94,9 @@ async def create_chats(client: TelegramClient) -> dict[str, Union[str, Exception
 
     try:
         # Создаем папку с чатами "Maksogram" и добавляем канал "Мои сообщения" и системного бота "Maksogram"
+        title = TextWithEntities("Maksogram", [])
         await client(UpdateDialogFilterRequest(
-            42, DialogFilter(42, "Maksogram", [input_peer_my_messages, input_peer_admin_channel, bot], [], [])))
+            42, DialogFilter(42, title, [input_peer_my_messages, input_peer_admin_channel, bot], [], [])))
     except Exception as e:
         return {
             'result': 'error',
