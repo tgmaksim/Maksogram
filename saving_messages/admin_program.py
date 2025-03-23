@@ -24,6 +24,7 @@ from core import (
     morning,
     security,
     time_now,
+    www_path,
     Variables,
     get_gifts,
     json_encode,
@@ -638,7 +639,7 @@ class Program:
     async def answering_machine(self, event: events.newmessage.NewMessage.Event):
         message: Message = event.message
         answer_id = await get_enabled_auto_answer(self.id)
-        answer = await db.fetch_one(f"SELECT contacts, text, entities FROM answering_machine "
+        answer = await db.fetch_one(f"SELECT contacts, text, entities, media FROM answering_machine "
                                     f"WHERE answer_id={answer_id} AND account_id={self.id}")
         if not answer: return
         if answer['contacts'] and not (await self.client.get_entity(message.chat_id)).contact:
@@ -664,6 +665,11 @@ class Program:
                     entities.append(MessageEntityTextUrl(entity['offset'], entity['length'], entity['url']))
                 case "custom_emoji":
                     entities.append(MessageEntityCustomEmoji(entity['offset'], entity['length'], document_id=int(entity['custom_emoji_id'])))
+        if answer['media']:
+            access_hash = answer['media'] // 10
+            ext = 'png' if answer['media'] % 10 == 1 else 'mp4'
+            return await self.client.send_file(message.chat_id, www_path(f"answering_machine/{self.id}.{answer_id}.{access_hash}.{ext}"),
+                                               caption=answer['text'], formatting_entities=entities)
         return await self.client.send_message(message.chat_id, answer['text'], formatting_entities=entities)
 
     @security()

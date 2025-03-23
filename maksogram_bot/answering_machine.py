@@ -1,12 +1,17 @@
+import os
 import re
 import time
+import random
 
 from typing import Any
 from core import (
     db,
     html,
+    www_path,
     security,
+    WWW_SITE,
     json_encode,
+    preview_options,
     get_enabled_auto_answer,
 )
 
@@ -79,7 +84,7 @@ async def _new_answering_machine_start(callback_query: CallbackQuery, state: FSM
         return await callback_query.answer("У вас максимальное количество автоответов", True)
     await state.set_state(UserState.answering_machine)
     markup = KMarkup(keyboard=[[KButton(text="Отмена")]], resize_keyboard=True)
-    message_id = (await callback_query.message.answer("Напишите <b>текст</b>, который я отправлю в случае необходимости",
+    message_id = (await callback_query.message.answer("Отправьте <b>текст, фото или видео</b>, которые я отправлю в случае необходимости",
                                                       parse_mode=html, reply_markup=markup)).message_id
     await state.update_data(message_id=message_id)
     await callback_query.message.delete()
@@ -91,18 +96,33 @@ async def _new_answering_machine(message: Message, state: FSMContext):
     if await new_message(message): return
     message_id = (await state.get_data())['message_id']
     await state.clear()
-    if message.content_type != "text":
-        await message.answer("<b>Ваше сообщение не является текстом</b>", parse_mode=html,
+    text = message.text or message.caption
+    file = message.photo[-1] if message.photo else (message.video if message.video else None)
+    if not text:
+        await message.answer("<b>Текст не может быть пустым</b>", parse_mode=html,
                              reply_markup=(await answering_machine_menu(message.chat.id))['reply_markup'])
-    elif len(message.text) > 512:
+    elif message.content_type not in ("text", "photo", "video"):
+        await message.answer("<b>Ваше сообщение не является текстом, фото или видео</b>", parse_mode=html,
+                             reply_markup=(await answering_machine_menu(message.chat.id))['reply_markup'])
+    elif len(text) > 512:
         await message.answer("<b>Ваше сообщение слишком длинное</b>", parse_mode=html,
                              reply_markup=(await answering_machine_menu(message.chat.id))['reply_markup'])
-    elif message.text != "Отмена":
+    elif file and file.file_size / 2**20 > 10:
+        await message.answer("<b>Ваше медиа слишком большое</b>", parse_mode=html,
+                             reply_markup=(await answering_machine_menu(message.chat.id))['reply_markup'])
+    elif text != "Отмена":
         answer_id = int(time.time()) - 1737828000  # 1737828000 - 2025/01/26 00:00 (день активного обновления автоответчика)
         entities = json_encode([entity.model_dump() for entity in message.entities or []])
+        media = None
+        if message.photo or message.video:
+            access_hash = random.randint(10**10, 10**12-1)
+            ext = 'png' if message.photo else 'mp4'
+            media = access_hash * 10 + (1 if ext == 'png' else 2)
+            path = www_path(f"answering_machine/{message.chat.id}.{answer_id}.{access_hash}.{ext}")
+            await bot.download(file.file_id, path)
         # Новый автоответ
         await db.execute(f"INSERT INTO answering_machine VALUES ({message.chat.id}, {answer_id}, "
-                         f"false, 'ordinary', NULL, NULL, NULL, $1, '{entities}', false)", message.text)
+                         f"false, 'ordinary', NULL, NULL, NULL, $1, '{entities}', false, $2)", text, media)
         await message.answer(**await auto_answer_menu(message.chat.id, answer_id))
     else:
         await message.answer(**await answering_machine_menu(message.chat.id))
@@ -119,10 +139,11 @@ async def _answering_machine_menu(callback_query: CallbackQuery):
 
 async def auto_answer_menu(account_id: int, answer_id: int):
     # Включенный автоответ и нужный автоответ
-    answer = await db.fetch_one(f"SELECT status, type, start_time, end_time, weekdays, text, entities, contacts FROM answering_machine "
-                                f"WHERE account_id={account_id} AND answer_id={answer_id}")
+    answer = await db.fetch_one(f"SELECT status, type, start_time, end_time, weekdays, text, entities, contacts, media "
+                                f"FROM answering_machine WHERE account_id={account_id} AND answer_id={answer_id}")
     if answer is None:  # Автоответ не найден
         return await answering_machine_menu(account_id)
+    media = answer['media']
     time_button = IButton(text="⏰ Расписание", callback_data=f"answering_machine_time{answer_id}")
     weekdays_button = IButton(text="🗓 Выбрать дни", callback_data=f"answering_machine_weekdays{answer_id}")
     is_timetable = answer['type'] == 'timetable'
@@ -139,16 +160,23 @@ async def auto_answer_menu(account_id: int, answer_id: int):
         weekdays_button = IButton(text=f"🗓 {weekdays}", callback_data=f"answering_machine_weekdays{answer_id}")
     status_button = IButton(text="🔴 Выключить", callback_data=f"answering_machine_off_{answer_id}") if answer['status'] \
         else IButton(text="🟢 Включить", callback_data=f"answering_machine_on_{answer_id}")
-    contacts = IButton(text="🤝 Только контактам (включено)", callback_data=f"answering_machine_contacts_off_{answer_id}") \
-        if answer['contacts'] else IButton(text="🤝 Только контактам (выключено)", callback_data=f"answering_machine_contacts_on_{answer_id}")
+    contacts = IButton(text="🤝 Только контактам", callback_data=f"answering_machine_contacts_off_{answer_id}") \
+        if answer['contacts'] else IButton(text="🤝 Отвечаю всем", callback_data=f"answering_machine_contacts_on_{answer_id}")
     markup = IMarkup(inline_keyboard=[[status_button,
                                        IButton(text="🚫 Удалить", callback_data=f"answering_machine_del_answer{answer_id}")],
-                                      [IButton(text="✏️ Текст", callback_data=f"answering_machine_edit_text{answer_id}"),
+                                      [IButton(text="✏️ Изменить", callback_data=f"answering_machine_edit_text{answer_id}"),
                                        time_button],
                                       [weekdays_button],
                                       [contacts],
                                       [IButton(text="◀️  Назад", callback_data="answering_machine")]])
-    return {"text": str(answer['text']), "entities": answer['entities'], "reply_markup": markup}
+    if media:
+        access_hash = media // 10
+        ext = 'png' if media % 10 == 1 else 'mp4'
+        preview = preview_options(f"answering_machine/{account_id}.{answer_id}.{access_hash}.{ext}",
+                                  site=WWW_SITE, show_above_text=True)
+    else:
+        preview = None
+    return {"text": str(answer['text']), "entities": answer['entities'], "reply_markup": markup, "link_preview_options": preview}
 
 
 @dp.callback_query(F.data.startswith("answering_machine_del_answer"))
@@ -157,7 +185,13 @@ async def _answering_machine_del_answer(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     answer_id = int(callback_query.data.replace("answering_machine_del_answer", ""))
     account_id = callback_query.from_user.id
-    await db.execute(f"DELETE FROM answering_machine WHERE account_id={account_id} AND answer_id={answer_id}")  # Удаление автоответа
+    answer = await db.fetch_one(f"SELECT media FROM answering_machine WHERE account_id={account_id} AND answer_id={answer_id}")
+    if answer:
+        if media := answer['media']:
+            access_hash = media // 10
+            ext = 'png' if media % 10 == 1 else 'mp4'
+            os.remove(www_path(f"answering_machine/{account_id}.{answer_id}.{access_hash}.{ext}"))
+        await db.execute(f"DELETE FROM answering_machine WHERE account_id={account_id} AND answer_id={answer_id}")  # Удаление автоответа
     await callback_query.message.edit_text(**await answering_machine_menu(callback_query.message.chat.id))
 
 
@@ -209,7 +243,7 @@ async def _answering_machine_edit_text_start(callback_query: CallbackQuery, stat
     answer_id = int(callback_query.data.replace("answering_machine_edit_text", ""))
     await state.set_state(UserState.answering_machine_edit_text)
     markup = KMarkup(keyboard=[[KButton(text="Отмена")]], resize_keyboard=True)
-    message_id = (await callback_query.message.answer("Напишите <b>текст</b>, который я отправлю в случае необходимости",
+    message_id = (await callback_query.message.answer("Отправь <b>текст, фото или видео</b>, которые я отправлю в случае необходимости",
                                                       parse_mode=html, reply_markup=markup)).message_id
     await state.update_data(message_id=message_id, answer_id=answer_id)
     await callback_query.message.delete()
@@ -224,18 +258,39 @@ async def _answering_machine_edit_text(message: Message, state: FSMContext):
     answer_id = data['answer_id']
     await state.clear()
     account_id = message.chat.id
+    text = message.text or message.caption
+    file = message.photo[-1] if message.photo else (message.video if message.video else None)
     if not await db.fetch_one(f"SELECT true FROM answering_machine WHERE account_id={account_id} AND answer_id={answer_id}"):
         await message.answer(**await answering_machine_menu(account_id))  # Автоответ не найден
-    elif message.content_type != "text":
-        await message.answer("<b>Ваше сообщение не является текстом</b>", parse_mode=html,
+    elif not text:
+        await message.answer("<b>Текст не должен быть пустым</b>", parse_mode=html,
                              reply_markup=(await auto_answer_menu(message.chat.id, answer_id))['reply_markup'])
-    elif len(message.text) > 512:
+    elif message.content_type not in ("text", "photo", "video"):
+        await message.answer("<b>Ваше сообщение не является текстом, фото или видео</b>", parse_mode=html,
+                             reply_markup=(await auto_answer_menu(message.chat.id, answer_id))['reply_markup'])
+    elif len(text) > 512:
         await message.answer("<b>Ваше сообщение слишком длинное</b>", parse_mode=html,
                              reply_markup=(await auto_answer_menu(message.chat.id, answer_id))['reply_markup'])
-    elif message.text != "Отмена":
+    elif file and file.file_size / 2**20 > 10:
+        await message.answer("<b>Ваше медиа слишком большое</b>", parse_mode=html,
+                             reply_markup=(await answering_machine_menu(message.chat.id))['reply_markup'])
+    elif text != "Отмена":
         entities = json_encode([entity.model_dump() for entity in message.entities or []])
-        await db.execute(f"UPDATE answering_machine SET text=$1, entities='{entities}' "
-                         f"WHERE account_id={account_id} AND answer_id={answer_id}", message.text)  # Изменение автоответа
+        media = None
+        last_media = await db.fetch_one(f"SELECT media FROM answering_machine "
+                                        f"WHERE account_id={account_id} AND answer_id={answer_id}", one_data=True)
+        if last_media:
+            access_hash = last_media // 10
+            ext = 'png' if last_media % 10 == 1 else 'mp4'
+            os.remove(www_path(f"answering_machine/{account_id}.{answer_id}.{access_hash}.{ext}"))
+        if message.photo or message.video:
+            access_hash = random.randint(10**10, 10**12-1)
+            ext = 'png' if message.photo else 'mp4'
+            media = access_hash * 10 + (1 if ext == 'png' else 2)
+            path = www_path(f"answering_machine/{account_id}.{answer_id}.{access_hash}.{ext}")
+            await bot.download(file.file_id, path)
+        await db.execute(f"UPDATE answering_machine SET text=$1, entities='{entities}', media=$2 "
+                         f"WHERE account_id={account_id} AND answer_id={answer_id}", text, media)  # Изменение автоответа
         await message.answer(**await auto_answer_menu(account_id, answer_id))
     else:
         await message.answer(**await auto_answer_menu(account_id, answer_id))

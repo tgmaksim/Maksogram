@@ -18,6 +18,10 @@ release_resources_path = lambda path: f"/home/c87813/tgmaksim.ru/Maksogram/resou
 debug_resources_path = lambda path: f"resources/{path}"  # Локально
 resources_path = release_resources_path if release else debug_resources_path
 
+release_www_path = lambda path: f"/home/c87813/tgmaksim.ru/www/maksogram/{path}"  # netangels
+debug_www_path = lambda path: f"resources/www/{path}"  # Локально
+www_path = release_www_path if release else debug_www_path
+
 release_sessions_path = lambda phone: f"/home/c87813/tgmaksim.ru/Maksogram/sessions/{phone}.session"  # netangels
 debug_sessions_path = lambda phone: f"sessions/{phone}.session"  # Локально
 sessions_path = release_sessions_path if release else debug_sessions_path

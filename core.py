@@ -2,6 +2,7 @@ OWNER = 5128609241
 support = "tgmaksim_company"
 support_link = f"<a href='tg://resolve?domain={support}'>тех. поддержке</a>"
 SITE = "https://tgmaksim.ru/проекты/maksogram"
+WWW_SITE = "https://tgmaksim.ru/maksogram"
 subscribe = "https://t.me/+F5YW1gV3gdhjNjVi"
 channel = "tgmaksim_ru"
 feedback_post = 375
@@ -57,6 +58,10 @@ telegram_clients: dict[int, TelegramClient] = {}
 
 def resources_path(path: str) -> str:
     return sys_keys.resources_path(path)
+
+
+def www_path(path: str) -> str:
+    return sys_keys.www_path(path)
 
 
 def json_decode(json_string: str) -> Union[dict, list]:
@@ -240,8 +245,8 @@ def omsk_time(t: datetime):
     return (t + timedelta(hours=6-tz)).replace(tzinfo=None)
 
 
-def preview_options(path="", site=SITE):
-    return LinkPreviewOptions(prefer_large_media=True, url=f"{site}/{path}")
+def preview_options(path="", site=SITE, show_above_text: bool = False):
+    return LinkPreviewOptions(prefer_large_media=True, url=f"{site}/{path}", show_above_text=show_above_text)
 
 
 def new_telegram_client(phone_number: str) -> TelegramClient:
@@ -273,7 +278,7 @@ async def send_email_message(to: str, subject: str, text: str, *, subtype: str =
 
 class Variables:
     version = "2.6"
-    version_string = "2.6.2 (46)"
+    version_string = "2.6.2 (47)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])
