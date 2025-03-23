@@ -4,7 +4,7 @@ from core import (
     db,
     html,
     security,
-    count_avatars,
+    get_avatars,
     telegram_clients,
 )
 
@@ -47,7 +47,7 @@ async def avatars_menu(account_id: int) -> dict[str, Any]:
 @security('state')
 async def _new_avatar_start(callback_query: CallbackQuery, state: FSMContext):
     if await new_callback_query(callback_query): return
-    if await db.fetch_one(f"SELECT COUNT(*) FROM avatars WHERE account_id={callback_query.from_user.id}", one_data=True) >= 2:
+    if await db.fetch_one(f"SELECT COUNT(*) FROM avatars WHERE account_id={callback_query.from_user.id}", one_data=True) >= 4:
         # Количество новых аватарок уже достигло максимума
         return await callback_query.answer("У вас максимальное количество \"новых аватарок\"")
     await state.set_state(UserState.avatar)
@@ -73,9 +73,13 @@ async def _new_avatar(message: Message, state: FSMContext):
         else:
             user = await telegram_clients[account_id].get_entity(user_id)
             name = user.first_name + (f" {user.last_name}" if user.last_name else "")
-            count = await count_avatars(account_id, user_id)
+            avatars = await get_avatars(account_id, user_id)
+            if avatars is None:
+                return await message.answer(f"<b>Слишком много аватарок у {name}</b>", parse_mode=html,
+                                            reply_markup=(await avatars_menu(account_id))['reply_markup'])
+            id_avatars = list(map(lambda x: x.id, avatars.values()))
             try:
-                await db.execute(f"INSERT INTO avatars VALUES ({account_id}, {user_id}, $1, {count})", name)  # Добавление новой аватарки
+                await db.execute(f"INSERT INTO avatars VALUES ({account_id}, {user_id}, $1, '{id_avatars}')", name)  # Добавление новой аватарки
             except UniqueViolationError:  # Уже есть
                 pass
             await message.answer(**await avatar_menu(message.chat.id, user_id))

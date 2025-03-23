@@ -28,7 +28,7 @@ from core import (
     json_encode,
     account_off,
     MaksogramBot,
-    count_avatars,
+    get_avatars,
     resources_path,
     get_enabled_auto_answer,
 )
@@ -646,18 +646,27 @@ class Program:
     @security()
     async def new_avatar_center(self):
         while await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={self.id}", one_data=True):
-            for user in await db.fetch_all(f"SELECT user_id, name, count FROM avatars WHERE account_id={self.id}"):
-                count = await count_avatars(self.id, user['user_id'])
-                if user['count'] > count:
-                    await MaksogramBot.send_message(
-                        self.id, f"📸 <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> удалил(а) аватарку",
-                        parse_mode="html")
-                elif user['count'] < count:
-                    await MaksogramBot.send_message(
-                        self.id, f"📸 <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> добавил(а) аватарку",
-                        parse_mode="html")
-                else: continue
-                await db.execute(f"UPDATE avatars SET count={count} WHERE account_id={self.id} AND user_id={user['user_id']}")
+            for user in await db.fetch_all(f"SELECT user_id, name, avatars FROM avatars WHERE account_id={self.id}"):
+                avatars = await get_avatars(self.id, user['user_id'])
+                if avatars is None:  # Количество аватарок превышает допустимое
+                    await db.execute(f"DELETE FROM avatars WHERE account_id={self.id} AND user_id={user['user_id']}")
+                    continue
+                for avatar in avatars.values():
+                    if avatar.id not in user['avatars']:  # Новая аватарка
+                        ext = 'mp4' if avatar.video_sizes else 'png'
+                        path = resources_path(f"avatars/{self.id}.{avatar.id}.{ext}")
+                        await self.client.download_media(avatar, path)
+                        await MaksogramBot.send_message(
+                            self.id, f"📸 <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> добавил(а) аватарку",
+                            parse_mode="html", **{f"{'video' if avatar.video_sizes else 'photo'}": path})
+                        os.remove(path)
+                    else: user['avatars'].remove(avatar.id)
+                if count_deleted_avatars := len(user['avatars']):  # Удаленные аватарки
+                    text = f"{count_deleted_avatars} аватарок" if count_deleted_avatars > 1 else "аватарку"
+                    await MaksogramBot.send_message(self.id, f"📸 <b><a href='tg://user?id={user['user_id']}'>"
+                                                             f"{user['name']}</a></b> удалил(а) {text}", parse_mode="html")
+                id_avatars = list(map(lambda x: x.id, avatars.values()))
+                await db.execute(f"UPDATE avatars SET avatars='{id_avatars}' WHERE account_id={self.id} AND user_id={user['user_id']}")
             await asyncio.sleep(5*60)
 
     @security()

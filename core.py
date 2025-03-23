@@ -29,7 +29,8 @@ from dataclasses import dataclass
 from telethon import TelegramClient
 from email.mime.text import MIMEText
 from datetime import datetime, timedelta
-from telethon.tl.types import StarGiftUnique
+from telethon.tl.types.photos import PhotosSlice
+from telethon.tl.types import StarGiftUnique, Photo
 from telethon.tl.types.payments import SavedStarGifts
 from telethon.tl.functions.photos import GetUserPhotosRequest
 from telethon.tl.functions.payments import GetSavedStarGiftsRequest
@@ -100,8 +101,15 @@ class db:
             return await conn.fetch_one(sql, *params, one_data=one_data)
 
 
-async def count_avatars(account_id: int, user_id: int) -> int:
-    return len((await telegram_clients[account_id](GetUserPhotosRequest(user_id, 0, 0, 128))).photos)
+async def get_avatars(account_id: int, user_id: int) -> Union[dict[str, Photo], None]:
+    results = {}
+    response = await telegram_clients[account_id](GetUserPhotosRequest(user_id, 0, 0, 64))
+    if isinstance(response, PhotosSlice):  # Количество аватарок превышает 64
+        return None
+    avatars: list[Photo] = response.photos
+    for avatar in avatars:
+        results[avatar.id] = avatar
+    return results
 
 
 async def get_gifts(account_id: int, user_id: int) -> Union[dict[str, Gift], None]:
@@ -265,7 +273,7 @@ async def send_email_message(to: str, subject: str, text: str, *, subtype: str =
 
 class Variables:
     version = "2.6"
-    version_string = "2.6.2 (45)"
+    version_string = "2.6.2 (46)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])
@@ -284,10 +292,13 @@ class MaksogramBot:
     IButton = InlineKeyboardButton
 
     @staticmethod
-    async def send_message(chat_id: int, message: str, photo=None, **kwargs):
+    async def send_message(chat_id: int, message: str, photo=None, video=None, **kwargs):
         if photo:
             photo = FSInputFile(photo)
             return await MaksogramBot.bot.send_photo(chat_id, photo=photo, caption=message, **kwargs)
+        if video:
+            video = FSInputFile(video)
+            return await MaksogramBot.bot.send_video(chat_id, video=video, caption=message, **kwargs)
         return await MaksogramBot.bot.send_message(chat_id, str(message), **kwargs)
 
     @staticmethod
