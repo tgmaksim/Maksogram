@@ -112,7 +112,7 @@ async def _new_answering_machine(message: Message, state: FSMContext):
                              reply_markup=(await answering_machine_menu(message.chat.id))['reply_markup'])
     elif text != "Отмена":
         answer_id = int(time.time()) - 1737828000  # 1737828000 - 2025/01/26 00:00 (день активного обновления автоответчика)
-        entities = json_encode([entity.model_dump() for entity in message.entities or []])
+        entities = json_encode([entity.model_dump() for entity in message.entities or message.caption_entities or []])
         media = None
         if message.photo or message.video:
             access_hash = random.randint(10**10, 10**12-1)
@@ -275,7 +275,7 @@ async def _answering_machine_edit_text(message: Message, state: FSMContext):
         await message.answer("<b>Ваше медиа слишком большое</b>", parse_mode=html,
                              reply_markup=(await answering_machine_menu(message.chat.id))['reply_markup'])
     elif text != "Отмена":
-        entities = json_encode([entity.model_dump() for entity in message.entities or []])
+        entities = json_encode([entity.model_dump() for entity in message.entities or message.caption_entities or []])
         media = None
         last_media = await db.fetch_one(f"SELECT media FROM answering_machine "
                                         f"WHERE account_id={account_id} AND answer_id={answer_id}", one_data=True)
