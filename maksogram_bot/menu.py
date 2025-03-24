@@ -10,6 +10,7 @@ from core import (
     security,
     unzip_int_data,
     preview_options,
+    generate_sensitive_link,
 )
 
 from aiogram import F
@@ -90,11 +91,11 @@ async def menu(account_id: int) -> dict[str, Any]:
     status = await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={account_id}", one_data=True)  # Вкл/выкл Maksogram
     if status is None:
         markup = IMarkup(inline_keyboard=[[IButton(text="🟢 Включить Maksogram", callback_data="registration")],
-                                          [IButton(text="ℹ️ Узнать все возможности", url=SITE)]])
+                                          [IButton(text="ℹ️ Узнать все возможности", url=await generate_sensitive_link(account_id))]])
     elif status is False:
         markup = IMarkup(inline_keyboard=[[IButton(text="🟢 Включить Maksogram", callback_data="on")],
                                           [IButton(text="⚙️ Настройки", callback_data="settings")],
-                                          [IButton(text="ℹ️ Памятка по функциям", url=SITE)]])
+                                          [IButton(text="ℹ️ Памятка по функциям", url=await generate_sensitive_link(account_id))]])
     else:
         markup = IMarkup(inline_keyboard=[[IButton(text="🔴 Выключить Maksogram", callback_data="off")],
                                           [IButton(text="📸 Новая аватарка", callback_data="avatars"),
@@ -103,7 +104,7 @@ async def menu(account_id: int) -> dict[str, Any]:
                                            IButton(text="🤖 Автоответчик", callback_data="answering_machine")],
                                           [IButton(text="⚙️ Настройки", callback_data="settings"),
                                            IButton(text="💬 Maksogram в чате", callback_data="modules")],  # IButton(text="🛡 Защита аккаунта", callback_data="security")
-                                          [IButton(text="ℹ️ Памятка по функциям", url=SITE)]])
+                                          [IButton(text="ℹ️ Памятка по функциям", url=await generate_sensitive_link(account_id))]])
     return {"text": "⚙️ Maksogram — меню ⚙️", "reply_markup": markup}
 
 
@@ -130,6 +131,7 @@ async def settings(account_id: int) -> dict[str, Any]:
                                              IButton(text="🕰 Часовой пояс", callback_data="time_zone")],
                                             [IButton(text="🌏 Город", callback_data="city"),
                                              IButton(text="🚹 🚺 Пол", callback_data="gender")],
+                                            [IButton(text="🎁 Пригласить друга", callback_data="friends")],
                                             [IButton(text="◀️  Назад", callback_data="menu")]])
     return {"text": f"⚙️ Общие настройки Maksogram\nЧасовой пояс: {time_zone}:00\nГород: {city}\nПол: {gender}",
             "reply_markup": reply_markup}

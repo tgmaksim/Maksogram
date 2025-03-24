@@ -249,6 +249,13 @@ def preview_options(path="", site=SITE, show_above_text: bool = False):
     return LinkPreviewOptions(prefer_large_media=True, url=f"{site}/{path}", show_above_text=show_above_text)
 
 
+async def generate_sensitive_link(account_id: int, event: str = "menu_link") -> str:
+    token = int(time_now().timestamp() * 1000)
+    text = f"ID: {account_id}\nСобытие: {event}"
+    await db.execute(f"INSERT INTO sensitive_links VALUES ({account_id}, {token}, $1)", text)
+    return f"{SITE}?t={token}"
+
+
 def new_telegram_client(phone_number: str) -> TelegramClient:
     return TelegramClient(
         sessions_path(phone_number),
@@ -278,7 +285,7 @@ async def send_email_message(to: str, subject: str, text: str, *, subtype: str =
 
 class Variables:
     version = "2.6"
-    version_string = "2.6.2 (48)"
+    version_string = "2.6.2 (49)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])

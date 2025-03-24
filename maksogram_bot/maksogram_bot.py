@@ -1,3 +1,4 @@
+from typing import Any
 from datetime import timedelta
 from core import (
     db,
@@ -64,18 +65,43 @@ async def _version(message: Message):
 @security()
 async def _friends(message: Message):
     if await new_message(message): return
-    url = f"tg://resolve?domain={MaksogramBot.username}&start={referal_link(message.chat.id)}"
-    await message.answer(
-        "<b>Реферальная программа</b>\n"
-        "Приглашайте своих знакомых и получайте в подарок месяц подписки за каждого друга. "
-        "Пригласить друга можно, отправив сообщение 👇", parse_mode=html)
+    await message.answer(**friends())
+
+
+@dp.callback_query(F.data == "friends")
+@security()
+async def _friends_button(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    await callback_query.message.answer(**friends())
+    await callback_query.message.delete()
+
+
+def friends() -> dict[str, Any]:
+    markup = IMarkup(inline_keyboard=[[IButton(text="Поделиться ссылкой", callback_data="friends_link")]])
+    return dict(text="🎁 <b>Реферальная программа</b>\nПриглашайте своих знакомых и "
+                     "получайте в подарок <b>месяц подписки</b> за каждого друга", parse_mode=html, reply_markup=markup)
+
+
+@dp.callback_query(F.data == "friends_link")
+@security()
+async def _friends_link(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    await callback_query.message.answer_photo(**friends_link(callback_query.from_user.id))
+    await callback_query.message.delete()
+
+
+def friends_link(account_id: int) -> dict[str, Any]:
+    url = f"tg://resolve?domain={MaksogramBot.username}&start={referal_link(account_id)}"
     markup = IMarkup(inline_keyboard=[[IButton(text="Попробовать бесплатно", url=url)]])
-    await message.answer_photo(
-        FSInputFile(resources_path("logo.jpg")),
-        f"Привет! Я хочу тебе посоветовать отличного <a href='{url}'>бота</a>. "
-        "С его помощью можно смотреть удаленные и измененные сообщения. Ты будешь первым(ой) узнавать о новой аватарке друга, "
-        "сможешь расшифровывать гс без Telegram Premium и настраивать автоответчик, когда очень занят(а). "
-        "Также в нем есть множество других полезных функций", parse_mode=html, reply_markup=markup, disable_web_page_preview=True)
+    return dict(
+        photo=FSInputFile(resources_path("logo.jpg")), disable_web_page_preview=True,
+        caption=f"Привет! Я хочу тебе посоветовать отличного <a href='{url}'>бота</a>\n"
+                "• Можно <b>смотреть удаленные</b> и измененные сообщения\n"
+                "• Всегда узнавать о новой аватарке и подарке друга\n"
+                "• Сможешь расшифровывать ГС без Telegram Premium\n"
+                "• Включать автоответчик, когда очень занят\n"
+                "• Быстро узнаешь, когда друг в сети\n"
+                "Также в нем есть множество других <b>полезных функций</b>", parse_mode=html, reply_markup=markup)
 
 
 @dp.message(Command('feedback'))
