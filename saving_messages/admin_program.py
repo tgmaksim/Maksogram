@@ -639,10 +639,12 @@ class Program:
     async def answering_machine(self, event: events.newmessage.NewMessage.Event):
         message: Message = event.message
         answer_id = await get_enabled_auto_answer(self.id)
-        answer = await db.fetch_one(f"SELECT contacts, text, entities, media FROM answering_machine "
+        answer = await db.fetch_one(f"SELECT contacts, text, entities, media, triggers FROM answering_machine "
                                     f"WHERE answer_id={answer_id} AND account_id={self.id}")
         if not answer: return
         if answer['contacts'] and not (await self.client.get_entity(message.chat_id)).contact:
+            return
+        if answer['triggers'] and not any(map(lambda trigger: trigger in message.text, answer['triggers'].values())):
             return
         await db.execute(f"UPDATE functions SET answering_machine_sending=answering_machine_sending || '{message.chat_id}' "
                          f"WHERE account_id={self.id}")
