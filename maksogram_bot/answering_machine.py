@@ -596,7 +596,7 @@ async def _answering_machine_edit_weekdays(callback_query: CallbackQuery, state:
 
 @dp.message(UserState.answering_machine_edit_weekdays)
 @security('state')
-async def _answering_machine_edit_time(message: Message, state: FSMContext):
+async def _answering_machine_edit_weekdays(message: Message, state: FSMContext):
     if await new_message(message): return
     data = await state.get_data()
     answer_id = data['answer_id']

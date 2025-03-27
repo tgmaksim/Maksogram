@@ -10,11 +10,12 @@ from core import (
 
 from aiogram import F
 from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery
 from aiogram.types import InlineKeyboardMarkup as IMarkup
 from aiogram.types import InlineKeyboardButton as IButton
+from aiogram.types import Message, CallbackQuery, WebAppInfo
 from .core import (
     dp,
+    Data,
     new_message,
     new_callback_query,
 )
@@ -37,8 +38,10 @@ async def _modules(callback_query: CallbackQuery):
 def modules_menu() -> dict[str, Any]:
     markup = IMarkup(inline_keyboard=[[IButton(text="🔢 Калькулятор", callback_data="calculator"),
                                        IButton(text="🌤 Погода", callback_data="weather")],
-                                      [IButton(text="🔗 Генератор QR-кодов", callback_data="qrcode")],
-                                      [IButton(text="🗣 Расшифровка ГС", callback_data="audio_transcription")],
+                                      [IButton(text="🔗 Генератор QR", callback_data="qrcode"),
+                                       IButton(text="🔗 Сканер QR", web_app=WebAppInfo(url=f"{Data.web_app}/main"))],
+                                      [IButton(text="🗣 ГС в текст", callback_data="audio_transcription"),
+                                       IButton(text="🔄 Видео в кружок", callback_data="round_video")],
                                       [IButton(text="◀️  Назад", callback_data="menu")]])
     return {"text": "💬 <b>Maksogram в чате</b>\nФункции, которые работают прямо из любого чата, не нужно вызывать меня",
             "reply_markup": markup, "parse_mode": html}
@@ -93,7 +96,7 @@ async def qrcode_menu(account_id: int) -> dict[str, Any]:
                                       [IButton(text="Как работает генератор?", url=f"{SITE}#генератор-qr")],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
     return {"text": "🔗 <b>Генератор QR-кодов</b>\nГенерирует QR-код с нужной ссылкой. "
-                    f"Тригеры: создай, создать, qr, сгенерировать\n<blockquote>Создай t.me/{channel}</blockquote>",
+                    f"Триггеры: создай, создать, qr, сгенерировать\n<blockquote>Создай t.me/{channel}</blockquote>",
             "reply_markup": markup, "parse_mode": html, "disable_web_page_preview": True}
 
 
@@ -125,7 +128,7 @@ async def audio_transcription_menu(account_id: int) -> dict[str, Any]:
     markup = IMarkup(inline_keyboard=[[status_button],
                                       [IButton(text="Как пользоваться расшифровкой гс?", url=f"{SITE}#расшифровка-гс")],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
-    return {"text": "🗣 <b>Расшифровка ГС</b>\nНе хотите слушать голосовое? Расшифруйте его в текст. Тригеры: расшифруй, в текст",
+    return {"text": "🗣 <b>Расшифровка ГС</b>\nНе хотите слушать голосовое? Расшифруйте его в текст. Триггеры: расшифруй, в текст",
             "reply_markup": markup, "parse_mode": html}
 
 
@@ -162,7 +165,7 @@ async def weather_menu(account_id: int) -> dict[str, Any]:
                                       [status_button_morning_weather],
                                       [IButton(text="Как пользоваться погодой?", url=f"{SITE}#погода")],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
-    return {"text": "🌤 <b>Погода</b>\nЛегко получайте погоду за окном, не выходя из Telegram. Тригеры: какая погода\n"
+    return {"text": "🌤 <b>Погода</b>\nЛегко получайте погоду за окном, не выходя из Telegram. Триггеры: какая погода\n"
                     f"Погода по утрам присылается, когда вы первый раз зашли в Telegram с {morning[0]}:00 до {morning[1]}:00",
             "reply_markup": markup, "parse_mode": html}
 
@@ -192,6 +195,38 @@ async def _morning_weather_switch(callback_query: CallbackQuery):
         case "off":
             await db.execute(f"UPDATE modules SET morning_weather=false WHERE account_id={account_id}")  # Выключение погоды по утрам
     await callback_query.message.edit_text(**await weather_menu(callback_query.message.chat.id))
+
+
+@dp.callback_query(F.data == "round_video")
+@security()
+async def _round_video(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    await callback_query.message.edit_text(**await round_video_menu(callback_query.message.chat.id))
+
+
+async def round_video_menu(account_id: int) -> dict[str, Any]:
+    if await db.fetch_one(f"SELECT round_video FROM modules WHERE account_id={account_id}", one_data=True):  # Вкл/выкл конвертер видео
+        status_button = IButton(text="🔴 Выключить конвертер", callback_data="round_video_off")
+    else:
+        status_button = IButton(text="🟢 Включить конвертер", callback_data="round_video_on")
+    markup = IMarkup(inline_keyboard=[[status_button],
+                                      [IButton(text="Как пользоваться конвертером?", url=f"{SITE}#видео-в-кружок")],
+                                      [IButton(text="◀️  Назад", callback_data="modules")]])
+    return {"text": "🔄 <b>Конвертер видео в кружок</b>\nПонадобилось сделать из обычного видео кружок? Сделай это через Maksogram. "
+                    "Триггеры: в кружок", "reply_markup": markup, "parse_mode": html}
+
+
+@dp.callback_query(F.data.in_(["round_video_on", "round_video_off"]))
+@security()
+async def _round_video_switch(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    command = callback_query.data.split("_")[-1]
+    match command:
+        case "on":
+            await db.execute(f"UPDATE modules SET round_video=true WHERE account_id={callback_query.from_user.id}")  # Включение конвертера
+        case "off":
+            await db.execute(f"UPDATE modules SET round_video=false WHERE account_id={callback_query.from_user.id}")  # Выключение конвертера
+    await callback_query.message.edit_text(**await round_video_menu(callback_query.message.chat.id))
 
 
 def modules_initial():

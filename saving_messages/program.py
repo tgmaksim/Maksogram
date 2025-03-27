@@ -7,6 +7,7 @@ from modules.calculator import main as calculator
 from modules.qrcode import create as create_qrcode
 from modules.audio_transcription import main as audio_transcription
 from modules.weather import main as weather
+from modules.round_video import main as round_video
 
 from io import BytesIO
 from typing import Union
@@ -62,6 +63,9 @@ from telethon.tl.types import (
     MessageEntityBlockquote,
     MessageEntityCustomEmoji,
 )
+
+
+TTL_MEDIA = Union[MessageMediaPhoto, MessageMediaDocument]
 
 
 class LastEvent:
@@ -235,7 +239,7 @@ class Program:
                                                          "Вы можете включить в настройках\n/menu_chat (Maksogram в чате)")
 
         # Расшифровка голосовых сообщений
-        if text and ("расшифруй" in text or "в текст" in text) and message.out and message.reply_to \
+        if text and ("расшифруй" in text or "в текст" in text) and "\n" not in text and message.out and message.reply_to \
                 and (reply_message := await self.get_message_by_id(message.chat_id, message.reply_to.reply_to_msg_id)).voice:
             if await db.fetch_one(f"SELECT audio_transcription FROM modules WHERE account_id={self.id}", one_data=True):
                 await message.edit("@MaksogramBot в чате\nРасшифровка голосового сообщения...")
@@ -245,7 +249,8 @@ class Program:
                 if answer.ok:
                     await message.edit(f"@MaksogramBot в чате\n<blockquote expandable>{answer.text}</blockquote>", parse_mode="HTML")
                 else:
-                    await MaksogramBot.send_system_message(f"⚠️Ошибка при расшифровке⚠️\n\n{answer.error}")
+                    await MaksogramBot.send_system_message(f"⚠️Ошибка при расшифровке⚠️\n\n"
+                                                           f"{answer.error.__class__.__name__}\n{answer.error}")
                     await message.edit("@MaksogramBot в чате\nПроизошла ошибка при расшифровке... Скоро все будет исправлено")
                 await db.execute(f"UPDATE statistics SET audio_transcription=now() WHERE account_id={self.id}")
                 return  # При срабатывании Maksogram в чате сохранение сообщения не происходит
@@ -266,18 +271,31 @@ class Program:
                 await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться калькулятором? Данная функция отключена у вас! "
                                                          "Вы можете включить ее в настройках\n/menu_chat (Maksogram в чате)")
 
-        # Погода
-        if ("какая" in text and "погода" in text) and "\n" not in text and message.out:
-            if await db.fetch_one(f"SELECT weather FROM modules WHERE account_id={self.id}", one_data=True):
-                request = await weather(self.id)
-                await message.edit(f"@MaksogramBot в чате\n{request}", parse_mode="HTML")
-                await db.execute(f"UPDATE statistics SET weather=now() WHERE account_id={self.id}")
-                return  # При срабатывании Maksogram в чате сохранение сообщения не происходит
+        # Видео в кружок
+        if text and "в кружок" in text and "\n" not in text and message.out and message.reply_to \
+                and (reply_message := await self.get_message_by_id(message.chat_id, message.reply_to.reply_to_msg_id)).video:
+            if await db.fetch_one(f"SELECT round_video FROM modules WHERE account_id={self.id}", one_data=True):
+                if reply_message.video.attributes[0].duration > 60:
+                    await message.edit("@MaksogramBot в чате\nВидео слишком длинное!")
+                else:
+                    await message.edit("@MaksogramBot в чате\nКонвертация видео в кружок...")
+                    video_path = resources_path(f"round_video/{reply_message.video.id}.mp4")
+                    await self.client.download_media(reply_message.media, file=video_path)
+                    answer = round_video(video_path)
+                    if answer.ok:
+                        await message.edit("@MaksogramBot в чате\nОтправка кружка...")
+                        await self.client.send_file(message.chat_id, file=answer.path, reply_to=reply_message.id, video_note=True)
+                        await message.delete()
+                        os.remove(answer.path)
+                    else:
+                        await MaksogramBot.send_system_message(f"⚠️Ошибка при конвертации⚠️\n\n"
+                                                               f"{answer.error.__class__.__name__}\n{answer.error}")
+                        await message.edit("@MaksogramBot в чате\nПроизошла ошибка при конвертации... Скоро все будет исправлено")
+                    return  # При срабатывании Maksogram в чате сохранение сообщения не происходит
             else:
-                await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться погодой? Данная функция отключена у вас! "
-                                                         "Вы можете включить ее в настройках\n/menu_chat (Maksogram в чате)")
+                await MaksogramBot.send_message(self.id, "Вы хотели конвертировать видео в кружок? Данная функция отключена у вас! "
+                                                         "Вы можете включить в настройках\n/menu_chat (Maksogram в чате)")
 
-        TTL_MEDIA = Union[MessageMediaPhoto, MessageMediaDocument]
         if isinstance(message.media, TTL_MEDIA) and message.media.ttl_seconds:  # Самоуничтожающееся медиа
             if message.file.size / 2**20 <= 10 or message.video_note or \
                     message.voice and message.voice.attributes[0].duration <= 480:  # меньше 10 МБ, или кружок, или гс (до 8 минут)
@@ -587,7 +605,8 @@ class Program:
                 if answer.ok:
                     await message.edit(f"@MaksogramBot в чате\n<blockquote expandable>{answer.text}</blockquote>", parse_mode="HTML")
                 else:
-                    await MaksogramBot.send_system_message(f"⚠️Ошибка при расшифровке⚠️\n\n{answer.error}")
+                    await MaksogramBot.send_system_message(f"⚠️Ошибка при расшифровке⚠️\n\n"
+                                                           f"{answer.error.__class__.__name__}\n{answer.error}")
                     await message.edit("@MaksogramBot в чате\nПроизошла ошибка при расшифровке... Скоро все будет исправлено")
                 await db.execute(f"UPDATE statistics SET audio_transcription=now() WHERE account_id={self.id}")
             else:
@@ -616,6 +635,30 @@ class Program:
                 await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться погодой? Данная функция отключена у вас! "
                                                          "Вы можете включить ее в настройках\n/menu_chat (Maksogram в чате)")
 
+        # Видео в кружок
+        elif text and "в кружок" in text and "\n" not in text and message.out and message.reply_to \
+                and (reply_message := await self.get_message_by_id(message.chat_id, message.reply_to.reply_to_msg_id)).video:
+            if await db.fetch_one(f"SELECT round_video FROM modules WHERE account_id={self.id}", one_data=True):
+                if reply_message.video.attributes[0].duration > 60:
+                    await message.edit("@MaksogramBot в чате\nВидео слишком длинное!")
+                else:
+                    await message.edit("@MaksogramBot в чате\nКонвертация видео в кружок...")
+                    video_path = resources_path(f"round_video/{reply_message.video.id}.mp4")
+                    await self.client.download_media(reply_message.media, file=video_path)
+                    answer = round_video(video_path)
+                    if answer.ok:
+                        await message.edit("@MaksogramBot в чате\nОтправка кружка...")
+                        await self.client.send_file(message.chat_id, file=answer.path, reply_to=reply_message.id, video_note=True)
+                        await message.delete()
+                        os.remove(answer.path)
+                    else:
+                        await MaksogramBot.send_system_message(f"⚠️Ошибка при конвертации⚠️\n\n"
+                                                               f"{answer.error.__class__.__name__}\n{answer.error}")
+                        await message.edit("@MaksogramBot в чате\nПроизошла ошибка при конвертации... Скоро все будет исправлено")
+            else:
+                await MaksogramBot.send_message(self.id, "Вы хотели конвертировать видео в кружок? Данная функция отключена у вас! "
+                                                         "Вы можете включить в настройках\n/menu_chat (Maksogram в чате)")
+
     async def answering_machine(self, event: events.newmessage.NewMessage.Event):
         message: Message = event.message
         answer_id = await get_enabled_auto_answer(self.id)
@@ -624,7 +667,7 @@ class Program:
         if not answer: return
         if answer['contacts'] and not (await self.client.get_entity(message.chat_id)).contact:
             return
-        if answer['triggers'] and not any(map(lambda trigger: trigger in message.text, answer['triggers'].values())):
+        if answer['triggers'] and not any(map(lambda trigger: trigger.lower() in message.text.lower(), answer['triggers'].values())):
             return
         await db.execute(f"UPDATE functions SET answering_machine_sending=answering_machine_sending || '{message.chat_id}' "
                          f"WHERE account_id={self.id}")
@@ -695,6 +738,9 @@ class Program:
         while await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={self.id}", one_data=True):
             for user in await db.fetch_all(f"SELECT user_id, name, gifts FROM gifts WHERE account_id={self.id}"):
                 gifts = await get_gifts(self.id, user['user_id'])
+                if gifts is None:  # Количество подарков превышает допустимое
+                    await db.execute(f"DELETE FROM gifts WHERE account_id={self.id} AND user_id={user['user_id']}")
+                    continue
                 for gift in gifts.values():
                     if user['gifts'].get(gift.id):  # Подарок присутствует
                         if gift.unique is True and user['gifts'][gift.id]['unique'] is False:  # Подарок стал уникальным
