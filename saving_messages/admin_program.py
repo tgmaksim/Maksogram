@@ -500,7 +500,7 @@ class Program:
         if await db.fetch_one(f"SELECT reading FROM status_users WHERE account_id={self.id} AND user_id={chat_id}", one_data=True):
             await db.execute(f"UPDATE status_users SET reading=false WHERE account_id={self.id} AND user_id={chat_id}")
             await MaksogramBot.send_message(self.id, f"🌐 {name} прочитал сообщение", reply_markup=MaksogramBot.IMarkup(
-                inline_keyboard=[[MaksogramBot.IButton(text="Настройки", callback_data=f"status_user_menu{self.id}")]]))
+                inline_keyboard=[[MaksogramBot.IButton(text="Настройки", callback_data=f"status_user_menu{self.id}|new")]]))
 
     async def check_awake(self, event: events.userupdate.UserUpdate.Event) -> Union[datetime, None]:
         status = isinstance(event.status, UserStatusOnline)
@@ -539,7 +539,7 @@ class Program:
                 continue
             name = function['name']
             await MaksogramBot.send_message(function['account_id'], f"🌐 {name} {status_str}", reply_markup=MaksogramBot.IMarkup(
-                inline_keyboard=[[MaksogramBot.IButton(text="Настройки", callback_data=f"status_user_menu{self.id}")]]))
+                inline_keyboard=[[MaksogramBot.IButton(text="Настройки", callback_data=f"status_user_menu{self.id}|new")]]))
 
         if not time:  # Уведомление не требуется
             return
@@ -606,7 +606,7 @@ class Program:
             return
         name = await self.chat_name(event.chat_id)
         await MaksogramBot.send_message(self.id, f"🌐 {name} {status_str}", reply_markup=MaksogramBot.IMarkup(
-            inline_keyboard=[[MaksogramBot.IButton(text="Настройки", callback_data=f"status_user_menu{event.chat_id}")]]))
+            inline_keyboard=[[MaksogramBot.IButton(text="Настройки", callback_data=f"status_user_menu{event.chat_id}|new")]]))
 
     async def system_bot(self, event: events.newmessage.NewMessage.Event):
         message: Message = event.message

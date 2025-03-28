@@ -19,6 +19,7 @@ from aiogram import F
 from aiogram.filters.command import Command
 from aiogram.types import InlineKeyboardMarkup as IMarkup
 from aiogram.types import InlineKeyboardButton as IButton
+from aiogram.types import ReplyKeyboardRemove as KRemove
 from aiogram.types import Message, CallbackQuery, FSInputFile
 from . core import (
     dp,
@@ -149,7 +150,7 @@ async def help(message: Message):
                          "/settings - настройки\n"
                          "/feedback - отзывы о Maksogram\n"
                          "/friends - реферальная программа\n"
-                         "/version - обзор прошлого обновления", parse_mode=html)
+                         "/version - обзор прошлого обновления", parse_mode=html, reply_markup=KRemove())
 
 
 @dp.callback_query(F.data == "send_payment")
@@ -184,13 +185,17 @@ async def _confirm_sending_payment(callback_query: CallbackQuery):
 @dp.callback_query()
 @security()
 async def _other_callback_query(callback_query: CallbackQuery):
-    await new_callback_query(callback_query)
+    await new_callback_query(callback_query, params={"Обработано": "не обработано"})
+    await callback_query.answer("Не распознано!")
 
 
 @dp.message()
 @security()
 async def _other_message(message: Message):
-    if await new_message(message): return
+    if await new_message(message, params={"Обработка": "не обработано"}): return
+    if message.text == "Отмена":
+        return await message.answer("Привет! /menu", reply_markup=KRemove())
+    await help(message)
 
 
 async def check_payment_datetime():

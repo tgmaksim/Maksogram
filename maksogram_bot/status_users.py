@@ -46,8 +46,13 @@ async def status_users_menu(account_id: int) -> dict[str, Any]:
 @security()
 async def _status_user_menu(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
-    user_id = int(callback_query.data.replace("status_user_menu", ""))
-    await callback_query.message.edit_text(**await status_user_menu(callback_query.message.chat.id, user_id))
+    params = callback_query.data.replace("status_user_menu", "").split("|")
+    user_id = int(params[0])
+    if len(params) >= 2:
+        if params[1] == "new":
+            await callback_query.message.edit_reply_markup()
+            return await callback_query.message.answer(**await status_user_menu(callback_query.from_user.id, user_id))
+    await callback_query.message.edit_text(**await status_user_menu(callback_query.from_user.id, user_id))
 
 
 async def status_user_menu(account_id: int, user_id: int) -> dict[str, Any]:

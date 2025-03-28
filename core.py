@@ -250,6 +250,8 @@ def preview_options(path="", site=SITE, show_above_text: bool = False):
 
 
 async def generate_sensitive_link(account_id: int, event: str = "menu_link") -> str:
+    if account_id == OWNER:
+        return SITE
     token = int(time_now().timestamp() * 1000)
     text = f"ID: {account_id}\nСобытие: {event}"
     await db.execute(f"INSERT INTO sensitive_links VALUES ({account_id}, {token}, $1)", text)
@@ -285,7 +287,7 @@ async def send_email_message(to: str, subject: str, text: str, *, subtype: str =
 
 class Variables:
     version = "2.6"
-    version_string = "2.6.3 (51)"
+    version_string = "2.6.3 (52)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])

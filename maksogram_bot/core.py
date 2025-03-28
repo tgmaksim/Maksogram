@@ -11,9 +11,9 @@ from core import (
 
 from core import MaksogramBot
 from aiogram import Dispatcher
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardMarkup as IMarkup
 from aiogram.types import InlineKeyboardButton as IButton
-from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
     Message,
     WebAppInfo,
@@ -92,7 +92,7 @@ async def developer_command(message: Message) -> bool:
     return message.chat.id != OWNER
 
 
-async def new_message(message: Message) -> bool:
+async def new_message(message: Message, params: dict[str, str] = None) -> bool:
     if message.chat.id == OWNER:
         return False
 
@@ -107,31 +107,32 @@ async def new_message(message: Message) -> bool:
     else:
         content = f"'{str(message.content_type).lower().replace('contenttype.', '')}'"
     id = str(message.chat.id)
+    message_id = str(message.message_id)
     username = message.from_user.username
     first_name = message.from_user.first_name
     last_name = message.from_user.last_name
     date = str(omsk_time(message.date))
     acquaintance = await username_acquaintance(message.chat.id, first_name)
-    acquaintance = f"<b>Знакомый: {acquaintance}</b>\n" if acquaintance else ""
 
-    await bot.send_message(
-        OWNER,
-        text=f"ID: {id}\n"
-             f"{acquaintance}" +
-             (f"USERNAME: @{username}\n" if username else "") +
-             f"Имя: {escape(first_name)}\n" +
-             (f"Фамилия: {escape(last_name)}\n" if last_name else "") +
-             (f"<code>{escape(content)}</code>\n"
-              if not content.startswith("/") or len(content.split()) > 1 else f"{escape(content)}\n") +
-             f"Время: {date}",
-        parse_mode=html)
+    text = f"ID: {id}\n" \
+           f"MSG: {message_id}\n" + \
+           (f"<b>Знакомый: {acquaintance}</b>\n" if acquaintance else "") + \
+           (f"USERNAME: @{username}\n" if username else "") + \
+           f"Имя: {escape(first_name)}\n" + \
+           (f"Фамилия: {escape(last_name)}\n" if last_name else "") + \
+           (f"<code>{escape(content)}</code>\n" if not content.startswith("/") or len(content.split()) > 1 else
+            f"{escape(content)}\n") + \
+           f"Время: {date}\n" + \
+           "\n".join([f"{key}: {params[key]}" for key in params or []])
+
+    await bot.send_message(OWNER, text=text, parse_mode=html)
 
     if message.chat.id in Data.banned:
         await bot.send_message(OWNER, "Пользователь заблокирован!")
     return message.chat.id in Data.banned
 
 
-async def new_callback_query(callback_query: CallbackQuery) -> bool:
+async def new_callback_query(callback_query: CallbackQuery, params: dict[str, str] = None) -> bool:
     if callback_query.from_user.id == OWNER:
         return False
 
@@ -141,24 +142,23 @@ async def new_callback_query(callback_query: CallbackQuery) -> bool:
     last_name = callback_query.from_user.last_name
     callback_data = callback_query.data
     acquaintance = await username_acquaintance(callback_query.from_user.id, first_name)
-    acquaintance = f"<b>Знакомый: {acquaintance}</b>\n" if acquaintance else ""
 
-    await bot.send_message(
-        OWNER,
-        text=f"ID: {id}\n"
-             f"{acquaintance}" +
-             (f"USERNAME: @{username}\n" if username else "") +
-             f"Имя: {escape(first_name)}\n" +
-             (f"Фамилия: {escape(last_name)}\n" if last_name else "") +
-             f"Кнопка: {callback_data}",
-        parse_mode=html)
+    text = f"ID: {id}\n" + \
+           (f"<b>Знакомый: {acquaintance}</b>\n" if acquaintance else "") + \
+           (f"USERNAME: @{username}\n" if username else "") + \
+           f"Имя: {escape(first_name)}\n" + \
+           (f"Фамилия: {escape(last_name)}\n" if last_name else "") + \
+           f"Кнопка: {callback_data}\n" + \
+           "\n".join([f"{key}: {params[key]}" for key in params or []])
+
+    await bot.send_message(OWNER, text=text, parse_mode=html)
 
     if callback_query.from_user.id in Data.banned:
         await bot.send_message(OWNER, "Пользователь заблокирован!")
     return callback_query.from_user.id in Data.banned
 
 
-async def new_inline_query(inline_query: InlineQuery):
+async def new_inline_query(inline_query: InlineQuery, params: dict[str, str] = None):
     if inline_query.from_user.id == OWNER:
         return
 
@@ -168,17 +168,16 @@ async def new_inline_query(inline_query: InlineQuery):
     last_name = inline_query.from_user.last_name
     query = inline_query.query
     acquaintance = await username_acquaintance(inline_query.from_user.id, first_name)
-    acquaintance = f"<b>Знакомый: {acquaintance}</b>\n" if acquaintance else ""
 
-    await bot.send_message(
-        OWNER,
-        text=f"ID: {id}\n"
-             f"{acquaintance}" +
-             (f"USERNAME: @{username}\n" if username else "") +
-             f"Имя: {escape(first_name)}\n" +
-             (f"Фамилия: {escape(last_name)}\n" if last_name else "") +
-             f"Поиск: {query}",
-        parse_mode=html)
+    text = f"ID: {id}\n" + \
+           (f"<b>Знакомый: {acquaintance}</b>\n" if acquaintance else "") + \
+           (f"USERNAME: @{username}\n" if username else "") + \
+           f"Имя: {escape(first_name)}\n" + \
+           (f"Фамилия: {escape(last_name)}\n" if last_name else "") + \
+           f"Поиск: {query}\n" + \
+           "\n".join([f"{key}: {params[key]}" for key in params or []])
+
+    await bot.send_message(OWNER, text=text, parse_mode=html)
 
     if inline_query.from_user.id in Data.banned:
         await bot.send_message(OWNER, "Пользователь заблокирован!")
