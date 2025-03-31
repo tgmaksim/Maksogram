@@ -195,7 +195,6 @@ async def _other_message(message: Message):
     if await new_message(message, params={"Обработка": "не обработано"}): return
     if message.text == "Отмена":
         return await message.answer("Привет! /menu", reply_markup=KRemove())
-    await help(message)
 
 
 async def check_payment_datetime():

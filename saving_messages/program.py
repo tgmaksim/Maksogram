@@ -50,6 +50,7 @@ from telethon.tl.types import (
     UserStatusOnline,
     UserStatusOffline,
     MessageMediaPhoto,
+    MessageReplyHeader,
     ReactionCustomEmoji,
     MessageMediaDocument,
 
@@ -221,26 +222,42 @@ class Program:
         async for message in self.client.iter_messages(chat_id, ids=message_id):
             return message
 
-    async def new_message(self, event: events.newmessage.NewMessage.Event):
-        message: Message = event.message
+    async def modules(self, message: Message) -> bool:
         text = message.text.lower()
+        if not (text and "\n" not in text and message.out and message.media is None):
+            return False
+
+        reply_message = await self.get_message_by_id(message.chat_id, message.reply_to.reply_to_msg_id) if \
+            isinstance(message.reply_to, MessageReplyHeader) else None
+
+        # Калькулятор
+        if text[-1] == "=" and message.entities is None:
+            if await db.fetch_one(f"SELECT calculator FROM modules WHERE account_id={self.id}", one_data=True):
+                request = calculator(text[:-1])
+                if request:
+                    await message.edit(request)
+                    return True
+                else:
+                    await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться калькулятором? Вы неправильно ввели пример")
+            else:
+                await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться калькулятором? Данная функция отключена у вас! "
+                                                         "Вы можете включить ее в настройках\n/menu_chat (Maksogram в чате)")
 
         # Генератор QR
-        if ("создай" in text or "сгенерируй" in text or "qr" in text or "создать" in text or "сгенерировать" in text) \
-                and message.out and len(message.entities or []) == 1 and isinstance(message.entities[0], MessageEntityUrl):
+        elif any([command in text for command in ("создай", "сгенерируй", "qr", "создать", "сгенерировать")]) \
+                and len(message.entities or []) == 1 and isinstance(message.entities[0], MessageEntityUrl):
             if await db.fetch_one(f"SELECT qrcode FROM modules WHERE account_id={self.id}", one_data=True):
                 link = message.text[message.entities[0].offset:message.entities[0].length + message.entities[0].offset]
                 qr = create_qrcode(link)
                 await message.edit("@MaksogramBot в чате", file=qr)
                 os.remove(qr)
-                return  # При срабатывании Maksogram в чате сохранение сообщения не происходит
+                return True
             else:
                 await MaksogramBot.send_message(self.id, "Вы хотели создать QR-код? Данная функция отключена у вас! "
                                                          "Вы можете включить в настройках\n/menu_chat (Maksogram в чате)")
 
         # Расшифровка голосовых сообщений
-        if text and ("расшифруй" in text or "в текст" in text) and "\n" not in text and message.out and message.reply_to \
-                and (reply_message := await self.get_message_by_id(message.chat_id, message.reply_to.reply_to_msg_id)).voice:
+        elif any([command in text for command in ("расшифруй", "в текст", "расшифровать")]) and reply_message.voice:
             if await db.fetch_one(f"SELECT audio_transcription FROM modules WHERE account_id={self.id}", one_data=True):
                 await message.edit("@MaksogramBot в чате\nРасшифровка голосового сообщения...")
                 buffer = BytesIO()
@@ -253,29 +270,26 @@ class Program:
                                                            f"{answer.error.__class__.__name__}\n{answer.error}")
                     await message.edit("@MaksogramBot в чате\nПроизошла ошибка при расшифровке... Скоро все будет исправлено")
                 await db.execute(f"UPDATE statistics SET audio_transcription=now() WHERE account_id={self.id}")
-                return  # При срабатывании Maksogram в чате сохранение сообщения не происходит
+                return True
             else:
                 await MaksogramBot.send_message(self.id, "Вы хотели расшифровать гс? Данная функция отключена у вас! "
                                                          "Вы можете включить в настройках\n/menu_chat (Maksogram в чате)")
 
-        # Калькулятор
-        if text and text[-1] == "=" and "\n" not in text and message.out:
-            if await db.fetch_one(f"SELECT calculator FROM modules WHERE account_id={self.id}", one_data=True):
-                request = calculator(text[:-1])
-                if request:
-                    await message.edit(request)
-                    return  # При срабатывании Maksogram в чате сохранение сообщения не происходит
-                else:
-                    await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться калькулятором? Вы неправильно ввели пример")
+        # Погода
+        elif all([command in text for command in ("какая", "погода")]):
+            if await db.fetch_one(f"SELECT weather FROM modules WHERE account_id={self.id}", one_data=True):
+                request = await weather(self.id)
+                await message.edit(f"@MaksogramBot в чате\n{request}", parse_mode="HTML")
+                await db.execute(f"UPDATE statistics SET weather=now() WHERE account_id={self.id}")
+                return True
             else:
-                await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться калькулятором? Данная функция отключена у вас! "
+                await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться погодой? Данная функция отключена у вас! "
                                                          "Вы можете включить ее в настройках\n/menu_chat (Maksogram в чате)")
 
-        # Видео в кружок
-        if text and "в кружок" in text and "\n" not in text and message.out and message.reply_to \
-                and (reply_message := await self.get_message_by_id(message.chat_id, message.reply_to.reply_to_msg_id)).video:
+        # Конвертер видео в кружок
+        elif "кружок" in text and reply_message.video:
             if await db.fetch_one(f"SELECT round_video FROM modules WHERE account_id={self.id}", one_data=True):
-                if reply_message.video.attributes[0].duration > 60:
+                if reply_message.video.attributes[0].duration >= 60:
                     await message.edit("@MaksogramBot в чате\nВидео слишком длинное!")
                 else:
                     await message.edit("@MaksogramBot в чате\nКонвертация видео в кружок...")
@@ -291,10 +305,18 @@ class Program:
                         await MaksogramBot.send_system_message(f"⚠️Ошибка при конвертации⚠️\n\n"
                                                                f"{answer.error.__class__.__name__}\n{answer.error}")
                         await message.edit("@MaksogramBot в чате\nПроизошла ошибка при конвертации... Скоро все будет исправлено")
-                    return  # При срабатывании Maksogram в чате сохранение сообщения не происходит
+                return True
             else:
                 await MaksogramBot.send_message(self.id, "Вы хотели конвертировать видео в кружок? Данная функция отключена у вас! "
                                                          "Вы можете включить в настройках\n/menu_chat (Maksogram в чате)")
+
+        return False
+
+    async def new_message(self, event: events.newmessage.NewMessage.Event):
+        message: Message = event.message
+
+        if await self.modules(message):
+            return  # При срабатывании Maksogram в чате сохранение сообщения не происходит
 
         if isinstance(message.media, TTL_MEDIA) and message.media.ttl_seconds:  # Самоуничтожающееся медиа
             if message.file.size / 2**20 <= 10 or message.video_note or \
@@ -302,6 +324,8 @@ class Program:
                 file_id = message.photo.id if message.photo else message.document.id
                 ext = "png" if message.photo else message.file.ext
                 path = resources_path(f"ttl_media/{self.id}.{file_id}.{ext}")
+                await MaksogramBot.send_message(self.id, "Идет сохранение самоуничтожающегося медиа... "
+                                                         "Не смотрите его, пока идет сохранение!")
                 try:
                     await self.client.download_media(message, path)
                 except FileReferenceExpiredError:  # Уже удалено
@@ -561,103 +585,24 @@ class Program:
         awake = status is True and function['awake']
         online = function['online'] and status is True
         offline = function['offline'] and status is False
+        if status_str := not (online or offline or awake):
+            return
         if online or offline:
             status_str = "в сети" if status else "вышел(а) из сети"
-        elif awake:
+        if awake:
             time_zone: int = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={self.id}", one_data=True)
             time = time_now() + timedelta(hours=time_zone)
             time_last_notification = awake + timedelta(hours=time_zone)
-            if not (morning[0] <= time.hour < morning[1]):  # Сейчас не утро
-                return
-            if time_last_notification.date() == time.date() and morning[0] <= time_last_notification.hour < morning[1]:
-                return  # Сегодня уже отправлено
-            await db.execute(f"UPDATE status_users SET awake=now() WHERE account_id={self.id} AND user_id={event.chat_id}")
-            status_str = "проснулся(лась)"
-        else: return
+            if morning[0] <= time.hour < morning[1] and not \
+                    (time_last_notification.date() == time.date() and morning[0] <= time_last_notification.hour < morning[1]):
+                await db.execute(f"UPDATE status_users SET awake=now() WHERE account_id={self.id} AND user_id={event.chat_id}")
+                status_str = "проснулся(лась)"
         name = await self.chat_name(event.chat_id)
         await MaksogramBot.send_message(self.id, f"🌐 {name} {status_str}", reply_markup=MaksogramBot.IMarkup(
             inline_keyboard=[[MaksogramBot.IButton(text="Настройки", callback_data=f"status_user_menu{event.chat_id}|new")]]))
 
     async def system_bot(self, event: events.newmessage.NewMessage.Event):
-        message: Message = event.message
-        text = message.text.lower()
-
-        # Генератор QR
-        if ("создай" in text or "сгенерируй" in text or "qr" in text or "создать" in text or "сгенерировать" in text) \
-                and message.out and len(message.entities or []) == 1 and isinstance(message.entities[0], MessageEntityUrl):
-            if await db.fetch_one(f"SELECT qrcode FROM modules WHERE account_id={self.id}", one_data=True):
-                link = message.text[message.entities[0].offset:message.entities[0].length + message.entities[0].offset]
-                qr = create_qrcode(link)
-                await message.edit("@MaksogramBot в чате", file=qr)
-                os.remove(qr)
-            else:
-                await MaksogramBot.send_message(self.id, "Вы хотели создать QR-код? Данная функция отключена у вас! "
-                                                         "Вы можете включить в настройках\n/menu_chat (Maksogram в чате)")
-
-        # Расшифровка голосовых сообщений
-        elif text and ("расшифруй" in text or "в текст" in text) and message.out and message.reply_to \
-                and (reply_message := await self.get_message_by_id(message.chat_id, message.reply_to.reply_to_msg_id)).voice:
-            if await db.fetch_one(f"SELECT audio_transcription FROM modules WHERE account_id={self.id}", one_data=True):
-                await message.edit("@MaksogramBot в чате\nРасшифровка голосового сообщения...")
-                buffer = BytesIO()
-                await self.client.download_media(reply_message.media, file=buffer)
-                answer = await audio_transcription(buffer.getvalue())
-                if answer.ok:
-                    await message.edit(f"@MaksogramBot в чате\n<blockquote expandable>{answer.text}</blockquote>", parse_mode="HTML")
-                else:
-                    await MaksogramBot.send_system_message(f"⚠️Ошибка при расшифровке⚠️\n\n"
-                                                           f"{answer.error.__class__.__name__}\n{answer.error}")
-                    await message.edit("@MaksogramBot в чате\nПроизошла ошибка при расшифровке... Скоро все будет исправлено")
-                await db.execute(f"UPDATE statistics SET audio_transcription=now() WHERE account_id={self.id}")
-            else:
-                await MaksogramBot.send_message(self.id, "Вы хотели расшифровать гс? Данная функция отключена у вас! "
-                                                         "Вы можете включить в настройках\n/menu_chat (Maksogram в чате)")
-
-        # Калькулятор
-        elif text and text[-1] == "=" and "\n" not in text and message.out:
-            if await db.fetch_one(f"SELECT calculator FROM modules WHERE account_id={self.id}", one_data=True):
-                request = calculator(text[:-1])
-                if request:
-                    await message.edit(request)
-                else:
-                    await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться калькулятором? Вы неправильно ввели пример")
-            else:
-                await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться калькулятором? Данная функция отключена у вас! "
-                                                         "Вы можете включить ее в настройках\n/menu_chat (Maksogram в чате)")
-
-        # Погода
-        elif ("какая" in text and "погода" in text) and "\n" not in text and message.out:
-            if await db.fetch_one(f"SELECT weather FROM modules WHERE account_id={self.id}", one_data=True):
-                request = await weather(self.id)
-                await message.edit(f"@MaksogramBot в чате\n{request}", parse_mode="HTML")
-                await db.execute(f"UPDATE statistics SET weather=now() WHERE account_id={self.id}")
-            else:
-                await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться погодой? Данная функция отключена у вас! "
-                                                         "Вы можете включить ее в настройках\n/menu_chat (Maksogram в чате)")
-
-        # Видео в кружок
-        elif text and "в кружок" in text and "\n" not in text and message.out and message.reply_to \
-                and (reply_message := await self.get_message_by_id(message.chat_id, message.reply_to.reply_to_msg_id)).video:
-            if await db.fetch_one(f"SELECT round_video FROM modules WHERE account_id={self.id}", one_data=True):
-                if reply_message.video.attributes[0].duration > 60:
-                    await message.edit("@MaksogramBot в чате\nВидео слишком длинное!")
-                else:
-                    await message.edit("@MaksogramBot в чате\nКонвертация видео в кружок...")
-                    video_path = resources_path(f"round_video/{reply_message.video.id}.mp4")
-                    await self.client.download_media(reply_message.media, file=video_path)
-                    answer = round_video(video_path)
-                    if answer.ok:
-                        await message.edit("@MaksogramBot в чате\nОтправка кружка...")
-                        await self.client.send_file(message.chat_id, file=answer.path, reply_to=reply_message.id, video_note=True)
-                        await message.delete()
-                        os.remove(answer.path)
-                    else:
-                        await MaksogramBot.send_system_message(f"⚠️Ошибка при конвертации⚠️\n\n"
-                                                               f"{answer.error.__class__.__name__}\n{answer.error}")
-                        await message.edit("@MaksogramBot в чате\nПроизошла ошибка при конвертации... Скоро все будет исправлено")
-            else:
-                await MaksogramBot.send_message(self.id, "Вы хотели конвертировать видео в кружок? Данная функция отключена у вас! "
-                                                         "Вы можете включить в настройках\n/menu_chat (Maksogram в чате)")
+        await self.modules(event.message)
 
     async def answering_machine(self, event: events.newmessage.NewMessage.Event):
         message: Message = event.message

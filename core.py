@@ -287,7 +287,7 @@ async def send_email_message(to: str, subject: str, text: str, *, subtype: str =
 
 class Variables:
     version = "2.6"
-    version_string = "2.6.3 (52)"
+    version_string = "2.6.3 (53)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])
@@ -317,4 +317,4 @@ class MaksogramBot:
 
     @staticmethod
     async def send_system_message(message: str, **kwargs):
-        return await MaksogramBot.bot.send_message(OWNER, str(message), **kwargs)
+        return await MaksogramBot.send_message(OWNER, str(message), **kwargs)

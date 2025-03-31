@@ -13,12 +13,12 @@ async def main():
                 reply_markup=MaksogramBot.IMarkup(inline_keyboard=[[MaksogramBot.IButton(
                     text="Обзор автоответчика", url=f"{SITE}#автоответчик")]]))
             await db.execute(f"UPDATE statistics SET answering_machine=now() WHERE account_id={statistics['account_id']}")
-        elif time_now() - statistics['audio_transcription'] >= timedelta(days=7):
+        elif time_now() - statistics['audio_transcription'] >= timedelta(days=14):
             await MaksogramBot.send_message(
                 statistics['account_id'],
-                "🗣 Расшифровка ГС\nВы давно не пользовались расшифровкой гс. Это прекрасная функция с быстрым ответом!",
+                "🗣 Расшифровка голосовых\nВы очень давно не пользовались расшифровкой ГС. Это прекрасная функция с быстрым ответом!",
                 reply_markup=MaksogramBot.IMarkup(inline_keyboard=[[MaksogramBot.IButton(
-                    text="Обзор расшифровки ГС", url=f"{SITE}#расшифровка-гс")]]))
+                    text="Обзор функции", url=f"{SITE}#расшифровка-гс")]]))
             await db.execute(f"UPDATE statistics SET audio_transcription=now() WHERE account_id={statistics['account_id']}")
         elif time_now() - statistics['weather'] >= timedelta(days=7) and \
                 not await db.fetch_one(f"SELECT morning_weather FROM modules WHERE account_id={statistics['account_id']}", one_data=True):
