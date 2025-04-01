@@ -42,6 +42,7 @@ def modules_menu() -> dict[str, Any]:
                                        IButton(text="🔗 Сканер QR", web_app=WebAppInfo(url=f"{Data.web_app}/main"))],
                                       [IButton(text="🗣 ГС в текст", callback_data="audio_transcription"),
                                        IButton(text="🔄 Видео в кружок", callback_data="round_video")],
+                                      [IButton(text="⏰ Напоминалка", callback_data="reminder")],
                                       [IButton(text="◀️  Назад", callback_data="menu")]])
     return {"text": "💬 <b>Maksogram в чате</b>\nФункции, которые работают прямо из любого чата, не нужно вызывать меня",
             "reply_markup": markup, "parse_mode": html}
@@ -227,6 +228,40 @@ async def _round_video_switch(callback_query: CallbackQuery):
         case "off":
             await db.execute(f"UPDATE modules SET round_video=false WHERE account_id={callback_query.from_user.id}")  # Выключение конвертера
     await callback_query.message.edit_text(**await round_video_menu(callback_query.message.chat.id))
+
+
+@dp.callback_query(F.data == "reminder")
+@security()
+async def _reminder(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    await callback_query.message.edit_text(**await reminder_menu(callback_query.message.chat.id))
+
+
+async def reminder_menu(account_id: int) -> dict[str, Any]:
+    if await db.fetch_one(f"SELECT reminder FROM modules WHERE account_id={account_id}", one_data=True):  # Вкл/выкл напоминалки
+        status_button = IButton(text="🔴 Выключить напоминалку", callback_data="reminder_off")
+    else:
+        status_button = IButton(text="🟢 Включить напоминалку", callback_data="reminder_on")
+    markup = IMarkup(inline_keyboard=[[status_button],
+                                      [IButton(text="Как пользоваться напоминалкой?", url=f"{SITE}#напоминалка")],
+                                      [IButton(text="◀️  Назад", callback_data="modules")]])
+    return {"text": "⏰ <b>Напоминалка в чате</b>\nMaksogram предоставляет простой функционал для создания напоминаний в любом чате. "
+                    "<blockquote expandable><b>Примеры</b>:\nНапомни через 5 минут\nНапомни через 5 часов\nНапомни через "
+                    "5 часов 30 минут\nНапомни в 12:00\nНапомни завтра в 12.00\nНапомни 9 декабря в 12:00</blockquote>",
+                    "reply_markup": markup, "parse_mode": html}
+
+
+@dp.callback_query(F.data.in_(["reminder_on", "reminder_off"]))
+@security()
+async def _reminder_switch(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    command = callback_query.data.split("_")[-1]
+    match command:
+        case "on":
+            await db.execute(f"UPDATE modules SET reminder=true WHERE account_id={callback_query.from_user.id}")  # Включение напоминалки
+        case "off":
+            await db.execute(f"UPDATE modules SET reminder=false WHERE account_id={callback_query.from_user.id}")  # Выключение напоминалки
+    await callback_query.message.edit_text(**await reminder_menu(callback_query.message.chat.id))
 
 
 def modules_initial():

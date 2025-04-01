@@ -499,14 +499,12 @@ async def _answering_machine_edit_timetable(message: Message, state: FSMContext)
         await message.answer(**await time_auto_answer_menu(message.chat.id, answer_id, "<b>Некорректный формат времени</b>"))
     elif message.text != "Отмена":
         text = message.text.replace(" ", "")
-        if not re.fullmatch(r'\d{1,2}:\d{1,2}-\d{1,2}:\d{1,2}', text):  # Некорректный формат
+        if not (match := re.fullmatch(r'(\d{1,2})[:.](\d{1,2})-(\d{1,2})[:.](\d{1,2})', text)):  # Некорректный формат
             await message.answer(**await time_auto_answer_menu(message.chat.id, answer_id, "<b>Некорректный формат расписания</b>"))
         else:
             time_zone = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={account_id}", one_data=True)
-            start_time, end_time = text.split("-")
-            hours_start_time, minutes_start_time = map(int, start_time.split(":"))
+            hours_start_time, minutes_start_time, hours_end_time, minutes_end_time = map(int, match.groups())
             hours_start_time = (hours_start_time - time_zone) % 24
-            hours_end_time, minutes_end_time = map(int, end_time.split(":"))
             hours_end_time = (hours_end_time - time_zone) % 24
             if (hours_start_time, minutes_start_time) == (hours_end_time, minutes_end_time):  # Одинаковые start_time и end_time
                 await message.answer(**await time_auto_answer_menu(message.chat.id, answer_id, "<b>Некорректный формат расписания</b>"))
@@ -557,14 +555,14 @@ async def _answering_machine_edit_time(message: Message, state: FSMContext):
         await message.answer(**await time_auto_answer_menu(message.chat.id, answer_id, "<b>Некорректный формат времени</b>"))
     elif message.text != "Отмена":
         text = message.text.replace(" ", "")
-        if not re.fullmatch(r'\d{1,2}:\d{1,2}', text):  # Некорректный формат
+        if not (match := re.fullmatch(r'(\d{1,2})[:.](\d{1,2})', text)):  # Некорректный формат
             await message.answer(**await time_auto_answer_menu(message.chat.id, answer_id, "<b>Некорректный формат времени</b>"))
         else:
             other_type_time = "start_time" if type_time == "end_time" else "end_time"
             other_time = await db.fetch_one(f"SELECT {other_type_time} FROM answering_machine "
                                             f"WHERE account_id={account_id} AND answer_id={answer_id}", one_data=True)
             time_zone = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={account_id}", one_data=True)
-            hours, minutes = map(int, text.split(":"))
+            hours, minutes = map(int, match.groups())
             hours = (hours - time_zone) % 24
             if (hours, minutes) == tuple(map(int, other_time.strftime("%H:%M").split(":"))):
                 await message.answer(**await time_auto_answer_menu(message.chat.id, answer_id,

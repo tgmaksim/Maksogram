@@ -8,6 +8,7 @@ from modules.qrcode import create as create_qrcode
 from modules.audio_transcription import main as audio_transcription
 from modules.weather import main as weather
 from modules.round_video import main as round_video
+from modules.reminder import main as reminder
 
 from io import BytesIO
 from typing import Union
@@ -15,6 +16,7 @@ from telethon.tl.patched import Message
 from datetime import timedelta, datetime
 from telethon import TelegramClient, events
 from telethon.events.common import EventCommon
+from asyncpg.exceptions import UniqueViolationError
 from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.functions.account import UpdateStatusRequest
 from telethon.tl.functions.messages import GetCustomEmojiDocumentsRequest
@@ -67,6 +69,7 @@ from telethon.tl.types import (
 
 
 TTL_MEDIA = Union[MessageMediaPhoto, MessageMediaDocument]
+months = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "ноября", "декабря"]
 
 
 class LastEvent:
@@ -229,6 +232,8 @@ class Program:
 
         reply_message = await self.get_message_by_id(message.chat_id, message.reply_to.reply_to_msg_id) if \
             isinstance(message.reply_to, MessageReplyHeader) else None
+        if reply_message and reply_message.chat_id != message.chat_id:
+            return False
 
         # Калькулятор
         if text[-1] == "=" and message.entities is None:
@@ -308,6 +313,36 @@ class Program:
                 return True
             else:
                 await MaksogramBot.send_message(self.id, "Вы хотели конвертировать видео в кружок? Данная функция отключена у вас! "
+                                                         "Вы можете включить в настройках\n/menu_chat (Maksogram в чате)")
+
+        # Напоминалка
+        # напомни в 12.00, напомни завтра в 12.00, напомни послезавтра в 12.00, напомни 9 декабря в 12.00, напомни через 5 минут
+        elif reply_message and (remind_time := await reminder(text, db.fetch_one(f"SELECT time_zone FROM settings "
+                                                                                 f"WHERE account_id={self.id}", one_data=True))):
+            if await db.fetch_one(f"SELECT reminder FROM modules WHERE account_id={self.id}", one_data=True):
+                time_zone = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={self.id}", one_data=True)
+                name = await self.chat_name(message.chat_id, my_name="Избранное")
+                try:
+                    await db.fetch_one(f"INSERT INTO reminds VALUES ({self.id}, {reply_message.chat_id}, {reply_message.id}, $1, $2)",
+                                       remind_time - timedelta(hours=time_zone), name)
+                except UniqueViolationError:
+                    await message.edit("@MaksogramBot в чате\nНапоминание о событии в это время уже есть")
+                    return True
+                if remind_time.date() == time_now().date():  # Сегодня
+                    date = "сегодня"
+                elif remind_time.date() == (time_now() + timedelta(days=1)).date():  # Завтра
+                    date = "завтра"
+                elif remind_time.date() == (time_now() + timedelta(days=2)).date():  # Послезавтра
+                    date = "послезавтра"
+                else:
+                    date = f"{remind_time.day} {months[remind_time.month-1]}"
+                    if remind_time.year != time_now().year:
+                        date += " следующего года"
+                await message.edit("@MaksogramBot в чате\nЯ напомню вам о событии "
+                                   f"{date} в {remind_time.hour:02d}:{remind_time.minute:02d}")
+                return True
+            else:
+                await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться напоминалкой? Данная функция отключена у вас! "
                                                          "Вы можете включить в настройках\n/menu_chat (Maksogram в чате)")
 
         return False
@@ -531,7 +566,8 @@ class Program:
                 if gender is True: status_str = "проснулся"
                 elif gender is False: status_str = "проснулась"
                 else: status_str = "проснулся(лась)"
-            else: continue
+            else:
+                continue
             name = function['name']
             await MaksogramBot.send_message(function['account_id'], f"🌐 {name} {status_str}", reply_markup=MaksogramBot.IMarkup(
                 inline_keyboard=[[MaksogramBot.IButton(text="Настройки", callback_data=f"status_user_menu{self.id}|new")]]))
@@ -679,6 +715,17 @@ class Program:
             await asyncio.sleep(((time_now() + timedelta(minutes=1)).replace(second=0, microsecond=0) - time_now()).seconds)
 
     @security()
+    async def reminder_center(self):
+        while await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={self.id}", one_data=True):
+            for remind in await db.fetch_all("SELECT chat_id, message_id, chat_name FROM reminds WHERE "
+                                             f"account_id={self.id} AND (time - now()) < INTERVAL '10 seconds'"):
+                await self.client.send_message(remind['chat_id'], "@MaksogramBot напоминает о событии!", reply_to=remind['message_id'])
+                await MaksogramBot.send_message(self.id, f"⏰ <b>Напоминалка</b>\nНапоминаю о вашем событии "
+                                                         f"в чате с {remind['chat_name']}", parse_mode="HTML")
+            await db.fetch_one(f"DELETE FROM reminds WHERE account_id={self.id} AND (time - now()) < INTERVAL '10 seconds'")
+            await asyncio.sleep(((time_now() + timedelta(minutes=1)).replace(second=0, microsecond=0) - time_now()).seconds)
+
+    @security()
     async def gifts_center(self):
         while await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={self.id}", one_data=True):
             for user in await db.fetch_all(f"SELECT user_id, name, gifts FROM gifts WHERE account_id={self.id}"):
@@ -725,6 +772,7 @@ class Program:
         asyncio.get_running_loop().create_task(self.new_avatar_center())
         asyncio.get_running_loop().create_task(self.answering_machine_center())
         asyncio.get_running_loop().create_task(self.gifts_center())
+        asyncio.get_running_loop().create_task(self.reminder_center())
         try:
             await self.client.run_until_disconnected()
         except (AuthKeyInvalidError, AuthKeyUnregisteredError):
