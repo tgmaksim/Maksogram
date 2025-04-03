@@ -245,7 +245,7 @@ async def reminder_menu(account_id: int) -> dict[str, Any]:
     markup = IMarkup(inline_keyboard=[[status_button],
                                       [IButton(text="Как пользоваться напоминалкой?", url=f"{SITE}#напоминалка")],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
-    return {"text": "⏰ <b>Напоминалка в чате</b>\nMaksogram предоставляет простой функционал для создания напоминаний в любом чате. "
+    return {"text": "⏰ <b>Напоминалка в чате</b>\nДля создания напоминания <b>нужно ответить</b> на любое сообщение в чате командой\n"
                     "<blockquote expandable><b>Примеры</b>:\nНапомни через 5 минут\nНапомни через 5 часов\nНапомни через "
                     "5 часов 30 минут\nНапомни в 12:00\nНапомни завтра в 12.00\nНапомни 9 декабря в 12:00</blockquote>",
                     "reply_markup": markup, "parse_mode": html}

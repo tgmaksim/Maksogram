@@ -205,11 +205,13 @@ async def check_payment_datetime():
         if time_now() <= payment['next_payment'] <= (time_now() + timedelta(days=1)):  # За день до конца
             first_notification = await db.fetch_one(f"SELECT first_notification FROM payment WHERE account_id={account_id}", one_data=True)
             if (time_now() - first_notification).total_seconds() < 23*60*60 + 50*60:  # Прошлое уведомление было менее 23 часов 50 минут назад
-                return
+                continue
             await db.execute(f"UPDATE payment SET first_notification=now() WHERE account_id={account_id}")
             await bot.send_message(account_id, "Текущая подписка заканчивается! Произведите следующий "
                                                "платеж до конца завтрашнего дня")
-            await bot.send_message(account_id, **await payment_menu(account_id))
+            message = await payment_menu(account_id)
+            await bot.send_photo(account_id, **message)
+            await bot.send_message(OWNER, f"Оплата подписки для {account_id}\n{message['caption']}", parse_mode=html)
 
 
 async def start_bot():

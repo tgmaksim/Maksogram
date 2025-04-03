@@ -1,12 +1,18 @@
-from typing import Any
+import aiohttp
+
 from html import escape
 from typing import Literal
+from decimal import Decimal
+from typing import Any, Union
+from sys_keys import crypto_api_key
 from core import (
+    n,
     db,
     html,
     OWNER,
     omsk_time,
     zip_int_data,
+    resources_path,
 )
 
 from core import MaksogramBot
@@ -18,6 +24,7 @@ from aiogram.types import (
     Message,
     WebAppInfo,
     InlineQuery,
+    FSInputFile,
     CallbackQuery,
 )
 
@@ -61,14 +68,34 @@ class UserState(StatesGroup):
     security_new_agent = State('security_new_agent')
 
 
+async def convert_ruble(amount_rub: int, currencies: dict[str, Union[str, int]]):
+    url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
+    headers = {"X-CMC_PRO_API_KEY": crypto_api_key}
+    params = {"symbol": ",".join(map(lambda x: x['name'], currencies)), "convert": "RUB"}
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers, params=params) as response:
+            data = await response.json()
+            result = {"RUB": amount_rub}
+            for currency in currencies:
+                price = data['data'][currency['name']]['quote']['RUB']['price']
+                amount = round(amount_rub / price * currency['coefficient'], currency['accuracy'])
+                if currency['min']: amount = max(amount, round(currency['min'], currency['accuracy']))
+                result[currency['name']] = {"RUB": round(amount * price), currency['name']: str(Decimal(str(amount)))}
+            return result
+
+
 async def payment_menu(account_id: int) -> dict[str, Any]:
-    fee = await db.fetch_one(f"SELECT fee FROM payment WHERE account_id={account_id}", one_data=True)  # Цена подписки
-    markup = IMarkup(inline_keyboard=[[IButton(text="TON", web_app=WebAppInfo(url=f"{Data.web_app}/payment/ton")),
-                                       IButton(text="BTC", web_app=WebAppInfo(url=f"{Data.web_app}/payment/btc"))],
-                                      [IButton(text="Перевод по номеру", web_app=WebAppInfo(url=f"{Data.web_app}/payment/fps"))],
+    currencies = await db.fetch_all("SELECT name, coefficient, accuracy, min FROM currencies")
+    fee = await convert_ruble(await db.fetch_one(f"SELECT fee FROM payment WHERE account_id={account_id}", one_data=True), currencies)
+    buttons = [IButton(text=currency['name'], web_app=WebAppInfo(url=f"{Data.web_app}/payment/{currency['name'].lower()}"))
+               for currency in currencies]
+    markup = IMarkup(inline_keyboard=[buttons,
+                                      [IButton(text="Перевод по номеру", web_app=WebAppInfo(url=f"{Data.web_app}/payment/rub"))],
                                       [IButton(text="Я отправил(а)  ✅", callback_data="send_payment")]])
-    return {"text": f"Способы оплаты (любой):\nСбер: ({fee} руб)\nBTC: (0.00002 btc)\nTON: (0.4 ton)",
-            "parse_mode": html, "reply_markup": markup}
+    payment_methods = [f"{currency['name']}: {fee[currency['name']][currency['name']]} {currency['name'].lower()} " \
+                       f"(≈ {fee[currency['name']]['RUB']} руб)" for currency in currencies]
+    return {"caption": f"Подписка Maksogram на 30 дней:\nСбер: {fee['RUB']} руб\n{n.join(payment_methods)}",
+            "parse_mode": html, "reply_markup": markup, "photo": FSInputFile(resources_path("logo.jpg"))}
 
 
 def referal_link(user_id: int) -> str:
@@ -86,8 +113,6 @@ async def developer_command(message: Message) -> bool:
     await new_message(message)
     if message.chat.id == OWNER:
         await message.answer("<b>Команда разработчика активирована!</b>", parse_mode=html)
-    else:
-        await message.answer("<b>Команда разработчика НЕ была активирована</b>", parse_mode=html)
 
     return message.chat.id != OWNER
 

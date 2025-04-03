@@ -12,7 +12,7 @@ feedback_link = f"<a href='{feedback_button}'>отзывы</a>"
 morning = 5, 13
 
 html = "HTML"
-s1, s2 = "{}"
+s1, s2, n = "{}\n"
 
 import os
 import json
@@ -287,7 +287,7 @@ async def send_email_message(to: str, subject: str, text: str, *, subtype: str =
 
 class Variables:
     version = "2.6"
-    version_string = "2.6.4 (54)"
+    version_string = "2.6.4 (55)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])

@@ -38,5 +38,6 @@ db_config = {"host": os.environ['DBHOST'], "user": os.environ['DBUSER'],
              "password": os.environ['DBPASS'], "database": f"{os.environ['DBNAME']}_maksogram"}
 
 openweathermap_api_key = os.environ['OPENWEATHERMAP_API_KEY']
+crypto_api_key = os.environ['CRYPTO_API_KEY']
 
 email = {"host": os.environ['EMAIL_HOST'], "user": os.environ['EMAIL_USER'], "password": os.environ['EMAIL_PASSWORD']}

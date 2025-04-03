@@ -42,7 +42,23 @@ def get_wind(wind: dict[str, Union[str, int]]) -> str:
         direction = "северо-западный"
     else:
         direction = ""
-    return f"{direction} {wind['speed']} м/с 💨"
+    if 0 <= wind['speed'] < 3:
+        speed = "легкий"
+    elif 3 <= wind['speed'] < 6:
+        speed = "слабый"
+    elif 6 <= wind['speed'] < 10:
+        speed = "умеренный"
+    elif 10 <= wind['speed'] < 14:
+        speed = "сильный"
+    elif 14 <= wind['speed'] < 21:
+        speed = "⚠️ <b>очень сильный</b>"
+    elif 21 <= wind['speed'] < 25:
+        speed = "⚠️ <b>шторм</b>"
+    elif 25 <= wind['speed'] < 29:
+        speed = "⚠️ <b>сильный шторм</b>"
+    else:  # wind['speed'] > 30
+        speed = "⚠️ <b>ураган</b>"
+    return f"{speed} {direction} 💨"
 
 
 def get_status(statuses: list[dict[str, Union[str, int]]]) -> str:

@@ -28,6 +28,7 @@ from . core import (
     Data,
     UserState,
     new_message,
+    payment_menu,
     developer_command,
     new_callback_query,
 )
@@ -62,7 +63,8 @@ async def _admin(message: Message):
                          "/stop - остановить программу\n"
                          "/critical_stop - экстренная остановка\n"
                          "/mailing - рассылка\n"
-                         "/login - Web App ввода кода")
+                         "/login - Web App ввода кода\n"
+                         "/payment - меню оплаты подписки")
 
 
 @dp.message(Command('reload'))
@@ -183,6 +185,13 @@ async def _login_code(message: Message, state: FSMContext):
                              f"Расшифровано: {unzip_int_data(message.web_app_data.data)}", reply_markup=KRemove())
     else:
         await message.answer("Отмена", reply_markup=KRemove())
+
+
+@dp.message(Command('payment'))
+@security()
+async def _payment(message: Message):
+    if await developer_command(message): return
+    await message.answer_photo(**await payment_menu(message.chat.id))
 
 
 def admin_initial():
