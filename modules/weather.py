@@ -58,7 +58,7 @@ def get_wind(wind: dict[str, Union[str, int]]) -> str:
         speed = "⚠️ <b>сильный шторм</b>"
     else:  # wind['speed'] > 30
         speed = "⚠️ <b>ураган</b>"
-    return f"{speed} {direction} 💨"
+    return f"{speed} {direction}"
 
 
 def get_status(statuses: list[dict[str, Union[str, int]]]) -> str:

@@ -54,6 +54,7 @@ from telethon.tl.types import (
     MessageMediaPhoto,
     MessageReplyHeader,
     ReactionCustomEmoji,
+    MessageMediaWebPage,
     MessageMediaDocument,
 
     MessageEntityUrl,
@@ -227,7 +228,7 @@ class Program:
 
     async def modules(self, message: Message) -> bool:
         text = message.text.lower()
-        if not (text and "\n" not in text and message.out and message.media is None):
+        if not (text and "\n" not in text and message.out and (message.media is None or isinstance(message.media, MessageMediaWebPage))):
             return False
 
         reply_message = await self.get_message_by_id(message.chat_id, message.reply_to.reply_to_msg_id) if \
@@ -254,7 +255,9 @@ class Program:
             if await db.fetch_one(f"SELECT qrcode FROM modules WHERE account_id={self.id}", one_data=True):
                 link = message.text[message.entities[0].offset:message.entities[0].length + message.entities[0].offset]
                 qr = create_qrcode(link)
-                await message.edit("@MaksogramBot в чате", file=qr)
+                await message.edit("🤖 @MaksogramBot в чате\nГенератор QR-кода из ссылки", file=qr,
+                                   formatting_entities=[MessageEntityCustomEmoji(0, 2, 5418001570597986649),
+                                                        MessageEntityTextUrl(45, 6, link), MessageEntityBold(45, 6)])
                 os.remove(qr)
                 return True
             else:
@@ -264,7 +267,13 @@ class Program:
         # Расшифровка голосовых сообщений
         elif any([command in text for command in ("расшифруй", "в текст", "расшифровать")]) and reply_message.voice:
             if await db.fetch_one(f"SELECT audio_transcription FROM modules WHERE account_id={self.id}", one_data=True):
-                await message.edit("@MaksogramBot в чате\nРасшифровка голосового сообщения...")
+                if self.is_premium():
+                    await message.edit("🤖 @MaksogramBot в чате\n🗣 Расшифровка голосового ✍️",
+                                       formatting_entities=[MessageEntityCustomEmoji(0, 2, 5418001570597986649),
+                                                            MessageEntityCustomEmoji(24, 2, 5787303083709041530),
+                                                            MessageEntityCustomEmoji(50, 2, 5787196143318339389)])
+                else:
+                    await message.edit("@MaksogramBot в чате\nРасшифровка голосового...")
                 buffer = BytesIO()
                 await self.client.download_media(reply_message.media, file=buffer)
                 answer = await audio_transcription(buffer.getvalue())
@@ -295,14 +304,20 @@ class Program:
         elif "кружок" in text and reply_message.video:
             if await db.fetch_one(f"SELECT round_video FROM modules WHERE account_id={self.id}", one_data=True):
                 if reply_message.video.attributes[0].duration >= 60:
-                    await message.edit("@MaksogramBot в чате\nВидео слишком длинное!")
+                    await message.edit("🤖 @MaksogramBot в чате\nВидео слишком длинное! ⚠️",
+                                       formatting_entities=[MessageEntityCustomEmoji(0, 2, 5418001570597986649),
+                                                            MessageEntityCustomEmoji(47, 2, 5364241851500997604)])
                 else:
-                    await message.edit("@MaksogramBot в чате\nКонвертация видео в кружок...")
+                    await message.edit("🤖 @MaksogramBot в чате\nКонвертация видео в кружок ⏰",
+                                       formatting_entities=[MessageEntityCustomEmoji(0, 2, 5418001570597986649),
+                                                            MessageEntityCustomEmoji(51, 1, 5371071931833393000)])
                     video_path = resources_path(f"round_video/{reply_message.video.id}.mp4")
                     await self.client.download_media(reply_message.media, file=video_path)
                     answer = round_video(video_path)
                     if answer.ok:
-                        await message.edit("@MaksogramBot в чате\nОтправка кружка...")
+                        await message.edit("🤖 @MaksogramBot в чате\nОтправка кружка ⏰",
+                                           formatting_entities=[MessageEntityCustomEmoji(0, 2, 5418001570597986649),
+                                                                MessageEntityCustomEmoji(40, 1, 5787399776307776752)])
                         await self.client.send_file(message.chat_id, file=answer.path, reply_to=reply_message.id, video_note=True)
                         await message.delete()
                         os.remove(answer.path)
@@ -338,8 +353,10 @@ class Program:
                     date = f"{remind_time.day} {months[remind_time.month-1]}"
                     if remind_time.year != time_now().year:
                         date += " следующего года"
-                await message.edit("@MaksogramBot в чате\nЯ напомню вам о событии "
-                                   f"{date} в {remind_time.hour:02d}:{remind_time.minute:02d}")
+                await message.edit("🤖 @MaksogramBot в чате\nНапоминание на "
+                                   f"{date} в {remind_time.hour:02d}:{remind_time.minute:02d} ⏰",
+                                   formatting_entities=[MessageEntityCustomEmoji(0, 2, 5418001570597986649),
+                                                        MessageEntityCustomEmoji(48+len(date), 1, 5274055917766202507)])
                 return True
             else:
                 await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться напоминалкой? Данная функция отключена у вас! "
@@ -719,7 +736,9 @@ class Program:
         while await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={self.id}", one_data=True):
             for remind in await db.fetch_all("SELECT chat_id, message_id, chat_name FROM reminds WHERE "
                                              f"account_id={self.id} AND (time - now()) < INTERVAL '10 seconds'"):
-                await self.client.send_message(remind['chat_id'], "@MaksogramBot напоминает о событии!", reply_to=remind['message_id'])
+                await self.client.send_message(remind['chat_id'], "🤖 @MaksogramBot в чате\nНапоминание о событии! ⏰", reply_to=remind['message_id'],
+                                               formatting_entities=[MessageEntityCustomEmoji(0, 2, 5418001570597986649),
+                                                                    MessageEntityCustomEmoji(47, 1, 5274055917766202507)])
                 await MaksogramBot.send_message(self.id, f"⏰ <b>Напоминалка</b>\nНапоминаю о вашем событии "
                                                          f"в чате с {remind['chat_name']}", parse_mode="HTML")
             await db.fetch_one(f"DELETE FROM reminds WHERE account_id={self.id} AND (time - now()) < INTERVAL '10 seconds'")
