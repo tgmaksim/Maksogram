@@ -42,7 +42,8 @@ def modules_menu() -> dict[str, Any]:
                                        IButton(text="🔗 Сканер QR", web_app=WebAppInfo(url=f"{Data.web_app}/main"))],
                                       [IButton(text="🗣 ГС в текст", callback_data="audio_transcription"),
                                        IButton(text="🔄 Видео в кружок", callback_data="round_video")],
-                                      [IButton(text="⏰ Напоминалка", callback_data="reminder")],
+                                      [IButton(text="⏰ Напоминалка", callback_data="reminder"),
+                                       IButton(text="🎲 Рандомайзер", callback_data="randomizer")],
                                       [IButton(text="◀️  Назад", callback_data="menu")]])
     return {"text": "💬 <b>Maksogram в чате</b>\nФункции, которые работают прямо из любого чата, не нужно вызывать меня",
             "reply_markup": markup, "parse_mode": html}
@@ -262,6 +263,38 @@ async def _reminder_switch(callback_query: CallbackQuery):
         case "off":
             await db.execute(f"UPDATE modules SET reminder=false WHERE account_id={callback_query.from_user.id}")  # Выключение напоминалки
     await callback_query.message.edit_text(**await reminder_menu(callback_query.message.chat.id))
+
+
+@dp.callback_query(F.data == "randomizer")
+@security()
+async def _randomizer(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    await callback_query.message.edit_text(**await randomizer_menu(callback_query.message.chat.id))
+
+
+async def randomizer_menu(account_id: int) -> dict[str, Any]:
+    if await db.fetch_one(f"SELECT randomizer FROM modules WHERE account_id={account_id}", one_data=True):  # Вкл/выкл напоминалки
+        status_button = IButton(text="🔴 Выключить рандомайзер", callback_data="randomizer_off")
+    else:
+        status_button = IButton(text="🟢 Включить рандомайзер", callback_data="randomizer_on")
+    markup = IMarkup(inline_keyboard=[[status_button],
+                                      [IButton(text="Как пользоваться рандомайзером?", url=f"{SITE}#рандомайзер")],
+                                      [IButton(text="◀️  Назад", callback_data="modules")]])
+    return {"text": "🎲 <b>Рандомайзер в чате</b>\n<blockquote>Выбери да или нет\nВыбери число от 0 до 10\n"
+                    "Выбери яблоко, банан или груша</blockquote>", "reply_markup": markup, "parse_mode": html}
+
+
+@dp.callback_query(F.data.in_(["randomizer_on", "randomizer_off"]))
+@security()
+async def _randomizer_switch(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    command = callback_query.data.split("_")[-1]
+    match command:
+        case "on":
+            await db.execute(f"UPDATE modules SET randomizer=true WHERE account_id={callback_query.from_user.id}")  # Включение рандомайзера
+        case "off":
+            await db.execute(f"UPDATE modules SET randomizer=false WHERE account_id={callback_query.from_user.id}")  # Выключение рандомайзера
+    await callback_query.message.edit_text(**await randomizer_menu(callback_query.message.chat.id))
 
 
 def modules_initial():

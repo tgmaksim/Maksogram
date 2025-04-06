@@ -9,8 +9,10 @@ from modules.audio_transcription import main as audio_transcription
 from modules.weather import main as weather
 from modules.round_video import main as round_video
 from modules.reminder import main as reminder
+from modules.randomizer import main as randomizer
 
 from io import BytesIO
+from html import escape
 from typing import Union
 from telethon.tl.patched import Message
 from datetime import timedelta, datetime
@@ -51,6 +53,7 @@ from telethon.tl.types import (
     PeerChat,
     PeerChannel,
     ReactionEmoji,
+    MessageMediaDice,
     UserStatusOnline,
     UserStatusOffline,
     MessageMediaPhoto,
@@ -361,6 +364,20 @@ class Program:
                 return True
             else:
                 await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться напоминалкой? Данная функция отключена у вас! "
+                                                         "Вы можете включить в настройках\n/menu_chat (Maksogram в чате)")
+
+        # Рандомайзер
+        elif choice := randomizer(text):
+            if await db.fetch_one(f"SELECT randomizer FROM modules WHERE account_id={self.id}", one_data=True):
+                await self.client.send_message(message.chat_id, file=MessageMediaDice(0, "🎲"))
+                await asyncio.sleep(3)
+                entity = (await self.client._parse_message_text(f"🤖 @MaksogramBot выбирает <b>{escape(choice)}</b>", "html"))[1][0]
+                await message.reply(f"🤖 @MaksogramBot выбирает {choice}",
+                                    formatting_entities=[MessageEntityCustomEmoji(0, 2, 5418001570597986649),
+                                                         MessageEntitySpoiler(entity.offset, entity.length)])
+                return True
+            else:
+                await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться рандомайзером? Данная функция отключена у вас! "
                                                          "Вы можете включить в настройках\n/menu_chat (Maksogram в чате)")
 
         return False
