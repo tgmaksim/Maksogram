@@ -589,11 +589,20 @@ class Program:
         time = await self.check_awake(event)
         gender = await db.fetch_one(f"SELECT gender FROM settings WHERE account_id={self.id}", one_data=True)
 
-        functions = await db.fetch_all(f"SELECT account_id, online, offline, awake, name FROM status_users WHERE user_id={self.id}")
+        functions = await db.fetch_all(f"SELECT account_id, name, online, offline, awake, statistics FROM status_users WHERE user_id={self.id}")
         for function in functions:
+            statistics = function['statistics']
             awake = status is True and function['awake']
             online = function['online'] and status is True
             offline = function['offline'] and status is False
+            if statistics:
+                if status is True:  # В сети - нужно добавить новую пару в данных в таблицу и удалить неполные пары
+                    await db.execute(f"DELETE FROM statistics_status_users "
+                                     f"WHERE account_id={function['account_id']} AND user_id={self.id} AND offline_time IS NULL;\n"
+                                     f"INSERT INTO statistics_status_users VALUES ({function['account_id']}, {self.id}, now(), NULL)")
+                else:  # Офлайн - закончить пару данных или пропустить
+                    await db.execute(f"UPDATE statistics_status_users SET offline_time=now() "
+                                     f"WHERE account_id={function['account_id']} AND user_id={self.id} AND offline_time IS NULL")
             if online or offline:
                 status_str = "в сети" if status else "вышел(а) из сети"
             elif awake and time:
@@ -651,10 +660,19 @@ class Program:
 
         self.status_users[event.chat_id] = status
 
-        function = await db.fetch_one(f"SELECT online, offline, awake FROM status_users WHERE account_id={self.id} AND user_id={event.chat_id}")
+        function = await db.fetch_one(f"SELECT online, offline, awake, statistics FROM status_users WHERE account_id={self.id} AND user_id={event.chat_id}")
+        statistics = function['statistics']
         awake = status is True and function['awake']
         online = function['online'] and status is True
         offline = function['offline'] and status is False
+        if statistics:
+            if status is True:  # В сети - нужно добавить новую пару в данных в таблицу и удалить неполные пары
+                await db.execute(f"DELETE FROM statistics_status_users "
+                                 f"WHERE account_id={self.id} AND user_id={event.chat_id} AND offline_time IS NULL;\n"
+                                 f"INSERT INTO statistics_status_users VALUES ({self.id}, {event.chat_id}, now(), NULL)")
+            else:  # Офлайн - закончить пару данных или пропустить
+                await db.execute(f"UPDATE statistics_status_users SET offline_time=now() "
+                                 f"WHERE account_id={self.id} AND user_id={event.chat_id} AND offline_time IS NULL")
         if status_str := not (online or offline or awake):
             return
         if online or offline:
