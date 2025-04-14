@@ -1,8 +1,6 @@
 import matplotlib.pyplot as plt
 
-from math import ceil
 from typing import Any
-from datetime import timedelta
 from asyncpg.exceptions import UniqueViolationError
 from core import (
     db,
@@ -12,6 +10,7 @@ from core import (
     time_now,
     www_path,
     WWW_SITE,
+    human_time,
     preview_options,
     telegram_clients,
 )
@@ -33,6 +32,31 @@ from .core import (
 )
 
 
+async def general_online_statistics(account_id: int, user_id: int, user: dict[str, str], period: str) -> str:
+    if period == "day":
+        all_time = 24 * 60 * 60  # Количество секунд в дне
+    elif period == "week":
+        all_time = 7 * 24 * 60 * 60  # Количество секунд в неделе
+    else:  # Месяц (28 дней)
+        all_time = 28 * 24 * 60 * 60  # Количество секунд в 28 днях
+    data = map(lambda x: list(x.values()),
+               await db.fetch_all(f"SELECT online_time, offline_time FROM statistics_status_users WHERE account_id={account_id} AND "
+                                  f"user_id={user_id} AND offline_time IS NOT NULL AND (now() - offline_time) < INTERVAL '{all_time} seconds'"))
+    online = sum(map(lambda x: abs((x[1] - x[0]).total_seconds()), data))
+    offline = all_time - online
+    labels = ["Онлайн", "Офлайн"]
+    fig, ax = plt.subplots(figsize=(10, 7))
+    wedges, texts, auto_texts = ax.pie([online, offline], labels=labels, colors=("#006e4a", "#60d4ae"), explode=(0.2, 0),
+                                       autopct=lambda pct: human_time(pct / 100 * all_time))
+    ax.legend(wedges, labels, title="Статистика онлайн", loc="center left", bbox_to_anchor=(0.8, -0.3, 0.5, 1), fontsize=20)
+    plt.setp(auto_texts, size=20, weight="bold")
+    plt.setp(texts, size=20)
+    ax.set_title(f"Статистика онлайн для {user['name']}", fontsize=25, fontweight="bold")
+    path = f"statistics_status_users/{account_id}.{user_id}.png"
+    plt.savefig(www_path(path))
+    return path
+
+
 @dp.callback_query(F.data == "status_users")
 @security()
 async def _status_users(callback_query: CallbackQuery):
@@ -42,13 +66,21 @@ async def _status_users(callback_query: CallbackQuery):
 
 async def status_users_menu(account_id: int) -> dict[str, Any]:
     buttons = []
-    users = await db.fetch_all(f"SELECT user_id, name FROM status_users WHERE account_id={account_id}")  # Список друзей в сети
-    for user in users:
-        buttons.append([IButton(text=f"🌐 {user['name']}", callback_data=f"status_user_menu{user['user_id']}")])
+    users = sorted(await db.fetch_all(f"SELECT user_id, name FROM status_users WHERE account_id={account_id}"),
+                   key=lambda x: len(x['name']))  # Список друзей в сети, отсортированных по возрастанию длины имени
+    i = 0
+    while i < len(users):
+        if i+1 < len(users) and all(map(lambda x: len(x['name']) <= 15, users[i:i+1])):
+            buttons.append([IButton(text=f"🌐 {users[i]['name']}", callback_data=f"status_user_menu{users[i]['user_id']}"),
+                            IButton(text=f"🌐 {users[i+1]['name']}", callback_data=f"status_user_menu{users[i+1]['user_id']}")])
+            i += 1
+        else:
+            buttons.append([IButton(text=f"🌐 {users[i]['name']}", callback_data=f"status_user_menu{users[i]['user_id']}")])
+        i += 1
     buttons.append([IButton(text="➕ Добавить нового пользователя", callback_data="new_status_user")])
     buttons.append([IButton(text="◀️  Назад", callback_data="menu")])
-    return {"text": "🌐 <b>Друг в сети</b>\nЯ уведомлю вас, если пользователь будет онлайн/офлайн. Вы также можете "
-                    "посмотреть статистику онлайн\nНе работает, если собеседник скрыл время последнего захода...",
+    return {"text": "🌐 <b>Друг в сети</b>\nУведомления о входе/выходе из сети, прочтения сообщения, а также статистика онлайн\n"
+                    "<blockquote>⛔️ Не работает, если собеседник скрыл время последнего захода...</blockquote>",
             "reply_markup": IMarkup(inline_keyboard=buttons), "parse_mode": html}
 
 
@@ -85,7 +117,7 @@ async def status_user_menu(account_id: int, user_id: int) -> dict[str, Any]:
         [IButton(text="🚫 Удалить пользователя", callback_data=f"status_user_del{user_id}")],
         [IButton(text="◀️  Назад", callback_data="status_users")]])
     return {"text": f"🌐 <b>Друг в сети</b>\nКогда <b>{user['name']}</b> будет онлайн/оффлайн, проснется или прочитает сообщение, "
-                    "я сообщу. Также можно получить статистику онлайн за день", "parse_mode": html, "reply_markup": markup}
+                    "придет уведомление. В разделе статистика данные об онлайн за день, неделю и месяц", "parse_mode": html, "reply_markup": markup}
 
 
 @dp.callback_query(F.data.startswith("status_user_online_on").__or__(F.data.startswith("status_user_online_off")).__or__(
@@ -129,36 +161,16 @@ async def status_user_statistics_menu(account_id: int, user_id: int) -> dict[str
     if user is None:
         return await status_users_menu(account_id)
     if user['statistics']:  # Сбор статистики включен
-        markup = IMarkup(inline_keyboard=[[IButton(text="🔴 Выключить", callback_data=f"status_user_statistics_off_{user_id}"),
-                                           IButton(text="📊 Посмотреть", callback_data=f"status_user_statistics_watch_menu{user_id}")],
+        markup = IMarkup(inline_keyboard=[[IButton(text="🔴 Выключить сбор статистики", callback_data=f"status_user_statistics_off_{user_id}")],
+                                          [IButton(text="📊 День", callback_data=f"status_user_statistics_watch_day_{user_id}"),
+                                           IButton(text="📊 Неделя", callback_data=f"status_user_statistics_watch_week_{user_id}"),
+                                           IButton(text="📊 Месяц", callback_data=f"status_user_statistics_watch_month_{user_id}")],
                                           [IButton(text="◀️  Назад", callback_data=f"status_user_menu{user_id}")]])
     else:  # Сбор статистики выключен
         markup = IMarkup(inline_keyboard=[[IButton(text="🟢 Включить сбор статистики", callback_data=f"status_user_statistics_on_{user_id}")],
                                            [IButton(text="◀️  Назад", callback_data=f"status_user_menu{user_id}")]])
     return {"text": "🌐 <b>Статистика друга в сети</b>\nЗдесь вы можете вкл/выкл сбор статистики и посмотреть ее "
-                    "в виде наглядных графиков и диаграмм", "parse_mode": html, "reply_markup": markup}
-
-
-@dp.callback_query(F.data.startswith("status_user_statistics_watch_menu"))
-@security()
-async def _status_user_statistics_watch_menu(callback_query: CallbackQuery):
-    if await new_callback_query(callback_query): return
-    account_id = callback_query.from_user.id
-    user_id = int(callback_query.data.replace("status_user_statistics_watch_menu", ""))
-    await callback_query.message.edit_text(**await status_user_statistics_watch_menu(account_id, user_id))
-
-
-async def status_user_statistics_watch_menu(account_id: int, user_id: int) -> dict[str, Any]:
-    user = await db.fetch_one(f"SELECT statistics, name FROM status_users WHERE account_id={account_id} AND user_id={user_id}")
-    if user is None:
-        return await status_users_menu(account_id)
-    if user['statistics'] is False:
-        return await status_user_statistics_menu(account_id, user_id)
-    markup = IMarkup(inline_keyboard=[[IButton(text="День", callback_data=f"status_user_statistics_watch_day_{user_id}"),
-                                       IButton(text="Неделя", callback_data=f"status_user_statistics_watch_week_{user_id}")],
-                                      [IButton(text="◀️  Назад", callback_data=f"status_user_statistics_menu{user_id}")]])
-    return {"text": f"🌐 <b>Статистика онлайн</b>\nЗа какой период показать статистику онлайн у <b>{user['name']}</b>",
-            "parse_mode": html, "reply_markup": markup}
+                    "в виде наглядных графиков и диаграмм за день, неделю или месяц", "parse_mode": html, "reply_markup": markup}
 
 
 @dp.callback_query(F.data.startswith("status_user_statistics_watch_"))
@@ -172,36 +184,11 @@ async def _status_user_statistics_watch_period(callback_query: CallbackQuery):
         return await status_users_menu(account_id)
     if user['statistics'] is False:
         return await status_user_statistics_menu(account_id, user_id)
-    time_zone: int = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={account_id}", one_data=True)
-    time = time_now() + timedelta(hours=time_zone)
-    if period == "day":
-        all_time = 24*3600  # Количество секунд в дне
-        data = map(lambda x: list(x.values()),
-                   await db.fetch_all(f"SELECT online_time, offline_time FROM statistics_status_users WHERE account_id={account_id} "
-                                      f"AND user_id={user_id} AND offline_time IS NOT NULL AND (now() - offline_time) < INTERVAL '1 day'"))
-    else:
-        all_time = 7*24*60*60  # Количество секунд в неделе
-        data = map(lambda x: list(x.values()),
-                   await db.fetch_all(f"SELECT online_time, offline_time FROM statistics_status_users WHERE account_id={account_id} "
-                                      f"AND user_id={user_id} AND offline_time IS NOT NULL AND (now() - offline_time) < INTERVAL '7 days'"))
-    online = sum(map(lambda x: abs((x[1] - x[0]).total_seconds()), data))
-    offline = all_time - online
-    labels = ["Онлайн", "Офлайн"]
-    fig, ax = plt.subplots(figsize=(10, 7))
-    wedges, texts, auto_texts = ax.pie([online, offline], labels=labels, colors=("#006e4a", "#60d4ae"), explode=(0.2, 0),
-                                        autopct=lambda pct: f"{int(pct/100*all_time / 3600)}ч {ceil(pct/100*all_time % 3600 / 60)}мин")
-    ax.legend(wedges, labels, title="Статистика онлайн", loc="center left", bbox_to_anchor=(0.8, -0.3, 0.5, 1), fontsize=20)
-    plt.setp(auto_texts, size=20, weight="bold")
-    plt.setp(texts, size=20)
-    ax.set_title(f"Статистика онлайн для {user['name']}", fontsize=25, fontweight="bold")
-    path = f"statistics_status_users/{account_id}.{user_id}.png"
-    plt.savefig(www_path(path))
+    path = await general_online_statistics(account_id, user_id, user, period)  # Создание круговой диаграммы
     await callback_query.message.edit_text(
-        f"Статистика онлайн за {'день' if period == 'day' else 'неделю'}",
-        link_preview_options=preview_options(f"{path}?time={time.timestamp()}", WWW_SITE, show_above_text=True),
-        reply_markup=IMarkup(inline_keyboard=[[IButton(text="День", callback_data=f"status_user_statistics_watch_day_{user_id}"),
-                                               IButton(text="Неделя", callback_data=f"status_user_statistics_watch_week_{user_id}")],
-                                              [IButton(text="◀️  Назад", callback_data=f"status_user_statistics_menu{user_id}")]]))
+        f"🌐 <b>Статистика для {user['name']}</b>", parse_mode=html,
+        link_preview_options=preview_options(f"{path}?time={time_now().timestamp()}", WWW_SITE, show_above_text=True),
+        reply_markup=(await status_user_statistics_menu(account_id, user_id))['reply_markup'])
 
 
 @dp.callback_query(F.data == "new_status_user")

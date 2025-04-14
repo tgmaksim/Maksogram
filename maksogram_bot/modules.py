@@ -45,7 +45,7 @@ def modules_menu() -> dict[str, Any]:
                                       [IButton(text="⏰ Напоминалка", callback_data="reminder"),
                                        IButton(text="🎲 Рандомайзер", callback_data="randomizer")],
                                       [IButton(text="◀️  Назад", callback_data="menu")]])
-    return {"text": "💬 <b>Maksogram в чате</b>\nФункции, которые работают прямо из любого чата, не нужно вызывать меня",
+    return {"text": "💬 <b>Maksogram в чате</b>\nФункции, которые работают прямо из любого чата, не нужно писать мне",
             "reply_markup": markup, "parse_mode": html}
 
 
@@ -58,14 +58,14 @@ async def _calculator(callback_query: CallbackQuery):
 
 async def calculator_menu(account_id: int) -> dict[str, Any]:
     if await db.fetch_one(f"SELECT calculator FROM modules WHERE account_id={account_id}", one_data=True):  # Вкл/выкл калькулятор
-        status_button = IButton(text="🔴 Выключить калькулятор", callback_data="calculator_off")
+        status_button = IButton(text="🔴 Выключить Калькулятор", callback_data="calculator_off")
     else:
-        status_button = IButton(text="🟢 Включить калькулятор", callback_data="calculator_on")
+        status_button = IButton(text="🟢 Включить Калькулятор", callback_data="calculator_on")
     markup = IMarkup(inline_keyboard=[[status_button],
-                                      [IButton(text="Как работает калькулятор?", url=f"{SITE}#калькулятор")],
+                                      [IButton(text="Как работает Калькулятор?", url=f"{SITE}#калькулятор")],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
     return {"text": "🔢 <b>Калькулятор в чате</b>\nРешает примеры разных уровней сложности от обычного умножения до "
-                    "длинных примеров. Для срабатывания укажите в конце \"=\"\n<blockquote>10+5*15=</blockquote>",
+                    "длинных примеров\n<b>Для вызова укажите в конце \"=\"</b>\n<blockquote>10+5*15=</blockquote>",
             "reply_markup": markup, "parse_mode": html}
 
 
@@ -91,14 +91,14 @@ async def _qrcode(callback_query: CallbackQuery):
 
 async def qrcode_menu(account_id: int) -> dict[str, Any]:
     if await db.fetch_one(f"SELECT qrcode FROM modules WHERE account_id={account_id}", one_data=True):  # Вкл/выкл генератор QR
-        status_button = IButton(text="🔴 Выключить генератор", callback_data="qrcode_off")
+        status_button = IButton(text="🔴 Выключить Генератор", callback_data="qrcode_off")
     else:
-        status_button = IButton(text="🟢 Включить генератор", callback_data="qrcode_on")
+        status_button = IButton(text="🟢 Включить Генератор", callback_data="qrcode_on")
     markup = IMarkup(inline_keyboard=[[status_button],
-                                      [IButton(text="Как работает генератор?", url=f"{SITE}#генератор-qr")],
+                                      [IButton(text="Как работает Генератор QR?", url=f"{SITE}#генератор-qr")],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
-    return {"text": "🔗 <b>Генератор QR-кодов</b>\nГенерирует QR-код с нужной ссылкой. "
-                    f"Триггеры: создай, создать, qr, сгенерировать\n<blockquote>Создай t.me/{channel}</blockquote>",
+    return {"text": f"🔗 <b>Генератор QR-кода</b>\nГенерирует обычный QR-код с нужной ссылкой в чате\n<blockquote>Создай t.me/{channel}\n"
+                    f"Создать t.me/{channel}\nСгенерировать t.me/{channel}\nСгенерируй t.me/{channel}\nQR t.me/{channel}</blockquote>",
             "reply_markup": markup, "parse_mode": html, "disable_web_page_preview": True}
 
 
@@ -124,14 +124,14 @@ async def _audio_transcription(callback_query: CallbackQuery):
 
 async def audio_transcription_menu(account_id: int) -> dict[str, Any]:
     if await db.fetch_one(f"SELECT audio_transcription FROM modules WHERE account_id={account_id}", one_data=True):  # Вкл/выкл расшифровка гс
-        status_button = IButton(text="🔴 Выключить расшифровку", callback_data="audio_transcription_off")
+        status_button = IButton(text="🔴 Выключить Расшифровку", callback_data="audio_transcription_off")
     else:
-        status_button = IButton(text="🟢 Включить расшифровку", callback_data="audio_transcription_on")
+        status_button = IButton(text="🟢 Включить Расшифровку", callback_data="audio_transcription_on")
     markup = IMarkup(inline_keyboard=[[status_button],
-                                      [IButton(text="Как пользоваться расшифровкой гс?", url=f"{SITE}#расшифровка-гс")],
+                                      [IButton(text="Как расшифровать ГС?", url=f"{SITE}#расшифровка-гс")],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
-    return {"text": "🗣 <b>Расшифровка ГС</b>\nНе хотите слушать голосовое? Расшифруйте его в текст. Триггеры: расшифруй, в текст",
-            "reply_markup": markup, "parse_mode": html}
+    return {"text": "🗣 <b>Расшифровка голосовых</b>\nНе хотите слушать голосовое? Расшифруйте его в текст\n"
+                    "<blockquote>Расшифруй, расшифровать, в текст</blockquote>", "reply_markup": markup, "parse_mode": html}
 
 
 @dp.callback_query(F.data.in_(["audio_transcription_on", "audio_transcription_off"]))
@@ -156,20 +156,20 @@ async def _weather(callback_query: CallbackQuery):
 
 async def weather_menu(account_id: int) -> dict[str, Any]:
     if await db.fetch_one(f"SELECT weather FROM modules WHERE account_id={account_id}", one_data=True):  # Вкл/выкл погода
-        status_button_weather = IButton(text="🔴 Выключить погоду", callback_data="weather_off")
+        status_button_weather = IButton(text="🔴 Выключить Погоду", callback_data="weather_off")
     else:
-        status_button_weather = IButton(text="🟢 Включить погоду", callback_data="weather_on")
+        status_button_weather = IButton(text="🟢 Включить Погоду", callback_data="weather_on")
     if await db.fetch_one(f"SELECT morning_weather FROM modules WHERE account_id={account_id}", one_data=True):  # Вкл/выкл погода по утрам
-        status_button_morning_weather = IButton(text="🔴 Выключить утреннюю погоду", callback_data="morning_weather_off")
+        status_button_morning_weather = IButton(text="🔴 Выключить утреннюю Погоду", callback_data="morning_weather_off")
     else:
-        status_button_morning_weather = IButton(text="🟢 Включить утреннюю погоду", callback_data="morning_weather_on")
+        status_button_morning_weather = IButton(text="🟢 Включить утреннюю Погоду", callback_data="morning_weather_on")
     markup = IMarkup(inline_keyboard=[[status_button_weather],
                                       [status_button_morning_weather],
-                                      [IButton(text="Как пользоваться погодой?", url=f"{SITE}#погода")],
+                                      [IButton(text="Как получить прогноз?", url=f"{SITE}#погода")],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
-    return {"text": "🌤 <b>Погода</b>\nЛегко получайте погоду за окном, не выходя из Telegram. Триггеры: какая погода\n"
-                    f"Погода по утрам присылается, когда вы первый раз зашли в Telegram с {morning[0]}:00 до {morning[1]}:00",
-            "reply_markup": markup, "parse_mode": html}
+    return {"text": "🌤 <b>Погода</b>\nЛегко получайте погоду за окном, не выходя из Telegram командой 👇\n<blockquote>"
+                    "Какая погода</blockquote>\n<blockquote>❗️ Погода по утрам присылается, когда вы первый раз зашли в Telegram "
+                    f"с {morning[0]}:00 до {morning[1]}:00</blockquote>", "reply_markup": markup, "parse_mode": html}
 
 
 @dp.callback_query(F.data.in_(["weather_on", "weather_off"]))
@@ -208,14 +208,14 @@ async def _round_video(callback_query: CallbackQuery):
 
 async def round_video_menu(account_id: int) -> dict[str, Any]:
     if await db.fetch_one(f"SELECT round_video FROM modules WHERE account_id={account_id}", one_data=True):  # Вкл/выкл конвертер видео
-        status_button = IButton(text="🔴 Выключить конвертер", callback_data="round_video_off")
+        status_button = IButton(text="🔴 Выключить Конвертер", callback_data="round_video_off")
     else:
-        status_button = IButton(text="🟢 Включить конвертер", callback_data="round_video_on")
+        status_button = IButton(text="🟢 Включить Конвертер", callback_data="round_video_on")
     markup = IMarkup(inline_keyboard=[[status_button],
-                                      [IButton(text="Как пользоваться конвертером?", url=f"{SITE}#видео-в-кружок")],
+                                      [IButton(text="Как создать кружок?", url=f"{SITE}#видео-в-кружок")],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
-    return {"text": "🔄 <b>Конвертер видео в кружок</b>\nПонадобилось сделать из обычного видео кружок? Сделай это через Maksogram. "
-                    "Триггеры: в кружок", "reply_markup": markup, "parse_mode": html}
+    return {"text": "🔄 <b>Конвертер видео в кружок</b>\nПонадобилось сделать из обычного видео кружок? Сделай это командой\n"
+                    "<blockquote>Кружок</blockquote>", "reply_markup": markup, "parse_mode": html}
 
 
 @dp.callback_query(F.data.in_(["round_video_on", "round_video_off"]))
@@ -240,11 +240,11 @@ async def _reminder(callback_query: CallbackQuery):
 
 async def reminder_menu(account_id: int) -> dict[str, Any]:
     if await db.fetch_one(f"SELECT reminder FROM modules WHERE account_id={account_id}", one_data=True):  # Вкл/выкл напоминалки
-        status_button = IButton(text="🔴 Выключить напоминалку", callback_data="reminder_off")
+        status_button = IButton(text="🔴 Выключить Напоминалку", callback_data="reminder_off")
     else:
-        status_button = IButton(text="🟢 Включить напоминалку", callback_data="reminder_on")
+        status_button = IButton(text="🟢 Включить Напоминалку", callback_data="reminder_on")
     markup = IMarkup(inline_keyboard=[[status_button],
-                                      [IButton(text="Как пользоваться напоминалкой?", url=f"{SITE}#напоминалка")],
+                                      [IButton(text="Как пользоваться Напоминалкой?", url=f"{SITE}#напоминалка")],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
     return {"text": "⏰ <b>Напоминалка в чате</b>\nДля создания напоминания <b>нужно ответить</b> на любое сообщение в чате командой\n"
                     "<blockquote expandable><b>Примеры</b>:\nНапомни через 5 минут\nНапомни через 5 часов\nНапомни через "
@@ -274,11 +274,11 @@ async def _randomizer(callback_query: CallbackQuery):
 
 async def randomizer_menu(account_id: int) -> dict[str, Any]:
     if await db.fetch_one(f"SELECT randomizer FROM modules WHERE account_id={account_id}", one_data=True):  # Вкл/выкл напоминалки
-        status_button = IButton(text="🔴 Выключить рандомайзер", callback_data="randomizer_off")
+        status_button = IButton(text="🔴 Выключить Рандомайзер", callback_data="randomizer_off")
     else:
-        status_button = IButton(text="🟢 Включить рандомайзер", callback_data="randomizer_on")
+        status_button = IButton(text="🟢 Включить Рандомайзер", callback_data="randomizer_on")
     markup = IMarkup(inline_keyboard=[[status_button],
-                                      [IButton(text="Как пользоваться рандомайзером?", url=f"{SITE}#рандомайзер")],
+                                      [IButton(text="Как пользоваться Рандомайзером?", url=f"{SITE}#рандомайзер")],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
     return {"text": "🎲 <b>Рандомайзер в чате</b>\n<blockquote>Выбери да или нет\nВыбери число от 0 до 10\n"
                     "Выбери яблоко, банан или груша</blockquote>", "reply_markup": markup, "parse_mode": html}

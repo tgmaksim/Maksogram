@@ -22,6 +22,7 @@ import sys_keys
 import traceback
 import aiosmtplib
 
+from math import ceil
 from aiogram import Bot
 from typing import Union, Any
 from database import Database
@@ -236,6 +237,15 @@ def human_bytes(size: int):
         return '{0:.2f} ГБ'.format(b / Gb)
 
 
+def human_time(seconds: int) -> str:
+    days = f"{int(seconds / 86400)}д" if int(seconds / 86400) > 1 else None
+    hours = f"{int(seconds % 86400 / 3600)}ч"
+    minutes = f"{ceil(seconds % 3600 / 60)}мин"
+    if days:
+        return f"{days} {hours} {minutes}"
+    return f"{hours} {minutes}"
+
+
 def time_now() -> datetime:
     return datetime.utcnow()
 
@@ -287,7 +297,7 @@ async def send_email_message(to: str, subject: str, text: str, *, subtype: str =
 
 class Variables:
     version = "2.6"
-    version_string = "2.7.0 (59)"
+    version_string = "2.7.0 (60)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])
