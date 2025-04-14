@@ -175,17 +175,15 @@ async def _status_user_statistics_watch_period(callback_query: CallbackQuery):
     time_zone: int = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={account_id}", one_data=True)
     time = time_now() + timedelta(hours=time_zone)
     if period == "day":
-        all_time = time.hour*3600 + time.minute*60 + time.second  # Количество секунд, прошедших с полуночи
-        data = list(map(lambda x: list(x.values()),
-                        await db.fetch_all("SELECT online_time, offline_time FROM statistics_status_users "
-                                           f"WHERE account_id={account_id} AND user_id={user_id} "
-                                           f"AND offline_time IS NOT NULL AND (now() - offline_time) < INTERVAL '{all_time} seconds'")))
-    else:
-        all_time = time.weekday()*24*3600 + time.hour*3600 + time.minute*60 + time.second  # Количество секунд, прошедших с полуночи прошлого понедельника
+        all_time = 24*3600  # Количество секунд в дне
         data = map(lambda x: list(x.values()),
-                   await db.fetch_all(f"SELECT online_time, offline_time FROM statistics_status_users "
-                                      f"WHERE account_id={account_id} AND user_id={user_id} "
-                                      f"AND offline_time IS NOT NULL AND (now() - offline_time) < INTERVAL '{all_time} days'"))
+                   await db.fetch_all(f"SELECT online_time, offline_time FROM statistics_status_users WHERE account_id={account_id} "
+                                      f"AND user_id={user_id} AND offline_time IS NOT NULL AND (now() - offline_time) < INTERVAL '1 day'"))
+    else:
+        all_time = 7*24*60*60  # Количество секунд в неделе
+        data = map(lambda x: list(x.values()),
+                   await db.fetch_all(f"SELECT online_time, offline_time FROM statistics_status_users WHERE account_id={account_id} "
+                                      f"AND user_id={user_id} AND offline_time IS NOT NULL AND (now() - offline_time) < INTERVAL '7 days'"))
     online = sum(map(lambda x: abs((x[1] - x[0]).total_seconds()), data))
     offline = all_time - online
     labels = ["Онлайн", "Офлайн"]

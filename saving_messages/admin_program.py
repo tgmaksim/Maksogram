@@ -269,7 +269,7 @@ class Program:
                                                          "Вы можете включить в настройках\n/menu_chat (Maksogram в чате)")
 
         # Расшифровка голосовых сообщений
-        elif any([command in text for command in ("расшифруй", "в текст", "расшифровать")]) and reply_message.voice:
+        elif reply_message and reply_message.voice and any([command in text for command in ("расшифруй", "в текст", "расшифровать")]):
             if await db.fetch_one(f"SELECT audio_transcription FROM modules WHERE account_id={self.id}", one_data=True):
                 if self.is_premium():
                     await message.edit("🤖 @MaksogramBot в чате\n🗣 Расшифровка голосового ✍️",
@@ -305,7 +305,7 @@ class Program:
                                                          "Вы можете включить ее в настройках\n/menu_chat (Maksogram в чате)")
 
         # Конвертер видео в кружок
-        elif "кружок" in text and reply_message.video:
+        elif reply_message and reply_message.video and "кружок" in text:
             if await db.fetch_one(f"SELECT round_video FROM modules WHERE account_id={self.id}", one_data=True):
                 if reply_message.video.attributes[0].duration >= 60:
                     await message.edit("🤖 @MaksogramBot в чате\nВидео слишком длинное! ⚠️",

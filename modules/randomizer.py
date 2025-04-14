@@ -5,9 +5,9 @@ from typing import Optional
 
 
 def main(text: str) -> Optional[str]:
-    match_yes_no = re.fullmatch(r'да *или *нет', text)
-    match_randint = re.fullmatch(r'выбери *число *о?т? *(\d+) *д?о? *(\d+)', text)
-    match_choice = re.fullmatch(r'(выбери *)((?:[^,]+, *)*[^,]+ *(?:или|,) *[^,]+)', text)
+    match_yes_no = re.fullmatch(r'да +или +нет', text)
+    match_randint = re.fullmatch(r'выбери +число(?: +от)? *(\d+)(?: *до| +) *(\d+)', text)
+    match_choice = re.fullmatch(r'(выбери +)((?:[^,]+, *)*[^,]+ *(?:или|,) *[^,]+)', text)
     if match_yes_no:
         return "да" if random.random() >= 0.5 else "нет"
     if match_randint:

@@ -287,7 +287,7 @@ async def send_email_message(to: str, subject: str, text: str, *, subtype: str =
 
 class Variables:
     version = "2.6"
-    version_string = "2.7.0 (58)"
+    version_string = "2.7.0 (59)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])
@@ -306,14 +306,14 @@ class MaksogramBot:
     IButton = InlineKeyboardButton
 
     @staticmethod
-    async def send_message(chat_id: int, message: str, photo=None, video=None, **kwargs):
+    async def send_message(chat_id: int, message: str, photo=None, video=None, timeout: int = 10, **kwargs):
         if photo:
             photo = FSInputFile(photo)
-            return await MaksogramBot.bot.send_photo(chat_id, photo=photo, caption=message, **kwargs)
+            return await MaksogramBot.bot.send_photo(chat_id, photo=photo, caption=message, request_timeout=2*timeout, **kwargs)
         if video:
             video = FSInputFile(video)
-            return await MaksogramBot.bot.send_video(chat_id, video=video, caption=message, **kwargs)
-        return await MaksogramBot.bot.send_message(chat_id, str(message), **kwargs)
+            return await MaksogramBot.bot.send_video(chat_id, video=video, caption=message, request_timeout=2*timeout, **kwargs)
+        return await MaksogramBot.bot.send_message(chat_id, str(message), request_timeout=timeout, **kwargs)
 
     @staticmethod
     async def send_system_message(message: str, **kwargs):
