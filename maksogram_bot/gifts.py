@@ -35,9 +35,16 @@ async def _gifts(callback_query: CallbackQuery):
 
 async def gifts_menu(account_id: int) -> dict[str, Any]:
     buttons = []
-    users = await db.fetch_all(f"SELECT user_id, name FROM gifts WHERE account_id={account_id}")
-    for user in users:
-        buttons.append([IButton(text=f"🎁 {user['name']}", callback_data=f"gift_menu{user['user_id']}")])
+    users = sorted(await db.fetch_all(f"SELECT user_id, name FROM gifts WHERE account_id={account_id}"), key=lambda x: len(x['name']))
+    i = 0
+    while i < len(users):
+        if i + 1 < len(users) and all(map(lambda x: len(x['name']) <= 15, users[i:i+1])):
+            buttons.append([IButton(text=f"🎁 {users[i]['name']}", callback_data=f"gift_menu{users[i]['user_id']}"),
+                            IButton(text=f"🎁 {users[i+1]['name']}", callback_data=f"gift_menu{users[i+1]['user_id']}")])
+            i += 1
+        else:
+            buttons.append([IButton(text=f"🎁 {users[i]['name']}", callback_data=f"gift_menu{users[i]['user_id']}")])
+        i += 1
     buttons.append([IButton(text="➕ Добавить пользователя", callback_data="new_gift")])
     buttons.append([IButton(text="◀️  Назад", callback_data="menu")])
     return {"text": "🎁 <b>Новый подарок</b>\nКогда кто-то из выбранных пользователей получит или скроет подарок, я сообщу вам",

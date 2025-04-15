@@ -1,6 +1,9 @@
+import math
 import matplotlib.pyplot as plt
 
 from typing import Any
+from calendar import monthrange
+from datetime import datetime, timedelta
 from asyncpg.exceptions import UniqueViolationError
 from core import (
     db,
@@ -32,28 +35,121 @@ from .core import (
 )
 
 
-async def general_online_statistics(account_id: int, user_id: int, user: dict[str, str], period: str) -> str:
+def difference_periods(periods: list[list[datetime, datetime]], period: str, time_zone: int) -> list[int]:
+    if period == "day":
+        now = (time_now() + timedelta(hours=time_zone)).replace(minute=0, second=0, microsecond=0)
+    else:
+        now = (time_now() + timedelta(hours=time_zone)).replace(hour=0, minute=0, second=0, microsecond=0)
+    if period == "day":
+        bin_size = 3600  # 1 час в секундах
+        max_bins = 24
+    elif period == "week":
+        bin_size = 86400  # 1 день в секундах
+        max_bins = 7
+    else:  # month
+        bin_size = 86400  # 1 день в секундах
+        max_bins = 28
+    bins = [0] * max_bins
+
+    for start, end in periods:
+        if start > end or end > now:
+            continue
+
+        # Получаем временные разницы относительно now
+        start_delta = now - start
+        end_delta = now - end
+
+        # Индексы временных интервалов
+        start_bin = math.floor(start_delta.total_seconds() / bin_size)
+        end_bin = math.floor(end_delta.total_seconds() / bin_size)
+
+        # Если период в одном интервале
+        if start_bin == end_bin:
+            seconds = (end - start).total_seconds()
+            if start_bin < max_bins:
+                bins[start_bin] += seconds
+            continue
+
+        # Обрабатываем первый частичный интервал
+        if period == "day":
+            bin_end = start.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        else:
+            bin_end = start.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        if bin_end > start:
+            seconds = (bin_end - start).total_seconds()
+            if start_bin < max_bins:
+                bins[start_bin] += seconds
+
+        # Обрабатываем последний частичный интервал
+        if period == "day":
+            bin_start = end.replace(minute=0, second=0, microsecond=0)
+        else:
+            bin_start = end.replace(hour=0, minute=0, second=0, microsecond=0)
+        if bin_start < end:
+            seconds = (end - bin_start).total_seconds()
+            if end_bin < max_bins:
+                bins[end_bin] += seconds
+
+        # Обрабатываем полные интервалы между началом и концом
+        for bin_idx in range(end_bin + 1, start_bin):
+            if bin_idx < max_bins:
+                bins[bin_idx] += bin_size
+
+    return list(reversed(bins))
+
+
+async def get_data_by_period(account_id: int, user_id: int, period: str, time_zone: int) -> tuple[int, int, list[int]]:
     if period == "day":
         all_time = 24 * 60 * 60  # Количество секунд в дне
     elif period == "week":
         all_time = 7 * 24 * 60 * 60  # Количество секунд в неделе
     else:  # Месяц (28 дней)
         all_time = 28 * 24 * 60 * 60  # Количество секунд в 28 днях
-    data = map(lambda x: list(x.values()),
-               await db.fetch_all(f"SELECT online_time, offline_time FROM statistics_status_users WHERE account_id={account_id} AND "
-                                  f"user_id={user_id} AND offline_time IS NOT NULL AND (now() - offline_time) < INTERVAL '{all_time} seconds'"))
-    online = sum(map(lambda x: abs((x[1] - x[0]).total_seconds()), data))
+    data = list(map(lambda x: (x['online_time'] + timedelta(hours=time_zone), x['offline_time'] + timedelta(hours=time_zone)),
+                    await db.fetch_all(f"SELECT online_time, offline_time FROM statistics_status_users WHERE account_id={account_id} "
+                                       f"AND user_id={user_id} AND offline_time IS NOT NULL "
+                                       f"AND (now() - offline_time) < INTERVAL '{all_time} seconds' ORDER BY online_time")))
+    summa = sum(map(lambda x: abs((x[1] - x[0]).total_seconds()), data))  # Общее время в секундах и время онлайн
+    return all_time, summa, difference_periods(data, period, time_zone)  # Общее время в секундах, время онлайн и список онлайн по группам
+
+
+async def online_statistics(account_id: int, user_id: int, user: dict[str, str], period: str) -> str:
+    coefficient = {"day": 24, "week": 7, "month": 28}[period]
+    time_zone: int = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={account_id}", one_data=True)
+    now = time_now() + timedelta(hours=time_zone)
+    all_time, online, periods_online = await get_data_by_period(account_id, user_id, period, time_zone)
     offline = all_time - online
     labels = ["Онлайн", "Офлайн"]
-    fig, ax = plt.subplots(figsize=(10, 7))
-    wedges, texts, auto_texts = ax.pie([online, offline], labels=labels, colors=("#006e4a", "#60d4ae"), explode=(0.2, 0),
-                                       autopct=lambda pct: human_time(pct / 100 * all_time))
-    ax.legend(wedges, labels, title="Статистика онлайн", loc="center left", bbox_to_anchor=(0.8, -0.3, 0.5, 1), fontsize=20)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 7))
+
+    wedges, texts, auto_texts = ax1.pie([online, offline], labels=labels, colors=("#006e4a", "#60d4ae"), explode=(0.2, 0),
+                                        autopct=lambda pct: human_time(pct / 100 * all_time))
+    ax1.legend(wedges, labels, title="Статистика онлайн", loc="center left", bbox_to_anchor=(0.8, -0.4, 0.5, 1), fontsize=20)
     plt.setp(auto_texts, size=20, weight="bold")
     plt.setp(texts, size=20)
-    ax.set_title(f"Статистика онлайн для {user['name']}", fontsize=25, fontweight="bold")
+    ax1.set_title(f"Статистика онлайн для {user['name']}", fontsize=25, fontweight="bold")
+
+    if period == "day":
+        periods = list(range(now.hour, coefficient)) + list(range(now.hour))
+    elif period == "week":
+        periods = [["пн", "вт", "ср", "чт", "пт", "сб", "вс"][i] for i in list(range(now.weekday(), coefficient)) + list(range(now.weekday()))]
+    else:  # month
+        last_month = now.replace(day=1) - timedelta(days=1)
+        end_month = monthrange(last_month.year, last_month.month)[1]
+        periods = list(range(end_month - (coefficient - now.day), end_month+1)) + list(range(max(1, now.day - coefficient), now.day))
+    periods = list(map(str, periods))
+    periods_online = list(map(lambda x: x / 60, periods_online))  # Преобразование секунд в минуты
+    ax2.bar(periods, periods_online, color="blue")
+    ax2.set_ylabel("Время онлайн (минуты)", fontsize=15)
+    ax2.set_xlabel(f"Онлайн по {'часам' if period == 'day' else 'дням'}", fontsize=15)
+    ax2.set_title(f"Онлайн по {'часам' if period == 'day' else 'дням'} для {user['name']}", fontsize=20, fontweight="bold")
+    ax2.set_xticks(periods)
+    ax2.grid(True, axis='y', linestyle='--', alpha=0.7)
+
+    plt.tight_layout()
     path = f"statistics_status_users/{account_id}.{user_id}.png"
     plt.savefig(www_path(path))
+    plt.close()
     return path
 
 
@@ -184,7 +280,7 @@ async def _status_user_statistics_watch_period(callback_query: CallbackQuery):
         return await status_users_menu(account_id)
     if user['statistics'] is False:
         return await status_user_statistics_menu(account_id, user_id)
-    path = await general_online_statistics(account_id, user_id, user, period)  # Создание круговой диаграммы
+    path = await online_statistics(account_id, user_id, user, period)  # Создание диаграмм
     await callback_query.message.edit_text(
         f"🌐 <b>Статистика для {user['name']}</b>", parse_mode=html,
         link_preview_options=preview_options(f"{path}?time={time_now().timestamp()}", WWW_SITE, show_above_text=True),

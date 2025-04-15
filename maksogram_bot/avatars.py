@@ -34,9 +34,17 @@ async def _avatars(callback_query: CallbackQuery):
 
 async def avatars_menu(account_id: int) -> dict[str, Any]:
     buttons = []
-    users = await db.fetch_all(f"SELECT user_id, name FROM avatars WHERE account_id={account_id}")  # Список новых аватарок
-    for user in users:
-        buttons.append([IButton(text=f"📸 {user['name']}", callback_data=f"avatar_menu{user['user_id']}")])
+    users = sorted(await db.fetch_all(f"SELECT user_id, name FROM avatars WHERE account_id={account_id}"),
+                   key=lambda x: len(x['name']))  # Список новых аватарок, отсортированных по возрастанию длины имени
+    i = 0
+    while i < len(users):
+        if i + 1 < len(users) and all(map(lambda x: len(x['name']) <= 15, users[i:i+1])):
+            buttons.append([IButton(text=f"📸 {users[i]['name']}", callback_data=f"avatar_menu{users[i]['user_id']}"),
+                            IButton(text=f"📸 {users[i+1]['name']}", callback_data=f"avatar_menu{users[i+1]['user_id']}")])
+            i += 1
+        else:
+            buttons.append([IButton(text=f"📸 {users[i]['name']}", callback_data=f"avatar_menu{users[i]['user_id']}")])
+        i += 1
     buttons.append([IButton(text="➕ Добавить пользователя", callback_data="new_avatar")])
     buttons.append([IButton(text="◀️  Назад", callback_data="menu")])
     return {"text": "📸 <b>Новая аватарка</b>\nКогда кто-то из выбранных пользователей изменит или добавит аватарку, я сообщу вам",
