@@ -129,10 +129,14 @@ async def online_statistics(account_id: int, user_id: int, user: dict[str, str],
     time_readings = await db.fetch_all(f"SELECT time FROM statistics_time_reading WHERE account_id={account_id} AND user_id={user_id}", one_data=True)
     offline = all_time - online
     labels = ["Онлайн", "Офлайн"]
-    fig = plt.figure(figsize=(18, 16))
-    gs = gridspec.GridSpec(2, 2, height_ratios=[1, 1])
-    ax1, ax2 = fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1])  # Верхние диаграммы
-    ax3 = fig.add_subplot(gs[1, :])
+    if account_id == user_id:
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 10))
+        ax3 = None
+    else:
+        fig = plt.figure(figsize=(18, 16))
+        gs = gridspec.GridSpec(2, 2, height_ratios=[1, 1])
+        ax1, ax2 = fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1])  # Верхние диаграммы
+        ax3 = fig.add_subplot(gs[1, :])
 
     wedges, texts, auto_texts = ax1.pie([online, offline], labels=labels, colors=("#006e4a", "#60d4ae"), explode=(0.2, 0),
                                         autopct=lambda pct: human_time(pct / 100 * all_time))
@@ -175,11 +179,12 @@ async def online_statistics(account_id: int, user_id: int, user: dict[str, str],
     ax2.plot(online_frequency, color="green", linewidth=3, label="Количество входов")
     ax2.legend(fontsize=16)
 
-    time_readings = list(map(lambda x: x.total_seconds() / 60, time_readings))
-    ax3.plot(time_readings, color="red", linewidth=3)
-    ax3.set_title("Время ответа на ваши сообщения", fontsize=20, fontweight="bold")
-    ax3.set_ylabel("Время ответа (минуты)", fontsize=16)
-    ax3.grid(True, axis='y', linestyle='--', alpha=0.5)
+    if ax3:
+        time_readings = list(map(lambda x: x.total_seconds() / 60, time_readings))
+        ax3.plot(time_readings, color="red", linewidth=3)
+        ax3.set_title("Время ответа на ваши сообщения", fontsize=20, fontweight="bold")
+        ax3.set_ylabel("Время ответа (минуты)", fontsize=16)
+        ax3.grid(True, axis='y', linestyle='--', alpha=0.5)
 
     plt.tight_layout()
     path = f"statistics_status_users/{account_id}.{user_id}.png"
@@ -239,6 +244,13 @@ async def status_user_menu(account_id: int, user_id: int) -> dict[str, Any]:
                               f"WHERE account_id={account_id} AND user_id={user_id}")  # Данные о друге в сети
     if user is None:
         return await status_users_menu(account_id)
+    if user_id == account_id:
+        markup = IMarkup(inline_keyboard=[[IButton(text=f"Статистика ↙️", callback_data=f"status_user_statistics_menu{user_id}")],
+                                          [IButton(text="🚫 Удалить пользователя", callback_data=f"status_user_del{user_id}")],
+                                          [IButton(text="◀️  Назад", callback_data="status_users")]])
+        return {"text": "🌐 <b>Друг в сети</b>\nЗдесь вы можете посмотреть статистику онлайн для своего аккаунта за "
+                        "день, неделю и месяц\n<blockquote>Для других пользователей доступны и другие функции</blockquote>",
+                "parse_mode": html, "reply_markup": markup}
     markup = IMarkup(inline_keyboard=[
         [IButton(text=f"{status(user['online'])} Онлайн", callback_data=f"status_user_online_{command(user['online'])}_{user_id}"),
          IButton(text=f"{status(user['offline'])} Оффлайн", callback_data=f"status_user_offline_{command(user['offline'])}_{user_id}")],
@@ -315,9 +327,9 @@ async def _status_user_statistics_watch_period(callback_query: CallbackQuery):
         return await status_users_menu(account_id)
     if user['statistics'] is False:
         return await status_user_statistics_menu(account_id, user_id)
-    path = await online_statistics(account_id, user_id, user, period)  # Создание диаграмм
+    path = await online_statistics(account_id, int(user_id), user, period)  # Создание диаграмм
     await callback_query.message.edit_text(
-        f"🌐 <b>Статистика для {user['name']}</b>", parse_mode=html,
+        f"🌐 <b>Статистика для {'себя' if user_id == account_id else user['name']}</b>", parse_mode=html,
         link_preview_options=preview_options(f"{path}?time={time_now().timestamp()}", WWW_SITE, show_above_text=True),
         reply_markup=(await status_user_statistics_menu(account_id, user_id))['reply_markup'])
 
@@ -332,7 +344,8 @@ async def _new_status_user_start(callback_query: CallbackQuery, state: FSMContex
             return await callback_query.answer("У вас максимальное количество!", True)
     await state.set_state(UserState.status_user)
     request_users = KeyboardButtonRequestUsers(request_id=1, user_is_bot=False)
-    markup = KMarkup(keyboard=[[KButton(text="Выбрать", request_users=request_users)],
+    markup = KMarkup(keyboard=[[KButton(text="Выбрать", request_users=request_users),
+                                KButton(text="Себя")],
                                [KButton(text="Отмена")]], resize_keyboard=True)
     message_id = (await callback_query.message.answer("Отправьте пользователя для отслеживания", reply_markup=markup)).message_id
     await state.update_data(message_id=message_id)
@@ -343,24 +356,24 @@ async def _new_status_user_start(callback_query: CallbackQuery, state: FSMContex
 @security('state')
 async def _new_status_user(message: Message, state: FSMContext):
     if await new_message(message): return
+    account_id = message.chat.id
     message_id = (await state.get_data())['message_id']
     await state.clear()
-    if message.content_type == "users_shared":
-        user_id = message.users_shared.user_ids[0]
-        account_id = message.chat.id
-        if user_id == account_id:  # Себя нельзя
-            await message.answer(**await status_users_menu(account_id))
+    if message.content_type == "users_shared" or message.text == "Себя":
+        user_id = account_id if message.text == "Себя" else message.users_shared.user_ids[0]
+        if user_id == account_id:
+            name = "Мой аккаунт"
         else:
             user = await telegram_clients[message.chat.id].get_entity(user_id)
             name = user.first_name + (f" {user.last_name}" if user.last_name else "")
             name = (name[:30] + "...") if len(name) > 30 else name
             telegram_clients[account_id].list_event_handlers()[4][1].chats.add(user_id)
-            try:
-                await db.execute(f"INSERT INTO status_users VALUES ({account_id}, {user_id}, $1, false, false, "
-                                 f"false, NULL, false, NULL)", name)
-            except UniqueViolationError:  # Уже есть
-                pass
-            await message.answer(**await status_user_menu(message.chat.id, user_id))
+        try:
+            await db.execute(f"INSERT INTO status_users VALUES ({account_id}, {user_id}, $1, false, false, "
+                             f"false, NULL, false, NULL)", name)
+        except UniqueViolationError:  # Уже есть
+            pass
+        await message.answer(**await status_user_menu(message.chat.id, user_id))
     else:
         await message.answer(**await status_users_menu(message.chat.id))
     await bot.delete_messages(chat_id=message.chat.id, message_ids=[message.message_id, message_id])

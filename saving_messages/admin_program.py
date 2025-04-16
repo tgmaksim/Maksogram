@@ -152,8 +152,6 @@ class Program:
         async def message_read_outbox(event: events.messageread.MessageRead.Event):
             if await self.secondary_checking_event(event):
                 await self.message_read(event)
-                if self.offline:
-                    await self.client(UpdateStatusRequest(offline=True))
 
         @client.on(events.UserUpdate(
             chats=set(list(self.status_users) + [self.id]),
@@ -585,11 +583,11 @@ class Program:
         chat_id = (await event.get_chat()).id
         name = await self.chat_name(chat_id)
         functions = await db.fetch_one(f"SELECT reading, statistics FROM status_users WHERE account_id={self.id} AND user_id={chat_id}")
-        if functions['reading']:
+        if functions and functions['reading']:
             await db.execute(f"UPDATE status_users SET reading=false WHERE account_id={self.id} AND user_id={chat_id}")
             await MaksogramBot.send_message(self.id, f"🌐 {name} прочитал сообщение", reply_markup=MaksogramBot.IMarkup(
                 inline_keyboard=[[MaksogramBot.IButton(text="Настройки", callback_data=f"status_user_menu{self.id}|new")]]))
-        if functions['statistics']:
+        if functions and functions['statistics']:
             await db.execute(f"INSERT INTO statistics_time_reading SELECT account_id, user_id, now() - last_message "
                              f"FROM status_users WHERE account_id={self.id} AND user_id={chat_id} AND last_message IS NOT NULL;\n"
                              f"UPDATE status_users SET last_message=NULL WHERE account_id={self.id} AND user_id={chat_id}")
