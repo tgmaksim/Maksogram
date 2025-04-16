@@ -1,5 +1,6 @@
 import math
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 
 from typing import Any
 from calendar import monthrange
@@ -9,6 +10,7 @@ from core import (
     db,
     html,
     OWNER,
+    morning,
     security,
     time_now,
     www_path,
@@ -35,7 +37,7 @@ from .core import (
 )
 
 
-def difference_periods(periods: list[list[datetime, datetime]], period: str, time_zone: int) -> list[int]:
+def difference_periods(periods: list[list[datetime, datetime]], period: str, time_zone: int) -> tuple[list[int], list[int]]:
     if period == "day":
         now = (time_now() + timedelta(hours=time_zone)).replace(minute=0, second=0, microsecond=0)
     else:
@@ -50,6 +52,7 @@ def difference_periods(periods: list[list[datetime, datetime]], period: str, tim
         bin_size = 86400  # 1 день в секундах
         max_bins = 28
     bins = [0] * max_bins
+    frequency = [0] * max_bins
 
     for start, end in periods:
         if start > end or end > now:
@@ -68,6 +71,7 @@ def difference_periods(periods: list[list[datetime, datetime]], period: str, tim
             seconds = (end - start).total_seconds()
             if start_bin < max_bins:
                 bins[start_bin] += seconds
+                frequency[start_bin] += 1
             continue
 
         # Обрабатываем первый частичный интервал
@@ -79,6 +83,7 @@ def difference_periods(periods: list[list[datetime, datetime]], period: str, tim
             seconds = (bin_end - start).total_seconds()
             if start_bin < max_bins:
                 bins[start_bin] += seconds
+                frequency[start_bin] += 1
 
         # Обрабатываем последний частичный интервал
         if period == "day":
@@ -89,16 +94,18 @@ def difference_periods(periods: list[list[datetime, datetime]], period: str, tim
             seconds = (end - bin_start).total_seconds()
             if end_bin < max_bins:
                 bins[end_bin] += seconds
+                frequency[end_bin] += 1
 
         # Обрабатываем полные интервалы между началом и концом
         for bin_idx in range(end_bin + 1, start_bin):
             if bin_idx < max_bins:
                 bins[bin_idx] += bin_size
+                frequency[bin_idx] += 1
 
-    return list(reversed(bins))
+    return list(reversed(bins)), list(reversed(frequency))
 
 
-async def get_data_by_period(account_id: int, user_id: int, period: str, time_zone: int) -> tuple[int, int, list[int]]:
+async def get_data_by_period(account_id: int, user_id: int, period: str, time_zone: int) -> tuple[int, int, list[int], list[int]]:
     if period == "day":
         all_time = 24 * 60 * 60  # Количество секунд в дне
     elif period == "week":
@@ -110,41 +117,59 @@ async def get_data_by_period(account_id: int, user_id: int, period: str, time_zo
                                        f"AND user_id={user_id} AND offline_time IS NOT NULL "
                                        f"AND (now() - offline_time) < INTERVAL '{all_time} seconds' ORDER BY online_time")))
     summa = sum(map(lambda x: abs((x[1] - x[0]).total_seconds()), data))  # Общее время в секундах и время онлайн
-    return all_time, summa, difference_periods(data, period, time_zone)  # Общее время в секундах, время онлайн и список онлайн по группам
+    # Общее время в секундах, время онлайн, список онлайн по группам и список с количеством входов поо группам
+    return all_time, summa, *difference_periods(data, period, time_zone)
 
 
 async def online_statistics(account_id: int, user_id: int, user: dict[str, str], period: str) -> str:
     coefficient = {"day": 24, "week": 7, "month": 28}[period]
     time_zone: int = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={account_id}", one_data=True)
     now = time_now() + timedelta(hours=time_zone)
-    all_time, online, periods_online = await get_data_by_period(account_id, user_id, period, time_zone)
+    all_time, online, periods_online, online_frequency = await get_data_by_period(account_id, user_id, period, time_zone)
     offline = all_time - online
     labels = ["Онлайн", "Офлайн"]
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 7))
 
     wedges, texts, auto_texts = ax1.pie([online, offline], labels=labels, colors=("#006e4a", "#60d4ae"), explode=(0.2, 0),
                                         autopct=lambda pct: human_time(pct / 100 * all_time))
-    ax1.legend(wedges, labels, title="Статистика онлайн", loc="center left", bbox_to_anchor=(0.8, -0.4, 0.5, 1), fontsize=20)
+    ax1.legend(wedges, labels, loc="center left", bbox_to_anchor=(0.8, -0.4, 0.5, 1), fontsize=20)
     plt.setp(auto_texts, size=20, weight="bold")
     plt.setp(texts, size=20)
     ax1.set_title(f"Статистика онлайн для {user['name']}", fontsize=25, fontweight="bold")
 
+    colors, sleeping = "blue", [False, False]
     if period == "day":
         periods = list(range(now.hour, coefficient)) + list(range(now.hour))
+        for i, p in enumerate(periods):
+            if not periods_online[i] and sleeping[0] is False:  # Офлайн и сон не начался
+                sleeping[0] = i  # Предполагаемое начало сна
+            elif morning[0] <= int(p) <= morning[1] and periods_online[i]:  # Утро и онлайн
+                sleeping[1] = i-1
+                break
+            elif periods_online[i]:  # Онлайн
+                sleeping[0] = False
     elif period == "week":
         periods = [["пн", "вт", "ср", "чт", "пт", "сб", "вс"][i] for i in list(range(now.weekday(), coefficient)) + list(range(now.weekday()))]
+        colors = ["red" if weekday in ("сб", "вс") else "blue" for weekday in periods]
     else:  # month
         last_month = now.replace(day=1) - timedelta(days=1)
         end_month = monthrange(last_month.year, last_month.month)[1]
         periods = list(range(end_month - (coefficient - now.day), end_month+1)) + list(range(max(1, now.day - coefficient), now.day))
     periods = list(map(str, periods))
     periods_online = list(map(lambda x: x / 60, periods_online))  # Преобразование секунд в минуты
-    ax2.bar(periods, periods_online, color="blue")
+    ax2.bar(periods, periods_online, color=colors, alpha=0.7)
     ax2.set_ylabel("Время онлайн (минуты)", fontsize=15)
     ax2.set_xlabel(f"Онлайн по {'часам' if period == 'day' else 'дням'}", fontsize=15)
     ax2.set_title(f"Онлайн по {'часам' if period == 'day' else 'дням'} для {user['name']}", fontsize=20, fontweight="bold")
     ax2.set_xticks(periods)
-    ax2.grid(True, axis='y', linestyle='--', alpha=0.7)
+    ax2.grid(True, axis='y', linestyle='--', alpha=0.5)
+
+    if False not in sleeping:
+        ax2.axvspan(sleeping[0], sleeping[1], facecolor='gray', alpha=0.3, label="Время сна")
+        ax2.text(sum(sleeping) / 2, max(periods_online) / 2, "Крепко спал(а)",
+                 rotation=90, ha='center', va='center', fontsize=20, fontweight="bold")
+    ax2.plot(online_frequency, color="green", linewidth=3, label="Количество входов")
+    ax2.legend(fontsize=16)
 
     plt.tight_layout()
     path = f"statistics_status_users/{account_id}.{user_id}.png"
