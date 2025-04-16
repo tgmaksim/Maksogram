@@ -159,7 +159,7 @@ async def weather_menu(account_id: int) -> dict[str, Any]:
         status_button_weather = IButton(text="🔴 Выключить Погоду", callback_data="weather_off")
     else:
         status_button_weather = IButton(text="🟢 Включить Погоду", callback_data="weather_on")
-    if await db.fetch_one(f"SELECT morning_weather FROM modules WHERE account_id={account_id}", one_data=True):  # Вкл/выкл погода по утрам
+    if mw := await db.fetch_one(f"SELECT morning_weather FROM modules WHERE account_id={account_id}", one_data=True):  # Вкл/выкл погода по утрам
         status_button_morning_weather = IButton(text="🔴 Выключить утреннюю Погоду", callback_data="morning_weather_off")
     else:
         status_button_morning_weather = IButton(text="🟢 Включить утреннюю Погоду", callback_data="morning_weather_on")
@@ -167,9 +167,11 @@ async def weather_menu(account_id: int) -> dict[str, Any]:
                                       [status_button_morning_weather],
                                       [IButton(text="Как получить прогноз?", url=f"{SITE}#погода")],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
+    warnings = f"<blockquote>❗️ Погода по утрам присылается, когда вы первый раз зашли в Telegram с {morning[0]}:00 " \
+               f"до {morning[1]}:00</blockquote>\n<blockquote>❗️ Для улучшения точности выберите часовой пояс в /settings</blockquote>"
+    if not mw: warnings = "<blockquote>❗️ Для работы функции выберите город в /settings</blockquote>"
     return {"text": "🌤 <b>Погода</b>\nЛегко получайте погоду за окном, не выходя из Telegram командой 👇\n<blockquote>"
-                    "Какая погода</blockquote>\n<blockquote>❗️ Погода по утрам присылается, когда вы первый раз зашли в Telegram "
-                    f"с {morning[0]}:00 до {morning[1]}:00</blockquote>", "reply_markup": markup, "parse_mode": html}
+                    f"Какая погода</blockquote>\n{warnings}", "reply_markup": markup, "parse_mode": html}
 
 
 @dp.callback_query(F.data.in_(["weather_on", "weather_off"]))
@@ -247,6 +249,7 @@ async def reminder_menu(account_id: int) -> dict[str, Any]:
                                       [IButton(text="Как пользоваться Напоминалкой?", url=f"{SITE}#напоминалка")],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
     return {"text": "⏰ <b>Напоминалка в чате</b>\nДля создания напоминания <b>нужно ответить</b> на любое сообщение в чате командой\n"
+                    "<blockquote>❗️ Для правильной работы Напоминалки выберите часовой пояс в /settings</blockquote>\n"
                     "<blockquote expandable><b>Примеры</b>:\nНапомни через 5 минут\nНапомни через 5 часов\nНапомни через "
                     "5 часов 30 минут\nНапомни в 12:00\nНапомни завтра в 12.00\nНапомни 9 декабря в 12:00</blockquote>",
                     "reply_markup": markup, "parse_mode": html}

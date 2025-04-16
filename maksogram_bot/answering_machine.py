@@ -455,7 +455,8 @@ async def time_auto_answer_menu(account_id: int, answer_id: int, text: str = Non
         reply_markup = IMarkup(inline_keyboard=
                                [[IButton(text="⏰ Выбрать время", callback_data=f"answering_machine_edit_timetable{answer_id}")],
                                 [IButton(text="◀️  Назад", callback_data=f"answering_machine_menu{answer_id}")]])
-        return {"text": text or f"Вы можете добавить расписание, чтобы я отвечал только в нужное время",
+        return {"text": text or f"Вы можете добавить расписание, чтобы я отвечал только в нужное время\n"
+                                f"<blockquote>Для улучшения точности выберите часовой пояс в настройках /settings</blockquote>",
                 "reply_markup": reply_markup, "parse_mode": html}
     elif answer.type == 'timetable':  # Автоответ с расписанием
         reply_markup = IMarkup(inline_keyboard=[[IButton(text="➡️ Начало", callback_data=f"answering_machine_edit_start_time_{answer_id}"),
@@ -463,9 +464,9 @@ async def time_auto_answer_menu(account_id: int, answer_id: int, text: str = Non
                                                 [IButton(text="🗓 Дни недели", callback_data=f"answering_machine_edit_weekdays{answer_id}")],
                                                 [IButton(text="❌ Удалить расписание", callback_data=f"answering_machine_del_time{answer_id}")],
                                                 [IButton(text="◀️  Назад", callback_data=f"answering_machine_menu{answer_id}")]])
-        return {"text": text or f"Вы можете изменить или удалить расписание автоответа\n"
-                        f"{answer.human_timetable}\nДни работы: {answer.human_weekdays}",
-                "reply_markup": reply_markup, "parse_mode": html}
+        return {"text": text or f"Вы можете изменить или удалить расписание автоответа\n{answer.human_timetable}\n"
+                                f"Дни работы: {answer.human_weekdays}\n<blockquote>❗️ Для улучшения точности выберите "
+                                f"часовой пояс в /settings</blockquote>", "reply_markup": reply_markup, "parse_mode": html}
 
 
 @dp.callback_query(F.data.startswith("answering_machine_edit_timetable"))

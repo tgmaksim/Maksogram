@@ -244,6 +244,7 @@ async def status_user_menu(account_id: int, user_id: int) -> dict[str, Any]:
                               f"WHERE account_id={account_id} AND user_id={user_id}")  # Данные о друге в сети
     if user is None:
         return await status_users_menu(account_id)
+    warning = "<blockquote>❗️ Для улучшения точности выберите часовой пояс в /settings</blockquote>" if user['awake'] else ''
     if user_id == account_id:
         markup = IMarkup(inline_keyboard=[[IButton(text=f"Статистика ↙️", callback_data=f"status_user_statistics_menu{user_id}")],
                                           [IButton(text="🚫 Удалить пользователя", callback_data=f"status_user_del{user_id}")],
@@ -260,7 +261,8 @@ async def status_user_menu(account_id: int, user_id: int) -> dict[str, Any]:
         [IButton(text="🚫 Удалить пользователя", callback_data=f"status_user_del{user_id}")],
         [IButton(text="◀️  Назад", callback_data="status_users")]])
     return {"text": f"🌐 <b>Друг в сети</b>\nКогда <b>{user['name']}</b> будет онлайн/оффлайн, проснется или прочитает сообщение, "
-                    "придет уведомление. В разделе статистика данные об онлайн за день, неделю и месяц", "parse_mode": html, "reply_markup": markup}
+                    f"придет уведомление. В разделе статистика данные об онлайн за день, неделю и месяц\n{warning}",
+            "parse_mode": html, "reply_markup": markup}
 
 
 @dp.callback_query(F.data.startswith("status_user_online_on").__or__(F.data.startswith("status_user_online_off")).__or__(
