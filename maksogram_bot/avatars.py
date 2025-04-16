@@ -83,14 +83,15 @@ async def _new_avatar(message: Message, state: FSMContext):
             name = user.first_name + (f" {user.last_name}" if user.last_name else "")
             avatars = await get_avatars(account_id, user_id)
             if avatars is None:
-                return await message.answer(f"<b>Слишком много аватарок у {name}</b>", parse_mode=html,
-                                            reply_markup=(await avatars_menu(account_id))['reply_markup'])
-            id_avatars = list(map(lambda x: x.id, avatars.values()))
-            try:
-                await db.execute(f"INSERT INTO avatars VALUES ({account_id}, {user_id}, $1, '{id_avatars}')", name)  # Добавление новой аватарки
-            except UniqueViolationError:  # Уже есть
-                pass
-            await message.answer(**await avatar_menu(message.chat.id, user_id))
+                await message.answer(f"<b>Слишком много аватарок у {name}</b>", parse_mode=html,
+                                     reply_markup=(await avatars_menu(account_id))['reply_markup'])
+            else:
+                id_avatars = list(map(lambda x: x.id, avatars.values()))
+                try:
+                    await db.execute(f"INSERT INTO avatars VALUES ({account_id}, {user_id}, $1, '{id_avatars}')", name)  # Добавление новой аватарки
+                except UniqueViolationError:  # Уже есть
+                    pass
+                await message.answer(**await avatar_menu(message.chat.id, user_id))
     else:
         await message.answer(**await avatars_menu(message.chat.id))
     await bot.delete_messages(chat_id=message.chat.id, message_ids=[message.message_id, message_id])

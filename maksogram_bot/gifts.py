@@ -80,12 +80,17 @@ async def _new_gift(message: Message, state: FSMContext):
         else:
             user = await telegram_clients[account_id].get_entity(user_id)
             name = user.first_name + (f" {user.last_name}" if user.last_name else "")
-            gifts = json_encode({gift.id: gift.__dict__ for gift in (await get_gifts(account_id, user_id)).values()})
-            try:
-                await db.execute(f"INSERT INTO gifts VALUES ({account_id}, {user_id}, $1, $2)", name, gifts)
-            except UniqueViolationError:  # Уже есть
-                pass
-            await message.answer(**await gift_menu(message.chat.id, user_id))
+            gifts = await get_gifts(account_id, user_id)
+            if gifts is None:
+                await message.answer(f"<b>Слишком много подарков у {name}</b>", parse_mode=html,
+                                     reply_markup=(await gifts_menu(account_id))['reply_markup'])
+            else:
+                try:
+                    await db.execute(f"INSERT INTO gifts VALUES ({account_id}, {user_id}, $1, $2)",
+                                     name, json_encode({gift.id: gift.__dict__ for gift in gifts.values()}))
+                except UniqueViolationError:  # Уже есть
+                    pass
+                await message.answer(**await gift_menu(message.chat.id, user_id))
     else:
         await message.answer(**await gifts_menu(message.chat.id))
     await bot.delete_messages(chat_id=message.chat.id, message_ids=[message.message_id, message_id])
