@@ -126,9 +126,13 @@ async def online_statistics(account_id: int, user_id: int, user: dict[str, str],
     time_zone: int = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={account_id}", one_data=True)
     now = time_now() + timedelta(hours=time_zone)
     all_time, online, periods_online, online_frequency = await get_data_by_period(account_id, user_id, period, time_zone)
+    time_readings = await db.fetch_all(f"SELECT time FROM statistics_time_reading WHERE account_id={account_id} AND user_id={user_id}", one_data=True)
     offline = all_time - online
     labels = ["Онлайн", "Офлайн"]
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 7))
+    fig = plt.figure(figsize=(18, 16))
+    gs = gridspec.GridSpec(2, 2, height_ratios=[1, 1])
+    ax1, ax2 = fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[0, 1])  # Верхние диаграммы
+    ax3 = fig.add_subplot(gs[1, :])
 
     wedges, texts, auto_texts = ax1.pie([online, offline], labels=labels, colors=("#006e4a", "#60d4ae"), explode=(0.2, 0),
                                         autopct=lambda pct: human_time(pct / 100 * all_time))
@@ -170,6 +174,12 @@ async def online_statistics(account_id: int, user_id: int, user: dict[str, str],
                  rotation=90, ha='center', va='center', fontsize=20, fontweight="bold")
     ax2.plot(online_frequency, color="green", linewidth=3, label="Количество входов")
     ax2.legend(fontsize=16)
+
+    time_readings = list(map(lambda x: x.total_seconds() / 60, time_readings))
+    ax3.plot(time_readings, color="red", linewidth=3)
+    ax3.set_title("Время ответа на ваши сообщения", fontsize=20, fontweight="bold")
+    ax3.set_ylabel("Время ответа (минуты)", fontsize=16)
+    ax3.grid(True, axis='y', linestyle='--', alpha=0.5)
 
     plt.tight_layout()
     path = f"statistics_status_users/{account_id}.{user_id}.png"
@@ -346,7 +356,8 @@ async def _new_status_user(message: Message, state: FSMContext):
             name = (name[:30] + "...") if len(name) > 30 else name
             telegram_clients[account_id].list_event_handlers()[4][1].chats.add(user_id)
             try:
-                await db.execute(f"INSERT INTO status_users VALUES ({account_id}, {user_id}, $1, false, false, false, NULL, false)", name)
+                await db.execute(f"INSERT INTO status_users VALUES ({account_id}, {user_id}, $1, false, false, "
+                                 f"false, NULL, false, NULL)", name)
             except UniqueViolationError:  # Уже есть
                 pass
             await message.answer(**await status_user_menu(message.chat.id, user_id))
@@ -362,8 +373,9 @@ async def _status_user_del(callback_query: CallbackQuery):
     user_id = int(callback_query.data.replace("status_user_del", ""))
     account_id = callback_query.from_user.id
     telegram_clients[account_id].list_event_handlers()[4][1].chats.remove(user_id)
-    await db.execute(f"DELETE FROM statistics_status_users WHERE account_id={account_id} AND user_id={user_id}")  # Удаление статистики
-    await db.execute(f"DELETE FROM status_users WHERE account_id={account_id} AND user_id={user_id}")  # Удаление друга в сети
+    await db.execute(f"DELETE FROM statistics_status_users WHERE account_id={account_id} AND user_id={user_id};\n"  # Удаление статистики
+                     f"DELETE FROM statistics_time_reading WHERE account_id={account_id} AND user_id={user_id};\n"  # Удаление статистики
+                     f"DELETE FROM status_users WHERE account_id={account_id} AND user_id={user_id}")  # Удаление друга в сети
     await callback_query.message.edit_text(**await status_users_menu(callback_query.message.chat.id))
 
 

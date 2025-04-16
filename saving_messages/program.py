@@ -384,6 +384,11 @@ class Program:
     async def new_message(self, event: events.newmessage.NewMessage.Event):
         message: Message = event.message
 
+        if message.out:
+            # Для функции подсчета статистики времени ответа
+            await db.execute(f"UPDATE status_users SET last_message=now() "
+                             f"WHERE account_id={self.id} AND user_id={message.chat_id} AND last_message IS NULL")
+
         if await self.modules(message):
             return  # При срабатывании Maksogram в чате сохранение сообщения не происходит
 
@@ -562,10 +567,15 @@ class Program:
             return
         chat_id = (await event.get_chat()).id
         name = await self.chat_name(chat_id)
-        if await db.fetch_one(f"SELECT reading FROM status_users WHERE account_id={self.id} AND user_id={chat_id}", one_data=True):
+        functions = await db.fetch_one(f"SELECT reading, statistics FROM status_users WHERE account_id={self.id} AND user_id={chat_id}")
+        if functions['reading']:
             await db.execute(f"UPDATE status_users SET reading=false WHERE account_id={self.id} AND user_id={chat_id}")
             await MaksogramBot.send_message(self.id, f"🌐 {name} прочитал сообщение", reply_markup=MaksogramBot.IMarkup(
                 inline_keyboard=[[MaksogramBot.IButton(text="Настройки", callback_data=f"status_user_menu{self.id}|new")]]))
+        if functions['statistics']:
+            await db.execute(f"INSERT INTO statistics_time_reading SELECT account_id, user_id, now() - last_message "
+                             f"FROM status_users WHERE account_id={self.id} AND user_id={chat_id} AND last_message IS NOT NULL;\n"
+                             f"UPDATE status_users SET last_message=NULL WHERE account_id={self.id} AND user_id={chat_id}")
 
     async def check_awake(self, event: events.userupdate.UserUpdate.Event) -> Union[datetime, None]:
         status = isinstance(event.status, UserStatusOnline)
