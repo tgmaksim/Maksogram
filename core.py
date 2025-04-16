@@ -297,7 +297,7 @@ async def send_email_message(to: str, subject: str, text: str, *, subtype: str =
 
 class Variables:
     version = "2.6"
-    version_string = "2.7.0 (66)"
+    version_string = "2.7.0 (67)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])

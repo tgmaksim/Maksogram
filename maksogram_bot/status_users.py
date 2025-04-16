@@ -129,8 +129,8 @@ async def online_statistics(account_id: int, user_id: int, user: dict[str, str],
     time_readings = await db.fetch_all(f"SELECT time FROM statistics_time_reading WHERE account_id={account_id} AND user_id={user_id}", one_data=True)
     offline = all_time - online
     labels = ["Онлайн", "Офлайн"]
-    if account_id == user_id:
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 10))
+    if account_id == user_id or period == "day":
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 8))
         ax3 = None
     else:
         fig = plt.figure(figsize=(18, 16))
