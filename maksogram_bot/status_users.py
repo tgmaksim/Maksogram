@@ -1,4 +1,5 @@
 import math
+import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 
@@ -6,6 +7,7 @@ from typing import Any
 from calendar import monthrange
 from datetime import datetime, timedelta
 from asyncpg.exceptions import UniqueViolationError
+from matplotlib.colors import LinearSegmentedColormap
 from core import (
     db,
     html,
@@ -37,11 +39,11 @@ from .core import (
 )
 
 
-def difference_periods(periods: list[list[datetime, datetime]], period: str, time_zone: int) -> tuple[list[int], list[int]]:
+def difference_periods(periods: list[list[datetime, datetime]], period: str, time_zone: int, offset: int) -> tuple[list[int], list[int]]:
     if period == "day":
-        now = (time_now() + timedelta(hours=time_zone)).replace(minute=0, second=0, microsecond=0)
+        now = (time_now() + timedelta(hours=time_zone) - timedelta(seconds=offset)).replace(minute=0, second=0, microsecond=0)
     else:
-        now = (time_now() + timedelta(hours=time_zone)).replace(hour=0, minute=0, second=0, microsecond=0)
+        now = (time_now() + timedelta(hours=time_zone) - timedelta(seconds=offset)).replace(hour=0, minute=0, second=0, microsecond=0)
     if period == "day":
         bin_size = 3600  # 1 час в секундах
         max_bins = 24
@@ -105,7 +107,7 @@ def difference_periods(periods: list[list[datetime, datetime]], period: str, tim
     return list(reversed(bins)), list(reversed(frequency))
 
 
-async def get_data_by_period(account_id: int, user_id: int, period: str, time_zone: int) -> tuple[int, int, list[int], list[int]]:
+async def get_data_by_period(account_id: int, user_id: int, period: str, time_zone: int, offset: int) -> tuple[int, int, list[int], list[int]]:
     if period == "day":
         all_time = 24 * 60 * 60  # Количество секунд в дне
     elif period == "week":
@@ -114,18 +116,20 @@ async def get_data_by_period(account_id: int, user_id: int, period: str, time_zo
         all_time = 28 * 24 * 60 * 60  # Количество секунд в 28 днях
     data = list(map(lambda x: (x['online_time'] + timedelta(hours=time_zone), x['offline_time'] + timedelta(hours=time_zone)),
                     await db.fetch_all(f"SELECT online_time, offline_time FROM statistics_status_users WHERE account_id={account_id} "
-                                       f"AND user_id={user_id} AND offline_time IS NOT NULL "
-                                       f"AND (now() - offline_time) < INTERVAL '{all_time} seconds' ORDER BY online_time")))
+                                       f"AND user_id={user_id} AND offline_time IS NOT NULL AND "
+                                       f"INTERVAL '{offset} seconds' < now() - offline_time AND "
+                                       f"now() - offline_time < INTERVAL '{all_time+offset} seconds' ORDER BY online_time")))
     summa = sum(map(lambda x: abs((x[1] - x[0]).total_seconds()), data))  # Общее время в секундах и время онлайн
     # Общее время в секундах, время онлайн, список онлайн по группам и список с количеством входов поо группам
-    return all_time, summa, *difference_periods(data, period, time_zone)
+    return all_time, summa, *difference_periods(data, period, time_zone, offset)
 
 
-async def online_statistics(account_id: int, user_id: int, user: dict[str, str], period: str) -> str:
+async def online_statistics(account_id: int, user_id: int, user: dict[str, str], period: str, offset: int) -> str:
     coefficient = {"day": 24, "week": 7, "month": 28}[period]
+    offset = {"day": offset, "week": 7*offset, "month": 28*offset}[period]
     time_zone: int = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={account_id}", one_data=True)
-    now = time_now() + timedelta(hours=time_zone)
-    all_time, online, periods_online, online_frequency = await get_data_by_period(account_id, user_id, period, time_zone)
+    now = time_now() + timedelta(hours=time_zone) - timedelta(days=offset)
+    all_time, online, periods_online, online_frequency = await get_data_by_period(account_id, user_id, period, time_zone, offset*86400)
     time_readings = await db.fetch_all(f"SELECT time FROM statistics_time_reading WHERE account_id={account_id} AND user_id={user_id}", one_data=True)
     offline = all_time - online
     labels = ["Онлайн", "Офлайн"]
@@ -181,10 +185,15 @@ async def online_statistics(account_id: int, user_id: int, user: dict[str, str],
 
     if ax3:
         time_readings = list(map(lambda x: x.total_seconds() / 60, time_readings))
-        ax3.plot(time_readings, color="red", linewidth=3)
+        ax3.plot(time_readings, color="red", linewidth=3, zorder=0)
         ax3.set_title("Время ответа на ваши сообщения", fontsize=20, fontweight="bold")
         ax3.set_ylabel("Время ответа (минуты)", fontsize=16)
-        ax3.grid(True, axis='y', linestyle='--', alpha=0.5)
+        ax3.grid(True, axis='y', linestyle='--', alpha=0.6)
+
+        gradient = np.linspace(0, 1, 256).reshape(-1, 1)
+        cmap = LinearSegmentedColormap.from_list("custom", ["blue", "green"])
+        ax3.imshow(gradient, aspect='auto', cmap=cmap, alpha=0.5, zorder=0,
+                   extent=[0, len(time_readings), ax3.get_ylim()[0], ax3.get_ylim()[1]])
 
     plt.tight_layout()
     path = f"statistics_status_users/{account_id}.{user_id}.png"
@@ -301,15 +310,26 @@ async def _status_user_statistics_menu(callback_query: CallbackQuery):
     await callback_query.message.edit_text(**await status_user_statistics_menu(account_id, user_id))
 
 
-async def status_user_statistics_menu(account_id: int, user_id: int) -> dict[str, Any]:
+async def status_user_statistics_menu(account_id: int, user_id: int, watch: str = None, offset: int = 0, name: str = None) -> dict[str, Any]:
     user = await db.fetch_one(f"SELECT statistics FROM status_users WHERE account_id={account_id} AND user_id={user_id}")
     if user is None:
         return await status_users_menu(account_id)
+    if watch:
+        left_offset, right_offset = offset+1, "w" if offset-1 < 0 else offset-1
+        right = "➡️" if offset-1 >= 0 else "🚫"
+        markup = IMarkup(inline_keyboard=
+                         [[IButton(text="📊 День", callback_data=f"status_user_statistics_watch_day_00_{user_id}"),
+                           IButton(text="📊 Неделя", callback_data=f"status_user_statistics_watch_week_00_{user_id}"),
+                           IButton(text="📊 Месяц", callback_data=f"status_user_statistics_watch_month_00_{user_id}")],
+                          [IButton(text="⬅️", callback_data=f"status_user_statistics_watch_{watch}_{left_offset}_{user_id}"),
+                           IButton(text=right, callback_data=f"status_user_statistics_watch_{watch}_{right_offset}_{user_id}")],
+                          [IButton(text="◀️  Назад", callback_data=f"status_user_menu{user_id}")]])
+        return {"text": f"🌐 <b>Статистика для {name}</b>", "parse_mode": html, "reply_markup": markup}
     if user['statistics']:  # Сбор статистики включен
         markup = IMarkup(inline_keyboard=[[IButton(text="🔴 Выключить сбор статистики", callback_data=f"status_user_statistics_off_{user_id}")],
-                                          [IButton(text="📊 День", callback_data=f"status_user_statistics_watch_day_{user_id}"),
-                                           IButton(text="📊 Неделя", callback_data=f"status_user_statistics_watch_week_{user_id}"),
-                                           IButton(text="📊 Месяц", callback_data=f"status_user_statistics_watch_month_{user_id}")],
+                                          [IButton(text="📊 День", callback_data=f"status_user_statistics_watch_day_0_{user_id}"),
+                                           IButton(text="📊 Неделя", callback_data=f"status_user_statistics_watch_week_0_{user_id}"),
+                                           IButton(text="📊 Месяц", callback_data=f"status_user_statistics_watch_month_0_{user_id}")],
                                           [IButton(text="◀️  Назад", callback_data=f"status_user_menu{user_id}")]])
     else:  # Сбор статистики выключен
         markup = IMarkup(inline_keyboard=[[IButton(text="🟢 Включить сбор статистики", callback_data=f"status_user_statistics_on_{user_id}")],
@@ -323,17 +343,18 @@ async def status_user_statistics_menu(account_id: int, user_id: int) -> dict[str
 async def _status_user_statistics_watch_period(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     account_id = callback_query.from_user.id
-    period, user_id = callback_query.data.replace("status_user_statistics_watch_", "").split("_", 2)
+    period, offset, user_id = callback_query.data.replace("status_user_statistics_watch_", "").split("_", 3)
     user = await db.fetch_one(f"SELECT name, statistics FROM status_users WHERE account_id={account_id} AND user_id={user_id}")
     if user is None:
         return await status_users_menu(account_id)
     if user['statistics'] is False:
         return await status_user_statistics_menu(account_id, user_id)
-    path = await online_statistics(account_id, int(user_id), user, period)  # Создание диаграмм
+    if offset == "w":  # Нажатие на 🚫
+        return await callback_query.answer("Вы дошли до текущего периода!")
+    path = await online_statistics(account_id, int(user_id), user, period, int(offset))  # Создание диаграмм
     await callback_query.message.edit_text(
-        f"🌐 <b>Статистика для {'себя' if user_id == account_id else user['name']}</b>", parse_mode=html,
-        link_preview_options=preview_options(f"{path}?time={time_now().timestamp()}", WWW_SITE, show_above_text=True),
-        reply_markup=(await status_user_statistics_menu(account_id, user_id))['reply_markup'])
+        **await status_user_statistics_menu(account_id, user_id, period, int(offset), "себя" if user_id == account_id else user['name']),
+        link_preview_options=preview_options(f"{path}?time={time_now().timestamp()}", WWW_SITE, show_above_text=True))
 
 
 @dp.callback_query(F.data == "new_status_user")
