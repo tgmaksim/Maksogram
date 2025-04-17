@@ -11,6 +11,7 @@ from core import (
     unzip_int_data,
     preview_options,
     generate_sensitive_link,
+    registration_date_by_id,
 )
 
 from aiogram import F
@@ -190,9 +191,10 @@ async def profile_menu(account_id: int) -> dict[str, Any]:
     if subscription['user'] == 'admin':
         subscription['next_payment'] = "конца жизни 😎"
         subscription['fee'] = "бесплатно"
-    return {"text": f"👁 <b>Профиль</b>\nID: {account_id}\nИмя: {account['name']}\n"
-                    f"Регистрация: {account['registration_date']}\nМеня пригласил: {my_referal}\n"
-                    f"Подписка до {subscription['next_payment']}\nСтоимость: {subscription['fee']}",
+    count = await db.fetch_one(f"SELECT MAX(message_id) AS m, COUNT(*) AS sm FROM \"{account_id}_messages\"")
+    return {"text": f"👁 <b>Профиль</b>\nID: {account_id} (аккаунт ≈{registration_date_by_id(account_id)} года)\n"
+                    f"Регистрация: {account['registration_date']}\nСообщений в личках: {count['m']}\nСохранено: {count['sm']}\n"
+                    f"Меня пригласил: {my_referal}\nПодписка до {subscription['next_payment']}\nСтоимость: {subscription['fee']}",
             "parse_mode": html, "reply_markup": reply_markup}
 
 

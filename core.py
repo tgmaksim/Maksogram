@@ -268,6 +268,20 @@ async def generate_sensitive_link(account_id: int, event: str = "menu_link") -> 
     return f"{SITE}?t={token}"
 
 
+def registration_date_by_id(account_id: int):
+    main_bits = account_id // 10**8
+    if main_bits == 0: return "до 2016"
+    if 0 < main_bits <= 5: return "2017"
+    if 5 < main_bits < 10: return "2018"
+    if 10 <= main_bits < 15: return "2019"
+    if 15 <= main_bits <= 18: return "2020"
+    if 18 < main_bits <= 22: return "2021"
+    if 22 < main_bits < 60: return "2022"
+    if 60 <= main_bits < 70: return "2023"
+    if 70 <= main_bits < 80: return "2024"
+    return "2025"
+
+
 def new_telegram_client(phone_number: str) -> TelegramClient:
     return TelegramClient(
         sessions_path(phone_number),
@@ -296,8 +310,8 @@ async def send_email_message(to: str, subject: str, text: str, *, subtype: str =
 
 
 class Variables:
-    version = "2.6"
-    version_string = "2.7.0 (68)"
+    version = "2.7"
+    version_string = "2.7.0 (69)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])
