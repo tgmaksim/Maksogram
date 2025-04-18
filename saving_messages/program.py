@@ -414,6 +414,8 @@ class Program:
                 return await MaksogramBot.send_message(self.id, f"В чате с {peer} замечено самоуничтожающееся медиа. Я не смог "
                                                                 "его сохранить, т. к. по размеру оно превышает 10 МБ")
 
+        if not await db.fetch_one(f"SELECT saving_messages FROM settings WHERE account_id={self.id}", one_data=True):
+            return  # Сохранение сообщений выключено
         try:
             saved_message = await self.client.forward_messages(await self.my_messages, message)
         except (MessageIdInvalidError, ChatForwardsRestrictedError, BroadcastPublicVotersForbiddenError):
@@ -493,6 +495,14 @@ class Program:
         if not event.is_private:
             return await self.message_edited_in_group(event, saved_message_id)
         if not await self.check_reactions(event):  # Если изменено содержание сообщения (текст или медиа)
+            if self.id != event.chat_id and event.is_private \
+                    and await db.fetch_one(f"SELECT notify_changes FROM settings WHERE account_id={self.id}", one_data=True):
+                link_to_message = f"t.me/c/{str(await self.my_messages)[4:]}/{saved_message_id}"  # Сис. канал
+                name = await self.chat_name(event.chat_id)
+                await MaksogramBot.send_message(
+                    self.id, f"В чате с {name} изменено <a href='{link_to_message}'>сообщение</a>", parse_mode="HTML",
+                    reply_markup=MaksogramBot.IMarkup(inline_keyboard=[[
+                        MaksogramBot.IButton(text="Не уведомлять об изменении", callback_data="notify_changes|new")]]))
             await self.client.send_message(await self.my_messages, message, comment_to=saved_message_id)
         else:  # Изменение реакций
             is_premium = await self.is_premium()
@@ -626,6 +636,10 @@ class Program:
         if not time:  # Уведомление не требуется
             return
 
+        self.time_morning_notification = time_now()
+        await db.execute(f"UPDATE accounts SET morning_notification=now() WHERE account_id={self.id}")
+        await db.execute(f"UPDATE status_users SET awake=now() WHERE user_id={event.chat_id}")
+
         my_birthday: Birthday = (await self.client(GetFullUserRequest(self.id))).full_user.birthday
         if my_birthday.month == time.month and my_birthday.day == time.day:  # Поздравление в днем рождения
             postcard = random.choice(os.listdir(resources_path("holidays/birthday")))
@@ -654,9 +668,6 @@ class Program:
                 photo = None
             await MaksogramBot.send_message(self.id, f"Доброе утро! Как спалось? 😉\n\n{await weather(self.id)}",
                                             photo=photo, parse_mode="HTML")
-        self.time_morning_notification = time_now()
-        await db.execute(f"UPDATE accounts SET morning_notification=now() WHERE account_id={self.id}")
-        await db.execute(f"UPDATE status_users SET awake=now() WHERE user_id={event.chat_id}")
 
     async def user_update(self, event: events.userupdate.UserUpdate.Event):
         status = isinstance(event.status, UserStatusOnline)

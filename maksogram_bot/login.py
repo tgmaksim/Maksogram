@@ -336,7 +336,7 @@ async def start_program(account_id: int, username: str, phone_number: int, teleg
     next_payment = time_now() + timedelta(days=7)
     await db.execute(f"INSERT INTO accounts VALUES ({account_id}, '{name}', {phone_number}, "
                      f"{request['my_messages']}, {request['message_changes']}, now(), now())")
-    await db.execute(f"INSERT INTO settings VALUES ({account_id}, '[]', '[]', true, 6, 'Омск')")
+    await db.execute(f"INSERT INTO settings VALUES ({account_id}, '{{}}', '{{}}', true, 6, 'Омск', true, false)")
     await db.execute(f"INSERT INTO payment VALUES ({account_id}, 'user', {Variables.fee}, '{next_payment}', true, now(), now())")
     await db.execute(f"INSERT INTO functions VALUES ({account_id}, '[]')")
     await db.execute(f"INSERT INTO modules VALUES ({account_id}, false, false, false, false, false, false, false, false)")

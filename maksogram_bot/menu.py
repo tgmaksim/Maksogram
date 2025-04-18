@@ -133,9 +133,64 @@ async def settings(account_id: int) -> dict[str, Any]:
                                             [IButton(text="🌏 Город", callback_data="city"),
                                              IButton(text="🚹 🚺 Пол", callback_data="gender")],
                                             [IButton(text="🎁 Пригласить друга", callback_data="friends")],
+                                            [IButton(text="⚙️ Сохранение сообщений", callback_data="saving_messages")],
                                             [IButton(text="◀️  Назад", callback_data="menu")]])
     return {"text": f"⚙️ Общие настройки Maksogram\nЧасовой пояс: {time_zone}:00\nГород: {city}\nПол: {gender}",
             "reply_markup": reply_markup}
+
+
+@dp.callback_query(F.data == "saving_messages")
+@security()
+async def _saving_messages(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    await callback_query.message.edit_text(**await saving_messages_menu(callback_query.from_user.id))
+
+
+async def saving_messages_menu(account_id: int) -> dict[str, Any]:
+    account_settings = await db.fetch_one(f"SELECT added_chats, removed_chats, saving_messages, notify_changes "
+                                          f"FROM settings WHERE account_id={account_id}")
+    if account_settings['saving_messages']:  # Сохранение сообщений включено
+        indicator, command = ("🔴", "off") if account_settings['notify_changes'] else ("🟢", "on")
+        markup = IMarkup(inline_keyboard=[[IButton(text="🔴 Выкл", callback_data="saving_messages_off"),
+                                           IButton(text="Чаты работы", callback_data="chats")],
+                                          [IButton(text=f"{indicator} Увед об изменении сообщений", callback_data=f"notify_changes_{command}")],
+                                          [IButton(text="◀️  Назад", callback_data="settings")]])
+    else:
+        markup = IMarkup(inline_keyboard=[[IButton(text="🟢 Включить", callback_data="saving_messages_on")],
+                                          [IButton(text="◀️  Назад", callback_data="settings")]])
+    return {"text": "💬 Сохранение сообщений\n<blockquote>При выключении Сохранения сообщений остальные функции смогут "
+                    "работать</blockquote>\n<blockquote>⚠️ По умолчанию Maksogram работает только в личных чатах. Можно добавить "
+                    "нужные группы и удалить ненужные лички</blockquote>", "parse_mode": html, "reply_markup": markup}
+
+
+@dp.callback_query(F.data.in_(["saving_messages_on", "saving_messages_off", "notify_changes_on", "notify_changes_off"]))
+@security()
+async def _saving_messages_switch(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    account_id = callback_query.from_user.id
+    function, command = callback_query.data.rsplit("_", 1)
+    await db.execute(f"UPDATE settings SET {function}={'true' if command == 'on' else 'false'} WHERE account_id={account_id}")
+    if function == "notify_changes" and command == "on":
+        await callback_query.answer("Теперь каждое изменение сообщения будет уведомляться! Оно вам надо? :)", True)
+    await callback_query.message.edit_text(**await saving_messages_menu(account_id))
+
+
+@dp.callback_query(F.data == "chats")
+@security()
+async def _chats(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    await callback_query.message.edit_text(**await chats_menu(callback_query.from_user.id))
+
+
+async def chats_menu(account_id: int) -> dict[str, Any]:
+    chats = await db.fetch_one(f"SELECT added_chats, removed_chats FROM settings WHERE account_id={account_id}")
+    added_names = "\n".join(['    • ' + name for name in chats['added_chats'].values()])
+    removed_names = "\n".join(['    • ' + name for name in chats['removed_chats'].values()])
+    markup = IMarkup(inline_keyboard=[[IButton(text="➕ Добавить", callback_data="add_chat"),
+                                       IButton(text="➖ Удалить", callback_data="remove_chat")],
+                                      [IButton(text="◀️  Назад", callback_data="saving_messages")]])
+    return {"text": f"💬 Чаты работы Maksogram\nПо умолчанию только личные\nДобавлены:\n{added_names}\nУдалены:\n{removed_names}",
+            "parse_mode": html, "reply_markup": markup}
 
 
 @dp.callback_query(F.data == "gender")
