@@ -52,6 +52,8 @@ from . security import security_initial
 security_initial()
 from . gifts import gifts_initial
 gifts_initial()
+from . ghost_mode import ghost_mode_initial
+ghost_mode_initial()
 
 
 @dp.message(Command('version'))

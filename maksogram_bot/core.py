@@ -66,6 +66,9 @@ class UserState(StatesGroup):
     security_email = State('security_email')
     confirm_security_email = State('confirm_security_email')
     security_new_agent = State('security_new_agent')
+    add_chat = State('add_chat')
+    remove_chat = State('remove_chat')
+    ghost_stories = State('ghost_stories')
 
 
 async def convert_ruble(amount_rub: int, currencies: dict[str, Union[str, int]]):

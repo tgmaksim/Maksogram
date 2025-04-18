@@ -18,6 +18,7 @@ from aiogram import F
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import Command, CommandStart
 from aiogram.types import KeyboardButton as KButton
+from aiogram.types import KeyboardButtonRequestChat
 from aiogram.types import ReplyKeyboardMarkup as KMarkup
 from aiogram.types import ReplyKeyboardRemove as KRemove
 from aiogram.types import InlineKeyboardMarkup as IMarkup
@@ -98,12 +99,13 @@ async def menu(account_id: int) -> dict[str, Any]:
                                           [IButton(text="⚙️ Настройки", callback_data="settings")],
                                           [IButton(text="ℹ️ Памятка по функциям", url=await generate_sensitive_link(account_id))]])
     else:
-        markup = IMarkup(inline_keyboard=[[IButton(text="🔴 Выключить Maksogram", callback_data="off")],
+        markup = IMarkup(inline_keyboard=[[IButton(text="🔴 Выключить", callback_data="off"),
+                                           IButton(text="⚙️ Настройки", callback_data="settings")],
                                           [IButton(text="📸 Новая аватарка", callback_data="avatars"),
                                            IButton(text="🎁 Новый подарок", callback_data="gifts")],
                                           [IButton(text="🌐 Друг в сети", callback_data="status_users"),
                                            IButton(text="🤖 Автоответчик", callback_data="answering_machine")],
-                                          [IButton(text="⚙️ Настройки", callback_data="settings"),
+                                          [IButton(text="👀 Призрак", callback_data="ghost_mode"),
                                            IButton(text="💬 Maksogram в чате", callback_data="modules")],  # IButton(text="🛡 Защита аккаунта", callback_data="security")
                                           [IButton(text="ℹ️ Памятка по функциям", url=await generate_sensitive_link(account_id))]])
     return {"text": "⚙️ Maksogram — меню ⚙️", "reply_markup": markup}
@@ -191,6 +193,24 @@ async def chats_menu(account_id: int) -> dict[str, Any]:
                                       [IButton(text="◀️  Назад", callback_data="saving_messages")]])
     return {"text": f"💬 Чаты работы Maksogram\nПо умолчанию только личные\nДобавлены:\n{added_names}\nУдалены:\n{removed_names}",
             "parse_mode": html, "reply_markup": markup}
+
+
+# @dp.callback_query(F.data == "add_chat")
+# @security('state')
+# async def _add_chat_start(callback_query: CallbackQuery, state: FSMContext):
+#     if await new_callback_query(callback_query): return
+#     account_id = callback_query.from_user.id
+#     if await db.fetch_one(f"SELECT COUNT(*) FROM jsonb_object_keys((SELECT added_chats FROM settings "
+#                           f"WHERE account_id={account_id}))", one_data=True) >= 3:
+#         if account_id != OWNER:
+#             return await callback_query.answer("Вы добавили максимальное кол-во чатов")
+#     await state.set_state(UserState.add_chat)
+#     request_chat = KeyboardButtonRequestChat(request_id=1, chat_is_channel=False)
+#     markup = KMarkup(keyboard=[[KButton(text="Выбрать", request_users=request_chat)],
+#                                [KButton(text="Отмена")]], resize_keyboard=True)
+#     message_id = (await callback_query.message.answer("Отправьте группу для работы Maksogram", reply_markup=markup)).message_id
+#     await state.update_data(message_id=message_id)
+#     await callback_query.message.delete()
 
 
 @dp.callback_query(F.data == "gender")
