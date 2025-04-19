@@ -1,5 +1,5 @@
-from typing import Any
 from html import escape
+from typing import Any, Union
 from modules.weather import check_city
 from asyncpg.exceptions import UniqueViolationError
 from core import (
@@ -8,21 +8,27 @@ from core import (
     SITE,
     OWNER,
     security,
+    json_encode,
     unzip_int_data,
     preview_options,
+    telegram_clients,
     generate_sensitive_link,
     registration_date_by_id,
 )
 
 from aiogram import F
 from aiogram.fsm.context import FSMContext
+from telethon.tl.types.messages import ChatFull
 from aiogram.filters import Command, CommandStart
 from aiogram.types import KeyboardButton as KButton
-from aiogram.types import KeyboardButtonRequestChat
 from aiogram.types import ReplyKeyboardMarkup as KMarkup
 from aiogram.types import ReplyKeyboardRemove as KRemove
 from aiogram.types import InlineKeyboardMarkup as IMarkup
 from aiogram.types import InlineKeyboardButton as IButton
+from telethon.tl.functions.messages import GetFullChatRequest
+from telethon.tl.functions.channels import GetFullChannelRequest
+from telethon.tl.types import InputChannel, InputPeerChat, InputPeerChannel
+from aiogram.types import KeyboardButtonRequestChat, KeyboardButtonRequestUsers
 from .core import (
     dp,
     bot,
@@ -186,31 +192,107 @@ async def _chats(callback_query: CallbackQuery):
 
 async def chats_menu(account_id: int) -> dict[str, Any]:
     chats = await db.fetch_one(f"SELECT added_chats, removed_chats FROM settings WHERE account_id={account_id}")
-    added_names = "\n".join(['    • ' + name for name in chats['added_chats'].values()])
-    removed_names = "\n".join(['    • ' + name for name in chats['removed_chats'].values()])
-    markup = IMarkup(inline_keyboard=[[IButton(text="➕ Добавить", callback_data="add_chat"),
+    added_names = "\n".join([f"    • {name}" for name in chats['added_chats'].values()])
+    removed_names = "\n".join([f"    • {name}" for name in chats['removed_chats'].values()])
+    buttons = [IButton(text=f"🚫 {name}", callback_data=f"remove_added_chat_{chat_id}") for chat_id, name in chats['added_chats'].items()] + \
+              [IButton(text=f"🚫 {name}", callback_data=f"remove_removed_chat_{chat_id}") for chat_id, name in chats['removed_chats'].items()]
+    buttons = [([buttons[i], buttons[i+1]] if i+1 < len(buttons) else [buttons[i]]) for i in range(0, len(buttons), 2)]
+    markup = IMarkup(inline_keyboard=[*buttons,
+                                      [IButton(text="➕ Добавить", callback_data="add_chat"),
                                        IButton(text="➖ Удалить", callback_data="remove_chat")],
                                       [IButton(text="◀️  Назад", callback_data="saving_messages")]])
-    return {"text": f"💬 Чаты работы Maksogram\nПо умолчанию только личные\nДобавлены:\n{added_names}\nУдалены:\n{removed_names}",
+    return {"text": f"💬 Чаты работы Maksogram\n<b>По умолчанию только личные</b>\nДобавлены:\n{added_names}\nУдалены:\n{removed_names}",
             "parse_mode": html, "reply_markup": markup}
 
 
-# @dp.callback_query(F.data == "add_chat")
-# @security('state')
-# async def _add_chat_start(callback_query: CallbackQuery, state: FSMContext):
-#     if await new_callback_query(callback_query): return
-#     account_id = callback_query.from_user.id
-#     if await db.fetch_one(f"SELECT COUNT(*) FROM jsonb_object_keys((SELECT added_chats FROM settings "
-#                           f"WHERE account_id={account_id}))", one_data=True) >= 3:
-#         if account_id != OWNER:
-#             return await callback_query.answer("Вы добавили максимальное кол-во чатов")
-#     await state.set_state(UserState.add_chat)
-#     request_chat = KeyboardButtonRequestChat(request_id=1, chat_is_channel=False)
-#     markup = KMarkup(keyboard=[[KButton(text="Выбрать", request_users=request_chat)],
-#                                [KButton(text="Отмена")]], resize_keyboard=True)
-#     message_id = (await callback_query.message.answer("Отправьте группу для работы Maksogram", reply_markup=markup)).message_id
-#     await state.update_data(message_id=message_id)
-#     await callback_query.message.delete()
+@dp.callback_query(F.data == "add_chat")
+@security('state')
+async def _add_chat_start(callback_query: CallbackQuery, state: FSMContext):
+    if await new_callback_query(callback_query): return
+    account_id = callback_query.from_user.id
+    if await db.fetch_one(f"SELECT COUNT(*) FROM jsonb_object_keys((SELECT added_chats FROM settings "
+                          f"WHERE account_id={account_id}))", one_data=True) >= 3:
+        if account_id != OWNER:
+            return await callback_query.answer("Вы добавили максимальное кол-во чатов")
+    await state.set_state(UserState.add_chat)
+    request_chat = KeyboardButtonRequestChat(request_id=1, chat_is_channel=False, request_title=True)
+    markup = KMarkup(keyboard=[[KButton(text="Выбрать", request_chat=request_chat)],
+                               [KButton(text="Отмена")]], resize_keyboard=True)
+    message_id = (await callback_query.message.answer("Отправьте группу для работы Maksogram", reply_markup=markup)).message_id
+    await state.update_data(message_id=message_id)
+    await callback_query.message.delete()
+
+
+@dp.message(UserState.add_chat)
+@security('state')
+async def _add_chat(message: Message, state: FSMContext):
+    if await new_message(message): return
+    account_id = message.chat.id
+    message_id = (await state.get_data())['message_id']
+    await state.clear()
+    if message.content_type == "chat_shared":
+        chat_id, chat_name = message.chat_shared.chat_id, message.chat_shared.title
+        telegram_client = telegram_clients[account_id]
+        chat: Union[InputChannel, InputPeerChat] = await telegram_client.get_input_entity(chat_id)
+        if isinstance(chat, (InputChannel, InputPeerChannel, InputPeerChat)):
+            if isinstance(chat, (InputChannel, InputPeerChannel)):
+                chat = InputChannel(chat.channel_id, chat.access_hash)
+                full_chat: ChatFull = await telegram_client(GetFullChannelRequest(chat))
+                count = full_chat.full_chat.participants_count
+            else:  # InputPeerChat
+                full_chat: ChatFull = await telegram_client(GetFullChatRequest(-chat_id))
+                count = len(full_chat.full_chat.participants.participants)
+            if count > 100:
+                await message.answer("<b>Чат слишком большой!</b>", parse_mode=html)
+            else:
+                new_chat = json_encode({f"{chat_id}": chat_name})
+                await db.execute(f"UPDATE settings SET added_chats=added_chats || '{new_chat}' WHERE account_id={account_id}")
+        else:
+            await message.answer("<b>Сожалеем. Чат не найден!</b>", parse_mode=html)
+        await message.answer(**await chats_menu(account_id))
+    else:
+        await message.answer(**await chats_menu(account_id))
+    await bot.delete_messages(chat_id=message.chat.id, message_ids=[message.message_id, message_id])
+
+
+@dp.callback_query(F.data == "remove_chat")
+@security('state')
+async def _remove_chat_start(callback_query: CallbackQuery, state: FSMContext):
+    if await new_callback_query(callback_query): return
+    await state.set_state(UserState.remove_chat)
+    request_users = KeyboardButtonRequestUsers(request_id=1, user_is_bot=False, max_quantity=1)
+    markup = KMarkup(keyboard=[[KButton(text="Выбрать", request_users=request_users)],
+                               [KButton(text="Отмена")]], resize_keyboard=True)
+    message_id = (await callback_query.message.answer("Отправьте личный чат, в котором не будет работать Maksogram", reply_markup=markup)).message_id
+    await state.update_data(message_id=message_id)
+    await callback_query.message.delete()
+
+
+@dp.message(UserState.remove_chat)
+@security('state')
+async def _remove_chat(message: Message, state: FSMContext):
+    if await new_message(message): return
+    account_id = message.chat.id
+    message_id = (await state.get_data())['message_id']
+    await state.clear()
+    if message.content_type == "users_shared":
+        user_id = message.users_shared.user_ids[0]
+        user = await telegram_clients[account_id].get_entity(user_id)
+        name = f"{user.first_name} {user.last_name or ''}".strip()
+        new_chat = json_encode({f"{user_id}": name})
+        await db.execute(f"UPDATE settings SET removed_chats=removed_chats || '{new_chat}' WHERE account_id={account_id}")
+    await message.answer(**await chats_menu(account_id))
+    await bot.delete_messages(chat_id=message.chat.id, message_ids=[message.message_id, message_id])
+
+
+@dp.callback_query(F.data.startswith("remove_added_chat").__or__(F.data.startswith("remove_removed_chat")))
+@security()
+async def _remove_this_chat(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    account_id = callback_query.from_user.id
+    field, chat_id = callback_query.data.replace("remove_", "").replace("chat", "chats").rsplit("_", 1)
+    await db.execute(f"UPDATE settings SET {field}={field} - '{chat_id}' WHERE account_id={account_id}")
+    await callback_query.message.edit_text(**await chats_menu(account_id))
 
 
 @dp.callback_query(F.data == "gender")

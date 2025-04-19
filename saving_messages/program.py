@@ -170,8 +170,8 @@ class Program:
 
     async def initial_checking_event(self, event: EventCommon) -> bool:
         return event.is_private and \
-            not await db.fetch_one(f"SELECT removed_chats @> '{event.chat_id}' FROM settings WHERE account_id={self.id}", one_data=True) or \
-            await db.fetch_one(f"SELECT added_chats @> '{event.chat_id}' FROM settings WHERE account_id={self.id}", one_data=True)
+            not await db.fetch_one(f"SELECT removed_chats ? '{event.chat_id}' FROM settings WHERE account_id={self.id}", one_data=True) or \
+            await db.fetch_one(f"SELECT added_chats ? '{event.chat_id}' FROM settings WHERE account_id={self.id}", one_data=True)
 
     async def secondary_checking_event(self, event: EventCommon) -> bool:
         if event.is_private:

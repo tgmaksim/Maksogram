@@ -79,7 +79,8 @@ async def _ghost_stories_watch(message: Message, state: FSMContext):
                 else:
                     continue
                 await telegram_client.download_media(story.media, www_path(path))
-            links = '\n'.join([f"<a href='{WWW_SITE}/{path}'>История №{i+1}</a>" for i, path in enumerate(paths)])
+            links = '\n'.join([f"<a href='{WWW_SITE}/{path}'>История №{i+1}</a>" for i, path in enumerate(paths)]) if paths \
+                else "<b>Истории не найдены</b>"
             markup = IMarkup(inline_keyboard=[[IButton(text="◀️  Назад", callback_data="ghost_mode")]])
             await message.answer(f"👀 <b>Режим призрака</b>\nПосмотреть истории в «режиме призрака» можно по ссылкам ниже\n{links}",
                                  disable_web_page_preview=True, parse_mode=html, reply_markup=markup)
