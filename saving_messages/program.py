@@ -638,7 +638,7 @@ class Program:
 
         self.time_morning_notification = time_now()
         await db.execute(f"UPDATE accounts SET morning_notification=now() WHERE account_id={self.id}")
-        await db.execute(f"UPDATE status_users SET awake=now() WHERE user_id={event.chat_id}")
+        await db.execute(f"UPDATE status_users SET awake=now() WHERE user_id={event.chat_id} AND awake IS NOT NULL")
 
         my_birthday: Birthday = (await self.client(GetFullUserRequest(self.id))).full_user.birthday
         if my_birthday.month == time.month and my_birthday.day == time.day:  # Поздравление в днем рождения
