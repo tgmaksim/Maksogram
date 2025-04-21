@@ -229,7 +229,8 @@ class Program:
 
     async def modules(self, message: Message) -> bool:
         text = message.text.lower()
-        if not (text and "\n" not in text and message.out and (message.media is None or isinstance(message.media, MessageMediaWebPage))):
+        bot = message.chat_id == MaksogramBot.id
+        if not (bot or text and "\n" not in text and message.out and (message.media is None or isinstance(message.media, MessageMediaWebPage))):
             return False
 
         reply_message = await self.get_message_by_id(message.chat_id, message.reply_to.reply_to_msg_id) if \
@@ -238,7 +239,7 @@ class Program:
             return False
 
         # Калькулятор
-        if text[-1] == "=" and message.entities is None:
+        if text and text[-1] == "=" and message.entities is None:
             if await db.fetch_one(f"SELECT calculator FROM modules WHERE account_id={self.id}", one_data=True):
                 request = calculator(text[:-1])
                 if request:
@@ -251,7 +252,7 @@ class Program:
                                                          "Вы можете включить ее в настройках\n/menu_chat (Maksogram в чате)")
 
         # Генератор QR
-        elif any([command in text for command in ("создай", "сгенерируй", "qr", "создать", "сгенерировать")]) \
+        elif text and any([command in text for command in ("создай", "сгенерируй", "qr", "создать", "сгенерировать")]) \
                 and len(message.entities or []) == 1 and isinstance(message.entities[0], MessageEntityUrl):
             if await db.fetch_one(f"SELECT qrcode FROM modules WHERE account_id={self.id}", one_data=True):
                 link = message.text[message.entities[0].offset:message.entities[0].length + message.entities[0].offset]
@@ -266,15 +267,20 @@ class Program:
                                                          "Вы можете включить в настройках\n/menu_chat (Maksogram в чате)")
 
         # Расшифровка голосовых сообщений
-        elif reply_message and reply_message.voice and any([command in text for command in ("расшифруй", "в текст", "расшифровать")]):
+        elif bot and message.voice or \
+                reply_message and reply_message.voice and any([command in text for command in ("расшифруй", "в текст", "расшифровать")]):
             if await db.fetch_one(f"SELECT audio_transcription FROM modules WHERE account_id={self.id}", one_data=True):
                 if self.is_premium():
-                    await message.edit("🤖 @MaksogramBot в чате\n🗣 Расшифровка голосового ✍️",
-                                       formatting_entities=[MessageEntityCustomEmoji(0, 2, 5418001570597986649),
-                                                            MessageEntityCustomEmoji(24, 2, 5787303083709041530),
-                                                            MessageEntityCustomEmoji(50, 2, 5787196143318339389)])
+                    data = {f"{'message' if bot else 'text'}": "🤖 @MaksogramBot в чате\n🗣 Расшифровка голосового ✍️",
+                            "formatting_entities": [MessageEntityCustomEmoji(0, 2, 5418001570597986649),
+                                                    MessageEntityCustomEmoji(24, 2, 5787303083709041530),
+                                                    MessageEntityCustomEmoji(50, 2, 5787196143318339389)]}
                 else:
-                    await message.edit("@MaksogramBot в чате\nРасшифровка голосового...")
+                    data = {f"{'message' if bot else 'text'}": "@MaksogramBot в чате\nРасшифровка голосового..."}
+                if bot:
+                    reply_message, message = message, await message.reply(**data)
+                else:
+                    await message.edit(**data)
                 buffer = BytesIO()
                 await self.client.download_media(reply_message.media, file=buffer)
                 answer = await audio_transcription(buffer.getvalue())
@@ -291,7 +297,7 @@ class Program:
                                                          "Вы можете включить в настройках\n/menu_chat (Maksogram в чате)")
 
         # Погода
-        elif all([command in text for command in ("какая", "погода")]):
+        elif text and all([command in text for command in ("какая", "погода")]):
             if await db.fetch_one(f"SELECT weather FROM modules WHERE account_id={self.id}", one_data=True):
                 request = await weather(self.id)
                 await message.edit(f"@MaksogramBot в чате\n{request}", parse_mode="HTML")
@@ -302,16 +308,23 @@ class Program:
                                                          "Вы можете включить ее в настройках\n/menu_chat (Maksogram в чате)")
 
         # Конвертер видео в кружок
-        elif reply_message and reply_message.video and "кружок" in text:
+        elif bot and message.video or reply_message and reply_message.video and "кружок" in text:
             if await db.fetch_one(f"SELECT round_video FROM modules WHERE account_id={self.id}", one_data=True):
-                if reply_message.video.attributes[0].duration >= 60:
-                    await message.edit("🤖 @MaksogramBot в чате\nВидео слишком длинное! ⚠️",
-                                       formatting_entities=[MessageEntityCustomEmoji(0, 2, 5418001570597986649),
-                                                            MessageEntityCustomEmoji(47, 2, 5364241851500997604)])
+                video = message.video if bot else reply_message.video
+                if video.attributes[0].duration >= 60:
+                    data = {f"{'message' if bot else 'text'}": "🤖 @MaksogramBot в чате\nВидео слишком длинное! ⚠️",
+                            "formatting_entities": [MessageEntityCustomEmoji(0, 2, 5418001570597986649),
+                                                    MessageEntityCustomEmoji(47, 2, 5364241851500997604)]}
+                    if bot: await message.reply(**data)
+                    else: await message.edit(**data)
                 else:
-                    await message.edit("🤖 @MaksogramBot в чате\nКонвертация видео в кружок ⏰",
-                                       formatting_entities=[MessageEntityCustomEmoji(0, 2, 5418001570597986649),
-                                                            MessageEntityCustomEmoji(51, 1, 5371071931833393000)])
+                    data = {f"{'message' if bot else 'text'}": "🤖 @MaksogramBot в чате\nКонвертация видео в кружок ⏰",
+                            "formatting_entities": [MessageEntityCustomEmoji(0, 2, 5418001570597986649),
+                                                    MessageEntityCustomEmoji(51, 1, 5371071931833393000)]}
+                    if bot:
+                        reply_message, message = message, await message.reply(**data)
+                    else:
+                        await message.edit(**data)
                     video_path = resources_path(f"round_video/{reply_message.video.id}.mp4")
                     await self.client.download_media(reply_message.media, file=video_path)
                     answer = round_video(video_path)

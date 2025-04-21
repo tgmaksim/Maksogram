@@ -86,7 +86,7 @@ async def _ghost_stories_watch(message: Message, state: FSMContext):
                                  disable_web_page_preview=True, parse_mode=html, reply_markup=markup)
             await wait_message.delete()
     else:
-        await message.answer(ghost_mode_menu())
+        await message.answer(**ghost_mode_menu())
     await bot.delete_messages(chat_id=message.chat.id, message_ids=[message.message_id, message_id])
 
 
