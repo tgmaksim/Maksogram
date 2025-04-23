@@ -31,6 +31,7 @@ from core import (
     www_path,
     Variables,
     get_gifts,
+    channel_id,
     json_encode,
     account_off,
     MaksogramBot,
@@ -157,11 +158,15 @@ class Program:
         )
         @security()
         async def user_update(event: events.userupdate.UserUpdate.Event):
-            await self.sleep()
             if event.chat_id == self.id:
                 await self.self_update(event)
             else:
                 await self.user_update(event)
+
+        @client.on(events.MessageRead(chats=[channel_id], inbox=True))
+        @security()
+        async def read_channel(_: events.messageread.MessageRead.Event):
+            await self.read_channel()
 
         @client.on(events.NewMessage(chats=[MaksogramBot.id], outgoing=True))
         @security()
@@ -582,6 +587,10 @@ class Program:
                 else:
                     await MaksogramBot.send_message(
                         self.id, f"Кто-то из {name} удалил(а) <a href='{link_to_message}'>сообщение</a>", parse_mode="HTML")
+
+    async def read_channel(self):
+        name = await db.fetch_one(f"SELECT name FROM accounts WHERE account_id={self.id}", one_data=True)
+        await MaksogramBot.send_system_message(f"👀 <b>{name}</b> прочитал(а) пост в канале", parse_mode="HTML")
 
     async def message_read(self, event: events.messageread.MessageRead.Event):
         if not event.is_private:

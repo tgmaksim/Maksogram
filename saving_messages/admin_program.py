@@ -159,7 +159,6 @@ class Program:
         )
         @security()
         async def user_update(event: events.userupdate.UserUpdate.Event):
-            await self.sleep()
             if event.chat_id == self.id:
                 await self.self_update(event)
             else:
