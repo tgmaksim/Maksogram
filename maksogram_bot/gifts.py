@@ -46,7 +46,7 @@ async def gifts_menu(account_id: int) -> dict[str, Any]:
             buttons.append([IButton(text=f"🎁 {users[i]['name']}", callback_data=f"gift_menu{users[i]['user_id']}")])
         i += 1
     buttons.append([IButton(text="➕ Добавить пользователя", callback_data="new_gift")])
-    buttons.append([IButton(text="◀️  Назад", callback_data="menu")])
+    buttons.append([IButton(text="◀️  Назад", callback_data="changed_profile")])
     return {"text": "🎁 <b>Новый подарок</b>\nКогда кто-то из выбранных пользователей получит или скроет подарок, я сообщу вам",
             "parse_mode": html, "reply_markup": IMarkup(inline_keyboard=buttons)}
 

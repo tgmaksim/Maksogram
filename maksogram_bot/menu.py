@@ -105,16 +105,30 @@ async def menu(account_id: int) -> dict[str, Any]:
                                           [IButton(text="⚙️ Настройки", callback_data="settings")],
                                           [IButton(text="ℹ️ Памятка по функциям", url=await generate_sensitive_link(account_id))]])
     else:
-        markup = IMarkup(inline_keyboard=[[IButton(text="🔴 Выключить", callback_data="off"),
-                                           IButton(text="⚙️ Настройки", callback_data="settings")],
-                                          [IButton(text="📸 Новая аватарка", callback_data="avatars"),
-                                           IButton(text="🎁 Новый подарок", callback_data="gifts")],
-                                          [IButton(text="🌐 Друг в сети", callback_data="status_users"),
+        markup = IMarkup(inline_keyboard=[[IButton(text="🔴 Выключить Maksogram", callback_data="off")],
+                                          [IButton(text="👨‍🏫 Профиль друга", callback_data="changed_profile"),
                                            IButton(text="🤖 Автоответчик", callback_data="answering_machine")],
-                                          [IButton(text="👀 Призрак", callback_data="ghost_mode"),
+                                          [IButton(text="🌐 Друг в сети", callback_data="status_users"),
+                                           IButton(text="👀 Призрак", callback_data="ghost_mode")],
+                                          [IButton(text="⚙️ Настройки", callback_data="settings"),
                                            IButton(text="💬 Maksogram в чате", callback_data="modules")],  # IButton(text="🛡 Защита аккаунта", callback_data="security")
                                           [IButton(text="ℹ️ Памятка по функциям", url=await generate_sensitive_link(account_id))]])
     return {"text": "⚙️ Maksogram — меню ⚙️", "reply_markup": markup}
+
+
+@dp.callback_query(F.data == "changed_profile")
+@security()
+async def _changed_profile(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    await callback_query.message.edit_text(**changed_profile_menu())
+
+
+def changed_profile_menu() -> dict[str, Any]:
+    markup = IMarkup(inline_keyboard=[[IButton(text="📸 Новая аватарка", callback_data="avatars"),
+                                       IButton(text="🎁 Новый подарок", callback_data="gifts")],
+                                      [IButton(text="◀️  Назад", callback_data="menu")]])
+    return {"text": "👨‍🏫 <b>Профиль друга</b>\nЗдесь функции с которыми можно следить за профилем друга в Telegram",
+            "parse_mode": html, "reply_markup": markup}
 
 
 @dp.message(Command('settings'))
