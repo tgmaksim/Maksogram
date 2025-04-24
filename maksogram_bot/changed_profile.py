@@ -58,7 +58,7 @@ async def changed_profiles_menu(account_id: int) -> dict[str, Any]:
 @security('state')
 async def _new_changed_profile_start(callback_query: CallbackQuery, state: FSMContext):
     if await new_callback_query(callback_query): return
-    if await db.fetch_one(f"SELECT COUNT(*) FROM avatars WHERE account_id={callback_query.from_user.id}", one_data=True) >= 4:
+    if await db.fetch_one(f"SELECT COUNT(*) FROM changed_profiles WHERE account_id={callback_query.from_user.id}", one_data=True) >= 4:
         return await callback_query.answer("У вас максимальное количество \"новых аватарок\"")
     await state.set_state(UserState.changed_profile)
     request_users = KeyboardButtonRequestUsers(request_id=1, user_is_bot=False)
