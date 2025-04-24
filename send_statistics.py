@@ -6,6 +6,8 @@ from core import db, time_now, MaksogramBot, SITE
 
 async def main():
     for statistics in await db.fetch_all("SELECT account_id, answering_machine, audio_transcription, weather FROM statistics"):
+        if not await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={statistics['account_id']}", one_data=True):
+            continue
         if statistics['answering_machine'] and time_now() - statistics['answering_machine'] >= timedelta(days=7):
             await MaksogramBot.send_message(
                 statistics['account_id'],

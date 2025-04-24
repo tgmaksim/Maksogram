@@ -271,7 +271,7 @@ class Program:
         # Расшифровка голосовых сообщений
         elif bot_voice or reply_message and reply_message.voice and any([command in text for command in ("расшифруй", "в текст", "расшифровать")]):
             if await db.fetch_one(f"SELECT audio_transcription FROM modules WHERE account_id={self.id}", one_data=True):
-                if self.is_premium():
+                if await self.is_premium():
                     data = {f"{'message' if bot_voice else 'text'}": "🤖 @MaksogramBot в чате\n🗣 Расшифровка голосового ✍️",
                             "formatting_entities": [MessageEntityCustomEmoji(0, 2, 5418001570597986649),
                                                     MessageEntityCustomEmoji(24, 2, 5787303083709041530),
