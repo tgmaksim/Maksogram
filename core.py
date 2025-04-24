@@ -32,9 +32,11 @@ from dataclasses import dataclass
 from telethon import TelegramClient
 from email.mime.text import MIMEText
 from datetime import datetime, timedelta
+from telethon.tl.types.users import UserFull
 from telethon.tl.types.photos import PhotosSlice
 from telethon.tl.types import StarGiftUnique, Photo
 from telethon.tl.types.payments import SavedStarGifts
+from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.functions.photos import GetUserPhotosRequest
 from telethon.tl.functions.payments import GetSavedStarGiftsRequest
 from sys_keys import sessions_path, TOKEN, BOT_ID, USERNAME_BOT, email
@@ -121,8 +123,8 @@ async def get_avatars(account_id: int, user_id: int) -> Union[dict[str, Photo], 
 
 async def get_gifts(account_id: int, user_id: int) -> Union[dict[str, Gift], None]:
     result = {}
-    saved_gifts: SavedStarGifts = (await telegram_clients[account_id](GetSavedStarGiftsRequest(peer=user_id, offset="", limit=32)))
-    if saved_gifts.count > 32:
+    saved_gifts: SavedStarGifts = (await telegram_clients[account_id](GetSavedStarGiftsRequest(peer=user_id, offset="", limit=64)))
+    if saved_gifts.count > 64:
         return None
     for saved_gift in saved_gifts.gifts:
         gift = saved_gift.gift
@@ -136,6 +138,11 @@ async def get_gifts(account_id: int, user_id: int) -> Union[dict[str, Gift], Non
         else:
             result[str(gift.id)] = Gift(str(gift.id), False, giver, gift.limited, gift.stars, None)
     return result
+
+
+async def get_bio(account_id: int, user_id: int) -> str:
+    full_user: UserFull = await telegram_clients[account_id](GetFullUserRequest(user_id))
+    return full_user.full_user.about
 
 
 async def check_connection(telegram_client: TelegramClient) -> bool:
@@ -312,7 +319,7 @@ async def send_email_message(to: str, subject: str, text: str, *, subtype: str =
 
 class Variables:
     version = "2.7"
-    version_string = "2.7.2 (76)"
+    version_string = "2.7.2 (77)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])

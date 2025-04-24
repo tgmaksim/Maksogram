@@ -42,18 +42,16 @@ from . modules import modules_initial
 modules_initial()
 from . status_users import status_users_initial
 status_users_initial()
-from . avatars import avatars_initial
-avatars_initial()
 from . answering_machine import answering_machine_initial
 answering_machine_initial()
 from . login import login_initial
 login_initial()
 from . security import security_initial
 security_initial()
-from . gifts import gifts_initial
-gifts_initial()
 from . ghost_mode import ghost_mode_initial
 ghost_mode_initial()
+from . changed_profile import changed_profile_initial
+changed_profile_initial()
 
 
 @dp.message(Command('version'))

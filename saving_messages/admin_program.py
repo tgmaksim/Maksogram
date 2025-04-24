@@ -27,6 +27,7 @@ from telethon.errors import ChatForwardsRestrictedError, FileReferenceExpiredErr
 from core import (
     db,
     morning,
+    get_bio,
     security,
     time_now,
     www_path,
@@ -230,6 +231,7 @@ class Program:
     async def modules(self, message: Message) -> bool:
         text = message.text.lower()
         bot = message.chat_id == MaksogramBot.id
+        bot_voice, bot_video = bot and message.voice, bot and message.video
         if not (bot or text and "\n" not in text and message.out and (message.media is None or isinstance(message.media, MessageMediaWebPage))):
             return False
 
@@ -244,7 +246,7 @@ class Program:
                 request = calculator(text[:-1])
                 if request:
                     await message.edit(request)
-                    return True
+                    return "Калькулятор"
                 else:
                     await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться калькулятором? Вы неправильно ввели пример")
             else:
@@ -261,23 +263,22 @@ class Program:
                                    formatting_entities=[MessageEntityCustomEmoji(0, 2, 5418001570597986649),
                                                         MessageEntityTextUrl(45, 6, link), MessageEntityBold(45, 6)])
                 os.remove(qr)
-                return True
+                return "Генератор QR"
             else:
                 await MaksogramBot.send_message(self.id, "Вы хотели создать QR-код? Данная функция отключена у вас! "
                                                          "Вы можете включить в настройках\n/menu_chat (Maksogram в чате)")
 
         # Расшифровка голосовых сообщений
-        elif bot and message.voice or \
-                reply_message and reply_message.voice and any([command in text for command in ("расшифруй", "в текст", "расшифровать")]):
+        elif bot_voice or reply_message and reply_message.voice and any([command in text for command in ("расшифруй", "в текст", "расшифровать")]):
             if await db.fetch_one(f"SELECT audio_transcription FROM modules WHERE account_id={self.id}", one_data=True):
                 if self.is_premium():
-                    data = {f"{'message' if bot else 'text'}": "🤖 @MaksogramBot в чате\n🗣 Расшифровка голосового ✍️",
+                    data = {f"{'message' if bot_voice else 'text'}": "🤖 @MaksogramBot в чате\n🗣 Расшифровка голосового ✍️",
                             "formatting_entities": [MessageEntityCustomEmoji(0, 2, 5418001570597986649),
                                                     MessageEntityCustomEmoji(24, 2, 5787303083709041530),
                                                     MessageEntityCustomEmoji(50, 2, 5787196143318339389)]}
                 else:
-                    data = {f"{'message' if bot else 'text'}": "@MaksogramBot в чате\nРасшифровка голосового..."}
-                if bot:
+                    data = {f"{'message' if bot_voice else 'text'}": "@MaksogramBot в чате\nРасшифровка голосового..."}
+                if bot_voice:
                     reply_message, message = message, await message.reply(**data)
                 else:
                     await message.edit(**data)
@@ -291,7 +292,7 @@ class Program:
                                                            f"{answer.error.__class__.__name__}\n{answer.error}")
                     await message.edit("@MaksogramBot в чате\nПроизошла ошибка при расшифровке... Скоро все будет исправлено")
                 await db.execute(f"UPDATE statistics SET audio_transcription=now() WHERE account_id={self.id}")
-                return True
+                return "Расшифровка голосового"
             else:
                 await MaksogramBot.send_message(self.id, "Вы хотели расшифровать гс? Данная функция отключена у вас! "
                                                          "Вы можете включить в настройках\n/menu_chat (Maksogram в чате)")
@@ -302,26 +303,26 @@ class Program:
                 request = await weather(self.id)
                 await message.edit(f"@MaksogramBot в чате\n{request}", parse_mode="HTML")
                 await db.execute(f"UPDATE statistics SET weather=now() WHERE account_id={self.id}")
-                return True
+                return "Погода"
             else:
                 await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться погодой? Данная функция отключена у вас! "
                                                          "Вы можете включить ее в настройках\n/menu_chat (Maksogram в чате)")
 
         # Конвертер видео в кружок
-        elif bot and message.video or reply_message and reply_message.video and "кружок" in text:
+        elif bot_video or reply_message and reply_message.video and "кружок" in text:
             if await db.fetch_one(f"SELECT round_video FROM modules WHERE account_id={self.id}", one_data=True):
-                video = message.video if bot else reply_message.video
+                video = message.video if bot_video else reply_message.video
                 if video.attributes[0].duration >= 60:
-                    data = {f"{'message' if bot else 'text'}": "🤖 @MaksogramBot в чате\nВидео слишком длинное! ⚠️",
+                    data = {f"{'message' if bot_video else 'text'}": "🤖 @MaksogramBot в чате\nВидео слишком длинное! ⚠️",
                             "formatting_entities": [MessageEntityCustomEmoji(0, 2, 5418001570597986649),
                                                     MessageEntityCustomEmoji(47, 2, 5364241851500997604)]}
-                    if bot: await message.reply(**data)
+                    if bot_video: await message.reply(**data)
                     else: await message.edit(**data)
                 else:
-                    data = {f"{'message' if bot else 'text'}": "🤖 @MaksogramBot в чате\nКонвертация видео в кружок ⏰",
+                    data = {f"{'message' if bot_video else 'text'}": "🤖 @MaksogramBot в чате\nКонвертация видео в кружок ⏰",
                             "formatting_entities": [MessageEntityCustomEmoji(0, 2, 5418001570597986649),
                                                     MessageEntityCustomEmoji(51, 1, 5371071931833393000)]}
-                    if bot:
+                    if bot_video:
                         reply_message, message = message, await message.reply(**data)
                     else:
                         await message.edit(**data)
@@ -339,7 +340,7 @@ class Program:
                         await MaksogramBot.send_system_message(f"⚠️Ошибка при конвертации⚠️\n\n"
                                                                f"{answer.error.__class__.__name__}\n{answer.error}")
                         await message.edit("@MaksogramBot в чате\nПроизошла ошибка при конвертации... Скоро все будет исправлено")
-                return True
+                return "Конвертер видео в кружок"
             else:
                 await MaksogramBot.send_message(self.id, "Вы хотели конвертировать видео в кружок? Данная функция отключена у вас! "
                                                          "Вы можете включить в настройках\n/menu_chat (Maksogram в чате)")
@@ -371,7 +372,7 @@ class Program:
                                    f"{date} в {remind_time.hour:02d}:{remind_time.minute:02d} ⏰",
                                    formatting_entities=[MessageEntityCustomEmoji(0, 2, 5418001570597986649),
                                                         MessageEntityCustomEmoji(48+len(date), 1, 5274055917766202507)])
-                return True
+                return "Напоминалка"
             else:
                 await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться напоминалкой? Данная функция отключена у вас! "
                                                          "Вы можете включить в настройках\n/menu_chat (Maksogram в чате)")
@@ -385,7 +386,7 @@ class Program:
                 await message.reply(f"🤖 @MaksogramBot выбирает {choice}",
                                     formatting_entities=[MessageEntityCustomEmoji(0, 2, 5418001570597986649),
                                                          MessageEntitySpoiler(entity.offset, entity.length)])
-                return True
+                return "Рандомайзер"
             else:
                 await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться рандомайзером? Данная функция отключена у вас! "
                                                          "Вы можете включить в настройках\n/menu_chat (Maksogram в чате)")
@@ -779,31 +780,26 @@ class Program:
                                                caption=answer['text'], formatting_entities=entities)
         return await self.client.send_message(message.chat_id, answer['text'], formatting_entities=entities)
 
-    @security()
-    async def new_avatar_center(self):
-        while await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={self.id}", one_data=True):
-            for user in await db.fetch_all(f"SELECT user_id, name, avatars FROM avatars WHERE account_id={self.id}"):
-                avatars = await get_avatars(self.id, user['user_id'])
-                if avatars is None:  # Количество аватарок превышает допустимое
-                    await db.execute(f"DELETE FROM avatars WHERE account_id={self.id} AND user_id={user['user_id']}")
-                    continue
-                for avatar in avatars.values():
-                    if avatar.id not in user['avatars']:  # Новая аватарка
-                        ext = 'mp4' if avatar.video_sizes else 'png'
-                        path = resources_path(f"avatars/{self.id}.{avatar.id}.{ext}")
-                        await self.client.download_media(avatar, path)
-                        await MaksogramBot.send_message(
-                            self.id, f"📸 <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> добавил(а) аватарку",
-                            parse_mode="html", **{f"{'video' if avatar.video_sizes else 'photo'}": path})
-                        os.remove(path)
-                    else: user['avatars'].remove(avatar.id)
-                if count_deleted_avatars := len(user['avatars']):  # Удаленные аватарки
-                    text = f"{count_deleted_avatars} аватарок" if count_deleted_avatars > 1 else "аватарку"
-                    await MaksogramBot.send_message(self.id, f"📸 <b><a href='tg://user?id={user['user_id']}'>"
-                                                             f"{user['name']}</a></b> удалил(а) {text}", parse_mode="html")
-                id_avatars = list(map(lambda x: x.id, avatars.values()))
-                await db.execute(f"UPDATE avatars SET avatars='{id_avatars}' WHERE account_id={self.id} AND user_id={user['user_id']}")
-            await asyncio.sleep(5*60)
+    async def avatars_center(self, user: dict[str, Union[str, list[int]]]):
+        avatars = await get_avatars(self.id, user['user_id'])
+        if avatars is None:  # Количество аватарок превышает допустимое
+            return await db.execute(f"UPDATE changed_profiles SET avatars=NULL WHERE account_id={self.id} AND user_id={user['user_id']}")
+        for avatar in avatars.values():
+            if avatar.id not in user['avatars']:  # Новая аватарка
+                ext = 'mp4' if avatar.video_sizes else 'png'
+                path = resources_path(f"avatars/{self.id}.{avatar.id}.{ext}")
+                await self.client.download_media(avatar, path)
+                await MaksogramBot.send_message(
+                    self.id, f"📸 <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> добавил(а) аватарку",
+                    parse_mode="html", **{f"{'video' if avatar.video_sizes else 'photo'}": path})
+                os.remove(path)
+            else: user['avatars'].remove(avatar.id)
+        if count_deleted_avatars := len(user['avatars']):  # Удаленные аватарки
+            text = f"{count_deleted_avatars} аватарок" if count_deleted_avatars > 1 else "аватарку"
+            await MaksogramBot.send_message(self.id, f"📸 <b><a href='tg://user?id={user['user_id']}'>"
+                                                     f"{user['name']}</a></b> удалил(а) {text}", parse_mode="html")
+        id_avatars = list(map(lambda x: x.id, avatars.values()))
+        await db.execute(f"UPDATE changed_profiles SET avatars='{id_avatars}' WHERE account_id={self.id} AND user_id={user['user_id']}")
 
     @security()
     async def answering_machine_center(self):
@@ -819,61 +815,74 @@ class Program:
     async def reminder_center(self):
         while await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={self.id}", one_data=True):
             for remind in await db.fetch_all("SELECT chat_id, message_id, chat_name FROM reminds WHERE "
-                                             f"account_id={self.id} AND (time - now()) < INTERVAL '10 seconds'"):
+                                             f"account_id={self.id} AND (time - now()) < INTERVAL '0 seconds'"):
                 await self.client.send_message(remind['chat_id'], "🤖 @MaksogramBot в чате\nНапоминание о событии! ⏰", reply_to=remind['message_id'],
                                                formatting_entities=[MessageEntityCustomEmoji(0, 2, 5418001570597986649),
                                                                     MessageEntityCustomEmoji(47, 1, 5274055917766202507)])
                 await MaksogramBot.send_message(self.id, f"⏰ <b>Напоминалка</b>\nНапоминаю о вашем событии "
                                                          f"в чате с {remind['chat_name']}", parse_mode="HTML")
-            await db.fetch_one(f"DELETE FROM reminds WHERE account_id={self.id} AND (time - now()) < INTERVAL '10 seconds'")
+            await db.fetch_one(f"DELETE FROM reminds WHERE account_id={self.id} AND (time - now()) < INTERVAL '0 seconds'")
             await asyncio.sleep(((time_now() + timedelta(minutes=1)).replace(second=0, microsecond=0) - time_now()).seconds)
 
-    @security()
-    async def gifts_center(self):
-        while await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={self.id}", one_data=True):
-            for user in await db.fetch_all(f"SELECT user_id, name, gifts FROM gifts WHERE account_id={self.id}"):
-                gifts = await get_gifts(self.id, user['user_id'])
-                if gifts is None:  # Количество подарков превышает допустимое
-                    await db.execute(f"DELETE FROM gifts WHERE account_id={self.id} AND user_id={user['user_id']}")
-                    continue
-                for gift in gifts.values():
-                    if user['gifts'].get(gift.id):  # Подарок присутствует
-                        if gift.unique is True and user['gifts'][gift.id]['unique'] is False:  # Подарок стал уникальным
-                            link = f"t.me/nft/{gift.slug}"
-                            await MaksogramBot.send_message(
-                                self.id, f"🎁 <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> улучшил(а) "
-                                         f"<a href='{link}'>подарок</a>", parse_mode="html")
-                        del user['gifts'][gift.id]
-                    else:  # Подарок появился
-                        giver = (f"@{gift.giver['username']}" if gift.giver['username'] else
-                                 f"<a href='tg://user?id={gift.giver['user_id']}'>{gift.giver['name']}</a>") \
-                            if gift.giver else "не известно"
-                        gift_str = "лимитированный подарок" if gift.limited else "подарок"
-                        if gift.unique is False:  # Неуникальный подарок
-                            await MaksogramBot.send_message(
-                                self.id, f"🎁 <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> получил(а) {gift_str}\n"
-                                         f"От кого: {giver}\nСтоимость: {gift.stars} 🌟", parse_mode="html")
-                        else:  # Уникальный подарок
-                            link = f"t.me/nft/{gift.slug}"
-                            await MaksogramBot.send_message(
-                                self.id, f"🎁 <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> получил(а) "
-                                         f"<a href='{link}'>подарок</a>\nОт кого: {giver}", parse_mode="html")
-                if count_hidden_gifts := len(user['gifts']):  # Исчезнувшие подарки (скрытые, переданные)
-                    gift_str = "подарок" if count_hidden_gifts == 1 else f"{count_hidden_gifts} подарков"
+    async def gifts_center(self, user: dict[str, Union[str, dict]]):
+        gifts = await get_gifts(self.id, user['user_id'])
+        if gifts is None:  # Количество подарков превышает допустимое
+            return await db.execute(f"UPDATE changed_profiles SET gifts=NULL WHERE account_id={self.id} AND user_id={user['user_id']}")
+        for gift in gifts.values():
+            if user['gifts'].get(gift.id):  # Подарок присутствует
+                if gift.unique is True and user['gifts'][gift.id]['unique'] is False:  # Подарок стал уникальным
+                    link = f"t.me/nft/{gift.slug}"
                     await MaksogramBot.send_message(
-                        self.id, f"🎁 <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> скрыл(а) {gift_str}",
-                        parse_mode="html")
-                gifts_json = json_encode({gift.id: gift.__dict__ for gift in gifts.values()})
-                await db.execute(f"UPDATE gifts SET gifts=$1 WHERE account_id={self.id} AND user_id={user['user_id']}", gifts_json)
+                        self.id, f"🎁 <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> улучшил(а) "
+                                 f"<a href='{link}'>подарок</a>", parse_mode="html")
+                del user['gifts'][gift.id]
+            else:  # Подарок появился
+                giver = (f"@{gift.giver['username']}" if gift.giver['username'] else
+                         f"<a href='tg://user?id={gift.giver['user_id']}'>{gift.giver['name']}</a>") \
+                    if gift.giver else "не известно"
+                gift_str = "лимитированный подарок" if gift.limited else "подарок"
+                if gift.unique is False:  # Неуникальный подарок
+                    await MaksogramBot.send_message(
+                        self.id, f"🎁 <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> получил(а) {gift_str}\n"
+                                 f"От кого: {giver}\nСтоимость: {gift.stars} 🌟", parse_mode="html")
+                else:  # Уникальный подарок
+                    link = f"t.me/nft/{gift.slug}"
+                    await MaksogramBot.send_message(
+                        self.id, f"🎁 <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> получил(а) "
+                                 f"<a href='{link}'>подарок</a>\nОт кого: {giver}", parse_mode="html")
+        if count_hidden_gifts := len(user['gifts']):  # Исчезнувшие подарки (скрытые, переданные)
+            gift_str = "подарок" if count_hidden_gifts == 1 else f"{count_hidden_gifts} подарков"
+            await MaksogramBot.send_message(
+                self.id, f"🎁 <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> скрыл(а) {gift_str}",
+                parse_mode="html")
+        gifts_json = json_encode({gift.id: gift.__dict__ for gift in gifts.values()})
+        await db.execute(f"UPDATE changed_profiles SET gifts=$1 WHERE account_id={self.id} AND user_id={user['user_id']}", gifts_json)
+
+    async def bio_center(self, user: dict[str, str]):
+        bio = await get_bio(self.id, user['user_id'])
+        if user['bio'] != bio:
+            await MaksogramBot.send_message(self.id, f"🖼️ <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> "
+                                                     f"«О себе»\n<blockquote>{bio}</blockquote>", parse_mode="html")
+            await db.execute(f"UPDATE changed_profiles SET bio=$1 WHERE account_id={self.id} AND user_id={user['user_id']}", bio)
+
+    @security()
+    async def changed_profile_center(self):
+        while await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={self.id}", one_data=True):
+            for user in await db.fetch_all(f"SELECT user_id, name, avatars, gifts, bio FROM changed_profiles WHERE account_id={self.id}"):
+                if user['avatars'] is not None:
+                    await self.avatars_center(user)
+                if user['gifts'] is not None:
+                    await self.gifts_center(user)
+                if user['bio'] is not None:
+                    await self.bio_center(user)
             await asyncio.sleep(5*60)
 
     async def run_until_disconnected(self):
         await db.execute(f"CREATE TABLE IF NOT EXISTS \"{self.id}_messages\" (chat_id BIGINT NOT NULL, "
                          "message_id INTEGER NOT NULL, saved_message_id INTEGER NOT NULL, reactions TEXT NOT NULL)")
         await MaksogramBot.send_system_message(f"Maksogram {self.__version__} для меня запущен")
-        asyncio.get_running_loop().create_task(self.new_avatar_center())
+        asyncio.get_running_loop().create_task(self.changed_profile_center())
         asyncio.get_running_loop().create_task(self.answering_machine_center())
-        asyncio.get_running_loop().create_task(self.gifts_center())
         asyncio.get_running_loop().create_task(self.reminder_center())
         try:
             await self.client.run_until_disconnected()
