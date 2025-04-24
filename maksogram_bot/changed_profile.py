@@ -135,10 +135,8 @@ async def _changed_profile_function_switch(callback_query: CallbackQuery):
             warning = f"У пользователя {user['name']} слишком много подарков"
         elif function == "bio":
             data = await get_bio(account_id, user_id)
-    else:
-        data = "NULL"
-    if data is None:
-        return await callback_query.answer(warning, True)
+        if data is None:
+            return await callback_query.answer(warning, True)
     await db.execute(f"UPDATE changed_profiles SET {function}=$1 WHERE account_id={account_id} AND user_id={user_id}", data)
     await callback_query.message.edit_text(**await changed_profile_menu(account_id, int(user_id)))
 
