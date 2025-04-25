@@ -41,9 +41,9 @@ from .core import (
 
 def difference_periods(periods: list[list[datetime, datetime]], period: str, time_zone: int, offset: int) -> tuple[list[int], list[int]]:
     if period == "day":
-        now = (time_now() + timedelta(hours=time_zone) - timedelta(seconds=offset)).replace(minute=0, second=0, microsecond=0)
+        now = (time_now(time_zone) - timedelta(seconds=offset)).replace(minute=0, second=0, microsecond=0)
     else:
-        now = (time_now() + timedelta(hours=time_zone) - timedelta(seconds=offset)).replace(hour=0, minute=0, second=0, microsecond=0)
+        now = (time_now(time_zone) - timedelta(seconds=offset)).replace(hour=0, minute=0, second=0, microsecond=0)
     if period == "day":
         bin_size = 3600  # 1 час в секундах
         max_bins = 24
@@ -128,7 +128,7 @@ async def online_statistics(account_id: int, user_id: int, user: dict[str, str],
     coefficient = {"day": 24, "week": 7, "month": 28}[period]
     offset = {"day": offset, "week": 7*offset, "month": 28*offset}[period]
     time_zone: int = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={account_id}", one_data=True)
-    now = time_now() + timedelta(hours=time_zone) - timedelta(days=offset)
+    now = time_now(time_zone) - timedelta(days=offset)
     all_time, online, periods_online, online_frequency = await get_data_by_period(account_id, user_id, period, time_zone, offset*86400)
     time_readings = await db.fetch_all(f"SELECT time FROM statistics_time_reading WHERE account_id={account_id} AND user_id={user_id}", one_data=True)
     offline = all_time - online

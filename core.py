@@ -195,7 +195,7 @@ async def get_enabled_auto_answer(account_id: int) -> Union[int, None]:
         return enabled_ordinary_auto_answer
 
     time_zone: int = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={account_id}", one_data=True)
-    now = time_now() + timedelta(hours=time_zone)
+    now = time_now(time_zone)
     weekday = now.weekday()
     tomorrow_weekday = (weekday + 1) % 7
     timetable_auto_answers = await db.fetch_all("SELECT answer_id, start_time, end_time, weekdays FROM answering_machine WHERE "
@@ -254,8 +254,8 @@ def human_time(seconds: int) -> str:
     return f"{hours} {minutes}"
 
 
-def time_now() -> datetime:
-    return datetime.utcnow()
+def time_now(time_zone: int = 0) -> datetime:
+    return datetime.utcnow() + timedelta(hours=time_zone)
 
 
 def omsk_time(t: datetime):
@@ -319,7 +319,7 @@ async def send_email_message(to: str, subject: str, text: str, *, subtype: str =
 
 class Variables:
     version = "2.7"
-    version_string = "2.7.2 (80)"
+    version_string = "2.7.3 (81)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])

@@ -358,15 +358,18 @@ class Program:
                 except UniqueViolationError:
                     await message.edit("@MaksogramBot в чате\nНапоминание о событии в это время уже есть")
                     return True
-                if remind_time.date() == time_now().date():  # Сегодня
+                if reply_message.chat_id == self.id:
+                    await MaksogramBot.send_message(self.id, "⏰ <b>Напоминалка</b>\nВы можете создавать напоминания здесь, "
+                                                             "чтобы не забивать Избранное :)")
+                if remind_time.date() == time_now(time_zone).date():  # Сегодня
                     date = "сегодня"
-                elif remind_time.date() == (time_now() + timedelta(days=1)).date():  # Завтра
+                elif remind_time.date() == (time_now(time_zone) + timedelta(days=1)).date():  # Завтра
                     date = "завтра"
-                elif remind_time.date() == (time_now() + timedelta(days=2)).date():  # Послезавтра
+                elif remind_time.date() == (time_now(time_zone) + timedelta(days=2)).date():  # Послезавтра
                     date = "послезавтра"
                 else:
                     date = f"{remind_time.day} {months[remind_time.month-1]}"
-                    if remind_time.year != time_now().year:
+                    if remind_time.year != time_now(time_zone).year:
                         date += " следующего года"
                 await message.edit("🤖 @MaksogramBot в чате\nНапоминание на "
                                    f"{date} в {remind_time.hour:02d}:{remind_time.minute:02d} ⏰",
@@ -620,7 +623,7 @@ class Program:
         if status is False:  # Обработка только статуса в сети
             return
         time_zone: int = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={self.id}", one_data=True)
-        time = time_now() + timedelta(hours=time_zone)
+        time = time_now(time_zone)
         time_last_notification = self.time_morning_notification + timedelta(hours=time_zone)
         if not (morning[0] <= time.hour < morning[1]):  # Сейчас не утро
             return
@@ -729,7 +732,7 @@ class Program:
             status_str = "в сети" if status else "вышел(а) из сети"
         if awake:
             time_zone: int = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={self.id}", one_data=True)
-            time = time_now() + timedelta(hours=time_zone)
+            time = time_now(time_zone)
             time_last_notification = awake + timedelta(hours=time_zone)
             if morning[0] <= time.hour < morning[1] and not \
                     (time_last_notification.date() == time.date() and morning[0] <= time_last_notification.hour < morning[1]):
@@ -814,14 +817,15 @@ class Program:
     @security()
     async def reminder_center(self):
         while await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={self.id}", one_data=True):
-            for remind in await db.fetch_all("SELECT chat_id, message_id, chat_name FROM reminds WHERE "
+            for remind in await db.fetch_all("SELECT chat_id, message_id, time, chat_name FROM reminds WHERE "
                                              f"account_id={self.id} AND (time - now()) < INTERVAL '0 seconds'"):
+                text = {MaksogramBot.id: "", self.id: "в Избранном"}.get(remind['chat_id'], f"в чате с {remind['chat_name']}")
+                await MaksogramBot.send_message(self.id, f"⏰ <b>Напоминалка</b>\nНапоминаю о вашем событии {text}", parse_mode="HTML")
                 await self.client.send_message(remind['chat_id'], "🤖 @MaksogramBot в чате\nНапоминание о событии! ⏰", reply_to=remind['message_id'],
                                                formatting_entities=[MessageEntityCustomEmoji(0, 2, 5418001570597986649),
                                                                     MessageEntityCustomEmoji(47, 1, 5274055917766202507)])
-                await MaksogramBot.send_message(self.id, f"⏰ <b>Напоминалка</b>\nНапоминаю о вашем событии "
-                                                         f"в чате с {remind['chat_name']}", parse_mode="HTML")
-            await db.fetch_one(f"DELETE FROM reminds WHERE account_id={self.id} AND (time - now()) < INTERVAL '0 seconds'")
+                await db.execute(f"DELETE FROM reminds WHERE account_id={self.id} AND chat_id={remind['chat_id']} AND "
+                                 f"message_id={remind['message_id']} AND time={remind['time']}")
             await asyncio.sleep(((time_now() + timedelta(minutes=1)).replace(second=0, microsecond=0) - time_now()).seconds)
 
     async def gifts_center(self, user: dict[str, Union[str, dict]]):
