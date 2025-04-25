@@ -861,7 +861,7 @@ class Program:
                                                formatting_entities=[MessageEntityCustomEmoji(0, 2, 5418001570597986649),
                                                                     MessageEntityCustomEmoji(47, 1, 5274055917766202507)])
                 await db.execute(f"DELETE FROM reminds WHERE account_id={self.id} AND chat_id={remind['chat_id']} AND "
-                                 f"message_id={remind['message_id']} AND time={remind['time']}")
+                                 f"message_id={remind['message_id']} AND time='{remind['time']}'")
             await asyncio.sleep(((time_now() + timedelta(minutes=1)).replace(second=0, microsecond=0) - time_now()).seconds)
 
     async def gifts_center(self, user: dict[str, Union[str, dict]]):
