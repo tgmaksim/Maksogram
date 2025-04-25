@@ -53,6 +53,7 @@ from telethon.tl.types import (
     PeerChat,
     PeerChannel,
     ReactionEmoji,
+    StarGiftUnique,
     MessageMediaDice,
     UserStatusOnline,
     UserStatusOffline,
@@ -61,6 +62,8 @@ from telethon.tl.types import (
     ReactionCustomEmoji,
     MessageMediaWebPage,
     MessageMediaDocument,
+    MessageActionStarGift,
+    MessageActionStarGiftUnique,
 
     MessageEntityUrl,
     MessageEntityBold,
@@ -404,16 +407,38 @@ class Program:
     async def new_message(self, event: events.newmessage.NewMessage.Event):
         message: Message = event.message
 
-        if message.out:
-            # Для функции подсчета статистики времени ответа
-            await db.execute(f"UPDATE status_users SET last_message=now() "
-                             f"WHERE account_id={self.id} AND user_id={message.chat_id} AND last_message IS NULL")
-
         if module := await self.modules(message):
             name = await db.fetch_one(f"SELECT name FROM accounts WHERE account_id={self.id}", one_data=True)
             await MaksogramBot.send_system_message(f"💬 <b>Maksogram в чате</b>\n<b>{name}</b> воспользовался(лась) "
                                                    f"Maksogram в чате ({module})", parse_mode="html")
             return  # При срабатывании Maksogram в чате сохранение сообщения не происходит
+
+        if message.out and not message.action:
+            # Для функции подсчета статистики времени ответа
+            await db.execute(f"UPDATE status_users SET last_message=now() "
+                             f"WHERE account_id={self.id} AND user_id={message.chat_id} AND last_message IS NULL")
+
+        if isinstance(message.action, (MessageActionStarGift, MessageActionStarGiftUnique)):  # Подарок
+            if not message.out:  # Подарок подарен аккаунту
+                if isinstance(message.action.gift, StarGiftUnique):
+                    stars = ""
+                    gift_type = "уникальный "
+                    text = "ℹ️ Этот подарок является уникальным. Его можно свободно передавать между пользователями Telegram или " \
+                           "продать на рынке. Пока что подарок будет красоваться в профиле 😎"
+                elif message.action.gift.limited:  # Лимитированный подарок
+                    stars = f"за {message.action.gift.stars} звезд"
+                    gift_type = "лимитированный "
+                    text = "ℹ️ Этот подарок можно конвертировать в уникальный, чтобы получить особый узор, цвет и макет. После " \
+                           "улучшения можно передавать этот подарок другим пользователям или продать на рынке"
+                else:  # Обычный подарок
+                    stars = f"за {message.action.gift.stars} звезд"
+                    gift_type = ""
+                    text = "ℹ️ Этот подарок не входит в коллекцию лимитированных, значит его нельзя улучшить до уникального и " \
+                           "<b>через 7 дней продать его за звезды также не получится!</b>"
+                name = await self.chat_name(message.chat_id, my_name="себя")
+                await MaksogramBot.send_message(self.id, f"🎉 🥳 <b>Поздравляю с подарком!</b>\nВы получили {gift_type}подарок "
+                                                         f"от {name} {stars}\n<blockquote>{text}</blockquote>", parse_mode="html")
+            return  # Подарок не сохраняется
 
         if isinstance(message.media, TTL_MEDIA) and message.media.ttl_seconds:  # Самоуничтожающееся медиа
             if message.file.size / 2**20 <= 10 or message.video_note or \
