@@ -111,6 +111,9 @@ class Program:
         self.last_event = LastEvent()
         self.status = None
 
+        self.my_messages: int = None  # Инициализируется при запуске
+        self.message_changes: int = None  # Инициализируется при запуске
+
         self.status_users: dict[int, bool] = {user: None for user in status_users}  # {id: True} -> id в сети
         self.time_morning_notification: datetime = morning_notification
 
@@ -224,10 +227,6 @@ class Program:
 
     async def is_premium(self) -> bool:
         return (await self.client.get_me()).premium
-
-    @property
-    def my_messages(self):
-        return db.fetch_one(f"SELECT my_messages FROM accounts WHERE account_id={self.id}", one_data=True)
 
     async def get_message_by_id(self, chat_id: int, message_id: int) -> Message:
         async for message in self.client.iter_messages(chat_id, ids=message_id):
@@ -428,9 +427,9 @@ class Program:
                 except FileReferenceExpiredError:  # Уже удалено
                     return await MaksogramBot.send_message(self.id, "Я не успел сохранить самоуничтожающееся медиа, "
                                                                     "потому что вы его быстро посмотрели...")
-                saved_message: Message = await self.client.send_file(await self.my_messages, path, caption=message.text,
+                saved_message: Message = await self.client.send_file(self.my_messages, path, caption=message.text,
                                                                      video_note=message.video_note, voice_note=message.voice)
-                link_to_message = f"t.me/c/{str(await self.my_messages)[4:]}/{saved_message.id}"  # Сис. канал
+                link_to_message = f"t.me/c/{str(self.my_messages)[4:]}/{saved_message.id}"  # Сис. канал
                 await MaksogramBot.send_message(self.id, f"Сохранено <a href='{link_to_message}'>самоуничтожающееся медиа</a>",
                                                 parse_mode="html")
                 return os.remove(path)
@@ -442,7 +441,7 @@ class Program:
         if not await db.fetch_one(f"SELECT saving_messages FROM settings WHERE account_id={self.id}", one_data=True):
             return  # Сохранение сообщений выключено
         try:
-            saved_message = await self.client.forward_messages(await self.my_messages, message)
+            saved_message = await self.client.forward_messages(self.my_messages, message)
         except (MessageIdInvalidError, ChatForwardsRestrictedError, BroadcastPublicVotersForbiddenError):
             return
 
@@ -522,13 +521,13 @@ class Program:
         if not await self.check_reactions(event):  # Если изменено содержание сообщения (текст или медиа)
             if self.id != event.chat_id and event.is_private \
                     and await db.fetch_one(f"SELECT notify_changes FROM settings WHERE account_id={self.id}", one_data=True):
-                link_to_message = f"t.me/c/{str(await self.my_messages)[4:]}/{saved_message_id}"  # Сис. канал
+                link_to_message = f"t.me/c/{str(self.my_messages)[4:]}/{saved_message_id}"  # Сис. канал
                 name = await self.chat_name(event.chat_id)
                 await MaksogramBot.send_message(
                     self.id, f"В чате с {name} изменено <a href='{link_to_message}'>сообщение</a>", parse_mode="HTML",
                     reply_markup=MaksogramBot.IMarkup(inline_keyboard=[[
                         MaksogramBot.IButton(text="Не уведомлять об изменении", callback_data="notify_changes|new")]]))
-            await self.client.send_message(await self.my_messages, message, comment_to=saved_message_id)
+            await self.client.send_message(self.my_messages, message, comment_to=saved_message_id)
         else:  # Изменение реакций
             is_premium = await self.is_premium()
             reactions, entities = await self.get_reactions(event, is_premium=is_premium)
@@ -536,14 +535,14 @@ class Program:
             await db.execute(f"UPDATE \"{self.id}_messages\" SET reactions=$1 "
                              f"WHERE chat_id={message.chat_id} AND message_id={message.id}", reactions_str)
             reactions = reactions if reactions else "Реакции убраны"
-            await self.client.send_message(await self.my_messages, reactions,
+            await self.client.send_message(self.my_messages, reactions,
                                            formatting_entities=entities, comment_to=saved_message_id)
 
     async def message_edited_in_group(self, event: events.MessageEdited.Event, saved_message_id: int):
         reactions = await self.get_reactions(event, is_premium=await self.is_premium())
-        await self.client.send_message(await self.my_messages, event.message, comment_to=saved_message_id)
+        await self.client.send_message(self.my_messages, event.message, comment_to=saved_message_id)
         if reactions[0]:
-            await self.client.send_message(await self.my_messages, reactions[0],
+            await self.client.send_message(self.my_messages, reactions[0],
                                            formatting_entities=reactions[1], comment_to=saved_message_id)
 
     async def get_deleted_message(self, chat_id: int, is_private: bool, message_id: int):
@@ -561,32 +560,45 @@ class Program:
     async def message_deleted(self, event: events.messagedeleted.MessageDeleted.Event):
         is_private = event.is_private is None
         chat_id = event.chat_id
-        delete_ids = event.deleted_ids
-        if len(delete_ids) > 5:
-            message_data = await self.get_deleted_message(chat_id, is_private, min(delete_ids))
+        deleted_ids = event.deleted_ids
+        if chat_id in (self.my_messages, self.message_changes):
+            if len(deleted_ids) > 10:
+                await db.execute(f"DELETE FROM \"{self.id}_messages\"")
+            else:
+                for deleted_id in deleted_ids:
+                    await db.execute(f"DELETE FROM \"{self.id}_messages\" WHERE saved_message_id={deleted_id}")
+            name = await db.fetch_one(f"SELECT name FROM accounts WHERE account_id={self.id}", one_data=True)
+            text = {self.my_messages: "системном канале", self.message_changes: "системной группе"}[chat_id]
+            await MaksogramBot.send_system_message(f"⚠️ <b>Нарушение правил</b>\n<b>{name}</b> удалил(а) сообщение в {text}")
+            await MaksogramBot.send_message(self.id, "⚠️ <b>Нарушение правил</b>\nБыло замечено нарушение правил пользования "
+                                                     "Maksogram! Удалять сообщения в канале Мои сообщения и группе Изменение "
+                                                     "сообщения строго запрещено! За повтор можно получить бан от Maksogram")
+            return
+        if len(deleted_ids) > 5:
+            message_data = await self.get_deleted_message(chat_id, is_private, min(deleted_ids))
             if message_data is None:
                 return
             chat_id, saved_message_id = message_data
             await db.execute(f"DELETE FROM \"{self.id}_messages\" WHERE saved_message_id={saved_message_id}")
-            await self.client.send_message(await self.my_messages, f"Сообщение (и еще {len(delete_ids)-1}) удалено", comment_to=saved_message_id)
+            await self.client.send_message(self.my_messages, f"Сообщение (и еще {len(deleted_ids)-1}) удалено", comment_to=saved_message_id)
             if chat_id != self.id:
-                link_to_message = f"t.me/c/{str(await self.my_messages)[4:]}/{saved_message_id}"  # Сис. канал
+                link_to_message = f"t.me/c/{str(self.my_messages)[4:]}/{saved_message_id}"  # Сис. канал
                 name = await self.chat_name(chat_id)
                 if is_private:
-                    await MaksogramBot.send_message(self.id, f"В чате {name} удалены {len(delete_ids)} сообщений, например, "
+                    await MaksogramBot.send_message(self.id, f"В чате {name} удалены {len(deleted_ids)} сообщений, например, "
                                                              f"<a href='{link_to_message}'>это</a>", parse_mode="HTML")
                 else:
-                    await MaksogramBot.send_message(self.id, f"Кто-то из {name} удалил(а) {len(delete_ids)} сообщений, например, "
+                    await MaksogramBot.send_message(self.id, f"Кто-то из {name} удалил(а) {len(deleted_ids)} сообщений, например, "
                                                              f"<a href='{link_to_message}'>это</a>", parse_mode="HTML")
             return
-        for id in delete_ids:
+        for id in deleted_ids:
             message_data = await self.get_deleted_message(chat_id, is_private, id)
             if message_data is None: continue
             chat_id, saved_message_id = message_data
             await db.execute(f"DELETE FROM \"{self.id}_messages\" WHERE saved_message_id={saved_message_id}")
-            await self.client.send_message(await self.my_messages, "Сообщение удалено", comment_to=saved_message_id)
+            await self.client.send_message(self.my_messages, "Сообщение удалено", comment_to=saved_message_id)
             if chat_id != self.id:
-                link_to_message = f"t.me/c/{str(await self.my_messages)[4:]}/{saved_message_id}"  # Сис. канал
+                link_to_message = f"t.me/c/{str(self.my_messages)[4:]}/{saved_message_id}"  # Сис. канал
                 name = await self.chat_name(chat_id)
                 if is_private:
                     await MaksogramBot.send_message(
@@ -882,6 +894,8 @@ class Program:
     async def run_until_disconnected(self):
         await db.execute(f"CREATE TABLE IF NOT EXISTS \"{self.id}_messages\" (chat_id BIGINT NOT NULL, "
                          "message_id INTEGER NOT NULL, saved_message_id INTEGER NOT NULL, reactions TEXT NOT NULL)")
+        account = await db.fetch_one(f"SELECT my_messages, message_changes FROM accounts WHERE account_id={self.id}")
+        self.my_messages, self.message_changes = account['my_messages'], account['message_changes']
         name = await db.fetch_one(f"SELECT name FROM accounts WHERE account_id={self.id}", one_data=True)
         await MaksogramBot.send_system_message(f"Maksogram {self.__version__} для {name} запущен")
         asyncio.get_running_loop().create_task(self.answering_machine_center())
