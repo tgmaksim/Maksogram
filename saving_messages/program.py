@@ -113,7 +113,8 @@ class Program:
         self.client = client
         self.last_event = LastEvent()
         self.status = None
-
+        
+        self.table_name = f"zz{self.id}"
         self.my_messages: int = None  # Инициализируется при запуске
         self.message_changes: int = None  # Инициализируется при запуске
 
@@ -471,13 +472,13 @@ class Program:
         except (MessageIdInvalidError, ChatForwardsRestrictedError, BroadcastPublicVotersForbiddenError):
             return
 
-        await db.execute(f"INSERT INTO \"{self.id}_messages\" VALUES "
+        await db.execute(f"INSERT INTO {self.table_name} VALUES "
                          f"({message.chat_id}, {message.id}, {saved_message.id}, '')")
 
     # Проверка на изменение
     async def check_reactions(self, event: events.messageedited.MessageEdited.Event) -> bool:
         message: Message = event.message
-        last_reactions = await db.fetch_one(f"SELECT reactions FROM \"{self.id}_messages\" "
+        last_reactions = await db.fetch_one(f"SELECT reactions FROM {self.table_name} "
                                             f"WHERE chat_id={message.chat_id} AND message_id={message.id}", one_data=True)
         if last_reactions is None:
             return False
@@ -538,7 +539,7 @@ class Program:
 
     async def message_edited(self, event: events.messageedited.MessageEdited.Event):
         message: Message = event.message
-        saved_message_id: int = await db.fetch_one(f"SELECT saved_message_id FROM \"{self.id}_messages\" "
+        saved_message_id: int = await db.fetch_one(f"SELECT saved_message_id FROM {self.table_name} "
                                                    f"WHERE chat_id={message.chat_id} AND message_id={message.id}", one_data=True)
         if saved_message_id is None:  # Если сообщение не было обработано ранее функцией new_message
             return
@@ -558,7 +559,7 @@ class Program:
             is_premium = await self.is_premium()
             reactions, entities = await self.get_reactions(event, is_premium=is_premium)
             reactions_str, _ = await self.get_reactions(event)
-            await db.execute(f"UPDATE \"{self.id}_messages\" SET reactions=$1 "
+            await db.execute(f"UPDATE {self.table_name} SET reactions=$1 "
                              f"WHERE chat_id={message.chat_id} AND message_id={message.id}", reactions_str)
             reactions = reactions if reactions else "Реакции убраны"
             await self.client.send_message(self.my_messages, reactions,
@@ -573,12 +574,12 @@ class Program:
 
     async def get_deleted_message(self, chat_id: int, is_private: bool, message_id: int):
         if is_private:
-            data = await db.fetch_one(f"SELECT chat_id, saved_message_id FROM \"{self.id}_messages\" "
+            data = await db.fetch_one(f"SELECT chat_id, saved_message_id FROM {self.table_name} "
                                       f"WHERE message_id={message_id} AND chat_id>-10000000000")
             if data is None: return
             chat_id, saved_message_id = data.values()
         else:
-            saved_message_id = await db.fetch_one(f"SELECT saved_message_id FROM \"{self.id}_messages\" "
+            saved_message_id = await db.fetch_one(f"SELECT saved_message_id FROM {self.table_name} "
                                                   f"WHERE message_id={message_id}", one_data=True)
             if saved_message_id is None: return
         return chat_id, saved_message_id
@@ -589,10 +590,10 @@ class Program:
         deleted_ids = event.deleted_ids
         if chat_id in (self.my_messages, self.message_changes):
             if len(deleted_ids) > 10:
-                await db.execute(f"DELETE FROM \"{self.id}_messages\"")
+                await db.execute(f"DELETE FROM {self.table_name}")
             else:
                 for deleted_id in deleted_ids:
-                    await db.execute(f"DELETE FROM \"{self.id}_messages\" WHERE saved_message_id={deleted_id}")
+                    await db.execute(f"DELETE FROM {self.table_name} WHERE saved_message_id={deleted_id}")
             name = await db.fetch_one(f"SELECT name FROM accounts WHERE account_id={self.id}", one_data=True)
             text = {self.my_messages: "системном канале", self.message_changes: "системной группе"}[chat_id]
             await MaksogramBot.send_system_message(f"⚠️ <b>Нарушение правил</b>\n<b>{name}</b> удалил(а) сообщение в {text}")
@@ -605,7 +606,7 @@ class Program:
             if message_data is None:
                 return
             chat_id, saved_message_id = message_data
-            await db.execute(f"DELETE FROM \"{self.id}_messages\" WHERE saved_message_id={saved_message_id}")
+            await db.execute(f"DELETE FROM {self.table_name} WHERE saved_message_id={saved_message_id}")
             await self.client.send_message(self.my_messages, f"Сообщение (и еще {len(deleted_ids)-1}) удалено", comment_to=saved_message_id)
             if chat_id != self.id:
                 link_to_message = f"t.me/c/{str(self.my_messages)[4:]}/{saved_message_id}"  # Сис. канал
@@ -621,7 +622,7 @@ class Program:
             message_data = await self.get_deleted_message(chat_id, is_private, id)
             if message_data is None: continue
             chat_id, saved_message_id = message_data
-            await db.execute(f"DELETE FROM \"{self.id}_messages\" WHERE saved_message_id={saved_message_id}")
+            await db.execute(f"DELETE FROM {self.table_name} WHERE saved_message_id={saved_message_id}")
             await self.client.send_message(self.my_messages, "Сообщение удалено", comment_to=saved_message_id)
             if chat_id != self.id:
                 link_to_message = f"t.me/c/{str(self.my_messages)[4:]}/{saved_message_id}"  # Сис. канал
@@ -918,7 +919,7 @@ class Program:
             await asyncio.sleep(5*60)
 
     async def run_until_disconnected(self):
-        await db.execute(f"CREATE TABLE IF NOT EXISTS \"{self.id}_messages\" (chat_id BIGINT NOT NULL, "
+        await db.execute(f"CREATE TABLE IF NOT EXISTS {self.table_name} (chat_id BIGINT NOT NULL, "
                          "message_id INTEGER NOT NULL, saved_message_id INTEGER NOT NULL, reactions TEXT NOT NULL)")
         account = await db.fetch_one(f"SELECT my_messages, message_changes FROM accounts WHERE account_id={self.id}")
         self.my_messages, self.message_changes = account['my_messages'], account['message_changes']
