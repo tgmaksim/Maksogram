@@ -230,7 +230,7 @@ class Program:
     async def modules(self, message: Message) -> bool:
         text = message.text.lower()
         bot = message.chat_id == MaksogramBot.id
-        bot_voice, bot_video = bot and message.voice, bot and message.video
+        bot_voice, bot_video, bot_video_note = bot and message.voice, bot and message.video, bot and message.video_note
         if not (bot or text and "\n" not in text and message.out and (message.media is None or isinstance(message.media, MessageMediaWebPage))):
             return False
 
@@ -267,17 +267,18 @@ class Program:
                 await MaksogramBot.send_message(self.id, "Вы хотели создать QR-код? Данная функция отключена у вас! "
                                                          "Вы можете включить в настройках\n/menu_chat (Maksogram в чате)")
 
-        # Расшифровка голосовых сообщений
-        elif bot_voice or reply_message and reply_message.voice and any([command in text for command in ("расшифруй", "в текст", "расшифровать")]):
+        # Расшифровка голосовых сообщений и кружков
+        elif (bot_voice or bot_video_note) or reply_message and (reply_message.voice or reply_message.video_note) and \
+                any([command in text for command in ("расшифруй", "в текст", "расшифровать")]):
             if await db.fetch_one(f"SELECT audio_transcription FROM modules WHERE account_id={self.id}", one_data=True):
                 if await self.is_premium():
-                    data = {f"{'message' if bot_voice else 'text'}": "🤖 @MaksogramBot в чате\n🗣 Расшифровка голосового ✍️",
+                    data = {f"{'message' if bot_voice or bot_video_note else 'text'}": "🤖 @MaksogramBot в чате\n🗣 Расшифровка голосового ✍️",
                             "formatting_entities": [MessageEntityCustomEmoji(0, 2, 5418001570597986649),
                                                     MessageEntityCustomEmoji(24, 2, 5787303083709041530),
                                                     MessageEntityCustomEmoji(50, 2, 5787196143318339389)]}
                 else:
-                    data = {f"{'message' if bot_voice else 'text'}": "@MaksogramBot в чате\nРасшифровка голосового..."}
-                if bot_voice:
+                    data = {f"{'message' if bot_voice or bot_video_note else 'text'}": "@MaksogramBot в чате\nРасшифровка голосового..."}
+                if bot_voice or bot_video_note:
                     reply_message, message = message, await message.reply(**data)
                 else:
                     await message.edit(**data)
