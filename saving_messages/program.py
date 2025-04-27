@@ -14,11 +14,11 @@ from modules.randomizer import main as randomizer
 from io import BytesIO
 from html import escape
 from typing import Union
-from telethon.tl.patched import Message
 from datetime import timedelta, datetime
 from telethon import TelegramClient, events
 from telethon.events.common import EventCommon
 from asyncpg.exceptions import UniqueViolationError
+from telethon.tl.patched import Message, MessageService
 from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.functions.account import UpdateStatusRequest
 from telethon.tl.functions.messages import GetCustomEmojiDocumentsRequest
@@ -54,6 +54,7 @@ from telethon.tl.types import (
     PeerChannel,
     ReactionEmoji,
     StarGiftUnique,
+    UpdateNewMessage,
     MessageMediaDice,
     UserStatusOnline,
     UserStatusOffline,
@@ -180,6 +181,12 @@ class Program:
         @security()
         async def system_bot(event: events.newmessage.NewMessage.Event):
             await self.system_bot(event)
+
+        @client.on(events.Raw(UpdateNewMessage, func=lambda update: isinstance(update.message, MessageService)))
+        @security()
+        async def new_message_service(update: UpdateNewMessage):
+            event = events.newmessage.NewMessage.Event(update.message)
+            await self.new_message_service(event)
 
     async def initial_checking_event(self, event: EventCommon) -> bool:
         return event.is_private and \
@@ -405,19 +412,8 @@ class Program:
 
         return False
 
-    async def new_message(self, event: events.newmessage.NewMessage.Event):
-        message: Message = event.message
-
-        if module := await self.modules(message):
-            name = await db.fetch_one(f"SELECT name FROM accounts WHERE account_id={self.id}", one_data=True)
-            await MaksogramBot.send_system_message(f"💬 <b>Maksogram в чате</b>\n<b>{name}</b> воспользовался(лась) "
-                                                   f"Maksogram в чате ({module})", parse_mode="html")
-            return  # При срабатывании Maksogram в чате сохранение сообщения не происходит
-
-        if message.out and not message.action:
-            # Для функции подсчета статистики времени ответа
-            await db.execute(f"UPDATE status_users SET last_message=now() "
-                             f"WHERE account_id={self.id} AND user_id={message.chat_id} AND last_message IS NULL")
+    async def new_message_service(self, event: events.newmessage.NewMessage.Event):
+        message: MessageService = event.message
 
         if isinstance(message.action, (MessageActionStarGift, MessageActionStarGiftUnique)):  # Подарок
             if not message.out:  # Подарок подарен аккаунту
@@ -439,7 +435,20 @@ class Program:
                 name = await self.chat_name(message.chat_id, my_name="себя")
                 await MaksogramBot.send_message(self.id, f"🎉 🥳 <b>Поздравляю с подарком!</b>\nВы получили {gift_type}подарок "
                                                          f"от {name} {stars}\n<blockquote>{text}</blockquote>", parse_mode="html")
-            return  # Подарок не сохраняется
+
+    async def new_message(self, event: events.newmessage.NewMessage.Event):
+        message: Message = event.message
+
+        if module := await self.modules(message):
+            name = await db.fetch_one(f"SELECT name FROM accounts WHERE account_id={self.id}", one_data=True)
+            await MaksogramBot.send_system_message(f"💬 <b>Maksogram в чате</b>\n<b>{name}</b> воспользовался(лась) "
+                                                   f"Maksogram в чате ({module})", parse_mode="html")
+            return  # При срабатывании Maksogram в чате сохранение сообщения не происходит
+
+        if message.out and not message.action:
+            # Для функции подсчета статистики времени ответа
+            await db.execute(f"UPDATE status_users SET last_message=now() "
+                             f"WHERE account_id={self.id} AND user_id={message.chat_id} AND last_message IS NULL")
 
         if isinstance(message.media, TTL_MEDIA) and message.media.ttl_seconds:  # Самоуничтожающееся медиа
             if message.file.size / 2**20 <= 10 or message.video_note or \
