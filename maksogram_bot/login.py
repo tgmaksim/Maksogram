@@ -77,11 +77,10 @@ async def _on(callback_query: CallbackQuery, state: FSMContext):
     is_paid = await db.fetch_one(f"SELECT is_paid FROM payment WHERE account_id={account_id}", one_data=True)
     if is_started is False:  # Зарегистрирован, но не запущен
         if is_paid is False:  # Просрочен платеж
-            payment_message = await payment_menu(account_id)
-            await callback_query.message.edit_text("Ваша подписка истекла. Продлите ее, чтобы пользоваться Maksogram\n"
-                                                   f"{payment_message['caption']}", reply_markup=payment_message['reply_markup'])
+            await callback_query.message.answer_photo(**await payment_menu())
+            await callback_query.message.edit_text("Ваша подписка истекла. Продлите ее, чтобы пользоваться Maksogram\n")
             name = await db.fetch_one(f"SELECT name FROM accounts WHERE account_id={account_id}", one_data=True)
-            return await bot.send_message(OWNER, f"Платеж просрочен. Maksogram не запущен ({name})\n\n{payment_message['caption']}")
+            return await bot.send_message(OWNER, f"Платеж просрочен. Maksogram не запущен ({name})")
         try:
             await account_on(account_id, (admin_program if callback_query.message.chat.id == OWNER else program).Program)
         except ConnectionError as e:  # Соединение не установлено

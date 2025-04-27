@@ -191,7 +191,7 @@ async def _login_code(message: Message, state: FSMContext):
 @security()
 async def _payment(message: Message):
     if await developer_command(message): return
-    await message.answer_photo(**await payment_menu(message.chat.id))
+    await message.answer_photo(**await payment_menu())
 
 
 def admin_initial():

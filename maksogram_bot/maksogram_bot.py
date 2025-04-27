@@ -28,6 +28,7 @@ from . core import (
     new_message,
     payment_menu,
     referal_link,
+    subscription_menu,
     new_callback_query,
 )
 
@@ -153,16 +154,35 @@ async def help(message: Message):
                          "/version - обзор прошлого обновления", parse_mode=html, reply_markup=KRemove())
 
 
-@dp.callback_query(F.data == "send_payment")
+@dp.callback_query(F.data.startswith("subscription"))
+@security()
+async def _subscription(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    account_id = callback_query.from_user.id
+    subscription_id = int(callback_query.data.replace("subscription", ""))
+    await callback_query.message.edit_caption(**await subscription_menu(account_id, subscription_id))
+
+
+@dp.callback_query(F.data == "payment")
+@security()
+async def _payment(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    (message := await payment_menu()).pop("photo")
+    await callback_query.message.edit_caption(**message)
+
+
+@dp.callback_query(F.data.startswith("send_payment"))
 @security()
 async def _send_payment(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     account_id = callback_query.from_user.id
+    subscription_id = int(callback_query.data.replace("send_payment", ""))
     name = await db.fetch_one(f"SELECT name FROM accounts WHERE account_id={account_id}", one_data=True)  # Имя пользователя
+    subscription = await db.fetch_one(f"SELECT about FROM subscriptions WHERE subscription_id={subscription_id}")
     markup = IMarkup(inline_keyboard=[[
-        IButton(text="Подтвердить! ✅", callback_data=f"confirm_sending_payment{account_id}_{callback_query.message.message_id}")]])
+        IButton(text="Подтвердить! ✅", callback_data=f"confirm_sending_payment{account_id}_{subscription_id}_{callback_query.message.message_id}")]])
     await bot.send_message(OWNER, f"Пользователь {name} отправил оплату, проверь это! Если так, то подтверди, "
-                                  "чтобы я продлил подписку на месяц", reply_markup=markup)
+                                  f"чтобы я продлил подписку на {subscription['about'].lower()}", reply_markup=markup)
     await callback_query.answer("Запрос отправлен. Ожидайте!", True)
 
 
@@ -172,13 +192,15 @@ async def _confirm_sending_payment(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     if callback_query.from_user.id != OWNER:
         return await callback_query.answer("Ошибка!", True)
-    account_id, message_id = map(int, callback_query.data.replace("confirm_sending_payment", "").split("_"))
+    account_id, subscription_id, message_id = map(int, callback_query.data.replace("confirm_sending_payment", "").split("_"))
+    subscription = await db.fetch_one(f"SELECT duration, about FROM subscriptions WHERE subscription_id={subscription_id}")
     await db.execute(f"""UPDATE payment SET next_payment=((CASE WHEN 
                      next_payment > CURRENT_TIMESTAMP THEN 
-                     next_payment ELSE CURRENT_TIMESTAMP END) + INTERVAL '30 days'), 
-                     is_paid=true WHERE account_id={account_id}""")  # перемещение даты оплаты на 30 дней вперед
+                     next_payment ELSE CURRENT_TIMESTAMP END) + INTERVAL '{subscription['duration']} days'), 
+                     is_paid=true WHERE account_id={account_id}""")  # перемещение даты оплаты на несколько дней вперед
     await bot.edit_message_reply_markup(chat_id=account_id, message_id=message_id)
-    await bot.send_message(account_id, f"Ваша оплата подтверждена! Следующий платеж через месяц", reply_to_message_id=message_id)
+    await bot.send_message(account_id, f"Ваша оплата подтверждена! Следующий платеж через {subscription['about'].lower()}",
+                           reply_to_message_id=message_id)
     await callback_query.message.edit_text(callback_query.message.text + '\n\nУспешно!')
 
 
@@ -209,9 +231,8 @@ async def check_payment_datetime():
             await db.execute(f"UPDATE payment SET first_notification=now() WHERE account_id={account_id}")
             await bot.send_message(account_id, "Текущая подписка заканчивается! Произведите следующий "
                                                "платеж до конца завтрашнего дня")
-            message = await payment_menu(account_id)
+            message = await payment_menu()
             await bot.send_photo(account_id, **message)
-            await bot.send_message(OWNER, f"Оплата подписки для {account_id}\n{message['caption']}", parse_mode=html)
 
 
 async def start_bot():

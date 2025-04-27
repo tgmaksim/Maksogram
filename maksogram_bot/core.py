@@ -77,7 +77,7 @@ async def convert_ruble(amount_rub: int, currencies: dict[str, Union[str, int]])
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers, params=params) as response:
             data = await response.json()
-            result = {"RUB": amount_rub}
+            result = {"RUB": int(amount_rub)}
             for currency in currencies:
                 price = data['data'][currency['name']]['quote']['RUB']['price']
                 amount = round(amount_rub / price * currency['coefficient'], currency['accuracy'])
@@ -86,18 +86,40 @@ async def convert_ruble(amount_rub: int, currencies: dict[str, Union[str, int]])
             return result
 
 
-async def payment_menu(account_id: int) -> dict[str, Any]:
+async def payment_menu() -> dict[str, Any]:
+    subscriptions = await db.fetch_all("SELECT subscription_id, about FROM subscriptions ORDER BY subscription_id")
+    i, buttons = 0, []
+    while i < len(subscriptions):
+        if i + 1 < len(subscriptions):
+            buttons.append([IButton(text=subscriptions[j]['about'], callback_data=f"subscription{subscriptions[j]['subscription_id']}")
+                            for j in [i, i+1]])
+            i += 1
+        else:
+            buttons.append([IButton(text=subscriptions[i]['about'], callback_data=f"subscription{subscriptions[i]['subscription_id']}")])
+        i += 1
+    return {"caption": "Подписка Maksogram с полным набором всех доступных функций", "parse_mode": html,
+            "reply_markup": IMarkup(inline_keyboard=buttons), "photo": FSInputFile(resources_path("logo.jpg"))}
+
+
+async def subscription_menu(account_id: int, subscription_id: int) -> dict[str, Any]:
+    subscription = await db.fetch_one(f"SELECT duration, discount, about FROM subscriptions WHERE subscription_id={subscription_id}")
+    fee = await db.fetch_one(f"SELECT fee FROM payment WHERE account_id={account_id}", one_data=True)
     currencies = await db.fetch_all("SELECT name, coefficient, accuracy, min FROM currencies")
-    fee = await convert_ruble(await db.fetch_one(f"SELECT fee FROM payment WHERE account_id={account_id}", one_data=True), currencies)
+    without_discount = fee * (subscription['duration']/30)
+    fee = await convert_ruble(without_discount * (1 - subscription['discount']/100), currencies)  # Вычисляем цену по скидке
     buttons = [IButton(text=currency['name'], web_app=WebAppInfo(url=f"{Data.web_app}/payment/{currency['name'].lower()}"))
                for currency in currencies]
     markup = IMarkup(inline_keyboard=[buttons,
                                       [IButton(text="Перевод по номеру", web_app=WebAppInfo(url=f"{Data.web_app}/payment/rub"))],
-                                      [IButton(text="Я отправил(а)  ✅", callback_data="send_payment")]])
+                                      [IButton(text="Я отправил(а)  ✅", callback_data=f"send_payment{subscription_id}")],
+                                      [IButton(text="◀️  Назад", callback_data="payment")]])
     payment_methods = [f"{currency['name']}: {fee[currency['name']][currency['name']]} {currency['name'].lower()} " \
                        f"(≈ {fee[currency['name']]['RUB']} руб)" for currency in currencies]
-    return {"caption": f"Подписка Maksogram на 30 дней:\nСбер: {fee['RUB']} руб\n{n.join(payment_methods)}",
-            "parse_mode": html, "reply_markup": markup, "photo": FSInputFile(resources_path("logo.jpg"))}
+    discount = "без скидки" if subscription['discount'] == 0 else f"-{subscription['discount']}%"
+    without_discount = f" (вместо {int(without_discount)} руб)" if fee['RUB'] != without_discount else ""
+    return {"caption": f"Maksogram на {subscription['about'].lower()} {discount}\nСбер: {fee['RUB']} руб{without_discount}\n"
+                       f"{n.join(payment_methods)}",
+            "parse_mode": html, "reply_markup": markup}
 
 
 def referal_link(user_id: int) -> str:
