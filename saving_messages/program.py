@@ -767,7 +767,7 @@ class Program:
         await db.execute(f"UPDATE status_users SET awake=now() WHERE user_id={event.chat_id} AND awake IS NOT NULL")
 
         my_birthday: Birthday = (await self.client(GetFullUserRequest(self.id))).full_user.birthday
-        if my_birthday.month == time.month and my_birthday.day == time.day:  # Поздравление в днем рождения
+        if my_birthday and my_birthday.month == time.month and my_birthday.day == time.day:  # Поздравление в днем рождения
             postcard = random.choice(os.listdir(resources_path("holidays/birthday")))
             photo = resources_path(f"holidays/birthday/{postcard}")
             await MaksogramBot.send_message(self.id, "Доброе утро! С днем рождения 🥳\nВсего самого лучшего! 🎊 🎁", photo=photo)
