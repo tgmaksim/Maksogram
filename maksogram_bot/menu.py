@@ -106,8 +106,8 @@ async def menu(account_id: int) -> dict[str, Any]:
                                           [IButton(text="ℹ️ Памятка по функциям", url=await generate_sensitive_link(account_id))]])
     else:
         markup = IMarkup(inline_keyboard=[[IButton(text="🔴 Выключить Maksogram", callback_data="off")],
-                                          [IButton(text="👨‍🏫 Профиль друга", callback_data="changed_profile"),
-                                           IButton(text="🤖 Автоответчик", callback_data="answering_machine")],
+                                          [IButton(text="🤖 Автоответчик", callback_data="answering_machine"),
+                                           IButton(text="👨‍🏫 Профиль друга", callback_data="changed_profile")],
                                           [IButton(text="🌐 Друг в сети", callback_data="status_users"),
                                            IButton(text="👀 Призрак", callback_data="ghost_mode")],
                                           [IButton(text="⚙️ Настройки", callback_data="settings"),

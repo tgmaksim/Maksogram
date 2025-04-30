@@ -319,7 +319,7 @@ async def send_email_message(to: str, subject: str, text: str, *, subtype: str =
 
 class Variables:
     version = "2.7"
-    version_string = "2.7.3 (89)"
+    version_string = "2.7.4 (90)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])
@@ -339,6 +339,8 @@ class MaksogramBot:
 
     @staticmethod
     async def send_message(chat_id: int, message: str, photo=None, video=None, timeout: int = 10, **kwargs):
+        if not kwargs.get('parse_mode'):
+            kwargs['parse_mode'] = html
         if photo:
             photo = FSInputFile(photo)
             return await MaksogramBot.bot.send_photo(chat_id, photo=photo, caption=message, request_timeout=2*timeout, **kwargs)

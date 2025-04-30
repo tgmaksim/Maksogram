@@ -20,11 +20,14 @@ from telethon.events.common import EventCommon
 from asyncpg.exceptions import UniqueViolationError
 from telethon.tl.patched import Message, MessageService
 from telethon.tl.functions.users import GetFullUserRequest
+from telethon.utils import get_input_channel, get_input_peer
 from telethon.tl.functions.account import UpdateStatusRequest
 from telethon.tl.functions.messages import GetCustomEmojiDocumentsRequest
 from telethon.errors import ChatForwardsRestrictedError, FileReferenceExpiredError
+from telethon.tl.functions.channels import GetFullChannelRequest, GetParticipantRequest
 from core import (
     db,
+    channel,
     get_bio,
     morning,
     security,
@@ -35,14 +38,16 @@ from core import (
     channel_id,
     json_encode,
     account_off,
-    MaksogramBot,
     get_avatars,
+    MaksogramBot,
     resources_path,
     get_enabled_auto_answer,
 )
 from telethon.errors.rpcerrorlist import (
     AuthKeyInvalidError,
+    ChannelPrivateError,
     MessageIdInvalidError,
+    UserNotParticipantError,
     AuthKeyUnregisteredError,
     BroadcastPublicVotersForbiddenError,
 )
@@ -51,8 +56,10 @@ from telethon.tl.types import (
     Birthday,
     PeerUser,
     PeerChat,
+    ChannelFull,
     PeerChannel,
     ReactionEmoji,
+    UpdateChannel,
     StarGiftUnique,
     UpdateNewMessage,
     MessageMediaDice,
@@ -64,6 +71,7 @@ from telethon.tl.types import (
     MessageMediaWebPage,
     MessageMediaDocument,
     MessageActionStarGift,
+    ChannelParticipantLeft,
     MessageActionStarGiftUnique,
 
     MessageEntityUrl,
@@ -75,6 +83,14 @@ from telethon.tl.types import (
     MessageEntityUnderline,
     MessageEntityBlockquote,
     MessageEntityCustomEmoji,
+)
+
+from create_chats import (
+    create_my_messages,
+    join_admin_channel,
+    update_dialog_filter,
+    create_message_changes,
+    link_my_messages_to_message_changes,
 )
 
 
@@ -109,15 +125,27 @@ class Program:
     def offline(self) -> bool:
         return not bool(self.status)
 
+    @property
+    def my_message_channel_id(self) -> int:
+        """self.my_messages без -100"""
+        return abs(self.my_messages % (-10**10))
+
+    @property
+    def message_changes_channel_id(self) -> int:
+        """self.message_changes без -100"""
+        return abs(self.message_changes % (-10**10))
+
     def __init__(self, client: TelegramClient, account_id: int, status_users: list[int], morning_notification: datetime):
         self.id = account_id
         self.client = client
         self.last_event = LastEvent()
         self.status = None
+        self.recovery_system_channels = False
         
         self.table_name = f"zz{self.id}"
         self.my_messages: int = None  # Инициализируется при запуске
         self.message_changes: int = None  # Инициализируется при запуске
+        self.name: str = None  # Инициализируется при запуске
 
         self.status_users: dict[int, bool] = {user: None for user in status_users}  # {id: True} -> id в сети
         self.time_morning_notification: datetime = morning_notification
@@ -148,7 +176,8 @@ class Program:
         @security()
         async def message_deleted(event: events.messagedeleted.MessageDeleted.Event):
             if event.is_private is False:  # Сообщение удалено в группе, супергруппе или канале
-                if not await db.fetch_one(f"SELECT added_chats @> '{event.chat_id}' FROM settings WHERE account_id={self.id}", one_data=True):
+                if event.chat_id not in (self.my_messages, self.message_changes) and \
+                        not await db.fetch_one(f"SELECT added_chats @> '{event.chat_id}' FROM settings WHERE account_id={self.id}", one_data=True):
                     return
             await self.sleep()
             await self.message_deleted(event)
@@ -187,6 +216,30 @@ class Program:
         async def new_message_service(update: UpdateNewMessage):
             event = events.newmessage.NewMessage.Event(update.message)
             await self.new_message_service(event)
+
+        @client.on(events.Raw(
+            UpdateChannel, func=lambda update: update.channel_id in (self.my_message_channel_id, self.message_changes_channel_id)))
+        @security()
+        async def update_system_channels(_):
+            if not self.recovery_system_channels:  # Если событие еще не обрабатывается
+                self.recovery_system_channels = True
+                updates = await self.check_system_channels()  # Получаем список значительных изменений
+                if updates:
+                    await MaksogramBot.send_system_message(
+                        f"🚨 <b>Нарушение правил</b> ❗️\n<b>{self.name}</b> изменил сис чаты\n"
+                        f"Коды ошибок: {','.join(map(str, updates))}", parse_mode="html")
+                    await MaksogramBot.send_message(self.id, "🚨 <b>Нарушение правил</b> ❗️\nБыло замечено значительное изменение "
+                                                             "в системных чатах или папке. Maksogram остановлен! "
+                                                             "Попробуйте перезапустить в /menu", parse_mode="html")
+                    await account_off(self.id)  # Если есть значительные изменения, останавливаем (исправляем при запуске)
+                else:
+                    self.recovery_system_channels = False  # Если нет значительных изменений, продолжаем работать
+
+        @client.on(events.Raw(UpdateChannel, func=lambda update: update.channel_id == channel_id))
+        @security()
+        async def update_admin_channel(_):
+            await self.update_admin_channel()
+            await self.update_system_dialog_filter()
 
     async def initial_checking_event(self, event: EventCommon) -> bool:
         return event.is_private and \
@@ -228,8 +281,7 @@ class Program:
             return peer.chat_id
         if isinstance(peer, PeerChannel):
             return peer.channel_id
-        name = await db.fetch_one(f"SELECT name FROM accounts WHERE account_id={self.id}", one_data=True)
-        await MaksogramBot.send_system_message(f"⚠️ Ошибка ⚠️\n\nТип peer - {peer.__class__.__name__} ({name})")
+        await MaksogramBot.send_system_message(f"⚠️ Ошибка ⚠️\n\nТип peer - {peer.__class__.__name__} ({self.name})")
         raise TypeError("peer isn't instance PeerUser, PeerChat, PeerChannel")
 
     @staticmethod
@@ -440,8 +492,7 @@ class Program:
         message: Message = event.message
 
         if module := await self.modules(message):
-            name = await db.fetch_one(f"SELECT name FROM accounts WHERE account_id={self.id}", one_data=True)
-            await MaksogramBot.send_system_message(f"💬 <b>Maksogram в чате</b>\n<b>{name}</b> воспользовался(лась) "
+            await MaksogramBot.send_system_message(f"💬 <b>Maksogram в чате</b>\n<b>{self.name}</b> воспользовался(лась) "
                                                    f"Maksogram в чате ({module})", parse_mode="html")
             return  # При срабатывании Maksogram в чате сохранение сообщения не происходит
 
@@ -603,9 +654,8 @@ class Program:
             else:
                 for deleted_id in deleted_ids:
                     await db.execute(f"DELETE FROM {self.table_name} WHERE saved_message_id={deleted_id}")
-            name = await db.fetch_one(f"SELECT name FROM accounts WHERE account_id={self.id}", one_data=True)
             text = {self.my_messages: "системном канале", self.message_changes: "системной группе"}[chat_id]
-            await MaksogramBot.send_system_message(f"⚠️ <b>Нарушение правил</b>\n<b>{name}</b> удалил(а) сообщение в {text}")
+            await MaksogramBot.send_system_message(f"⚠️ <b>Нарушение правил</b>\n<b>{self.name}</b> удалил(а) сообщение в {text}")
             await MaksogramBot.send_message(self.id, "⚠️ <b>Нарушение правил</b>\nБыло замечено нарушение правил пользования "
                                                      "Maksogram! Удалять сообщения в канале Мои сообщения и группе Изменение "
                                                      "сообщения строго запрещено! За повтор можно получить бан от Maksogram")
@@ -644,8 +694,7 @@ class Program:
                         self.id, f"Кто-то из {name} удалил(а) <a href='{link_to_message}'>сообщение</a>", parse_mode="HTML")
 
     async def read_channel(self):
-        name = await db.fetch_one(f"SELECT name FROM accounts WHERE account_id={self.id}", one_data=True)
-        await MaksogramBot.send_system_message(f"👀 <b>{name}</b> прочитал(а) пост в канале", parse_mode="HTML")
+        await MaksogramBot.send_system_message(f"👀 <b>{self.name}</b> прочитал(а) пост в канале", parse_mode="HTML")
 
     async def message_read(self, event: events.messageread.MessageRead.Event):
         if not event.is_private:
@@ -787,9 +836,69 @@ class Program:
 
     async def system_bot(self, event: events.newmessage.NewMessage.Event):
         if module := await self.modules(event.message):
-            name = await db.fetch_one(f"SELECT name FROM accounts WHERE account_id={self.id}", one_data=True)
-            await MaksogramBot.send_system_message(f"💬 <b>Maksogram в чате</b>\n<b>{name}</b> воспользовался(лась) "
+            await MaksogramBot.send_system_message(f"💬 <b>Maksogram в чате</b>\n<b>{self.name}</b> воспользовался(лась) "
                                                    f"Maksogram в чате ({module})", parse_mode="html")
+
+    async def check_system_channels(self) -> set[int]:
+        """0x0 — системный канал удален;\n
+        0x1 — супергруппа для комментариев удалена;\n
+        0x2 — супергруппа для комментариев отвязана"""
+
+        result = set()
+        try:  # Проверка наличия супергруппы для комментариев
+            await self.client(GetFullChannelRequest(self.message_changes_channel_id))
+        except ChannelPrivateError:
+            result.add(0x1)  # Супергруппа для комментариев удалена
+            result.add(0x2)  # Супергруппа для комментариев отвязана
+
+        try:  # Проверка наличия системного канала
+            my_messages: ChannelFull = (await self.client(GetFullChannelRequest(self.my_message_channel_id))).full_chat
+        except ChannelPrivateError:
+            result.add(0x0)  # Системный канал удален
+            result.add(0x2)  # Супергруппа для комментариев отвязана
+        else:  # Системный канал НЕ удален
+            if not my_messages.linked_chat_id:  # Супергруппа с комментариями отвязана (может быть удалена)
+                result.add(0x2)  # Супергруппа для комментариев отвязана
+
+        return result
+
+    async def update_system_dialog_filter(self):
+        input_peer_my_messages = get_input_peer(await self.client.get_input_entity(self.my_messages))
+        input_peer_admin_channel = get_input_peer(await self.client.get_input_entity(channel_id))
+        bot = get_input_peer(await self.client.get_input_entity(MaksogramBot.id))
+        await update_dialog_filter(self.client, input_peer_my_messages, input_peer_admin_channel, bot)
+
+    async def update_admin_channel(self) -> bool:
+        try:
+            participant = (await self.client(GetParticipantRequest(-10**12-channel_id, self.id))).participant
+        except UserNotParticipantError:
+            participant = ChannelParticipantLeft(self.id)
+        if isinstance(participant, ChannelParticipantLeft):  # Аккаунт не является участником
+            await MaksogramBot.send_message(self.id, "❗️ <b>Внимание</b>\nЛюбой чат в папке Maksogram, а также сама папка "
+                                                     f"являются неприкосновенными (в том числе канал @{channel})")
+            await join_admin_channel(self.client)
+            return True
+        return False
+
+    async def security_system_channels(self, updates: set[int]):
+        if 0x0 in updates or 0x1 in updates:  # Удалена особо значимые объекты
+            await db.execute(f"DELETE FROM {self.table_name}")
+
+        if 0x0 in updates:  # Системный канал удален
+            my_messages_id, input_my_messages, _ = await create_my_messages(self.client)  # Создание системного канала
+            self.my_messages = -10**12-my_messages_id
+            await db.execute(f"UPDATE accounts SET my_messages={self.my_messages} WHERE account_id={self.id}")
+        else:  # С системным каналом все в порядке
+            input_my_messages = get_input_channel(await self.client.get_input_entity(self.my_messages))
+        if 0x1 in updates:  # Супергруппа для комментариев удалена
+            message_changes_id, input_message_changes = await create_message_changes(self.client)  # Создание супергруппы для комментариев
+            self.message_changes = -10**12-message_changes_id
+            await db.execute(f"UPDATE accounts SET message_changes={self.message_changes} WHERE account_id={self.id}")
+        else:  # С супергруппой для комментариев все в порядке
+            input_message_changes = get_input_channel(await self.client.get_input_entity(self.message_changes))
+
+        if 0x2 in updates:  # Супергруппа для комментариев отвязана
+            await link_my_messages_to_message_changes(self.client, input_my_messages, input_message_changes)
 
     async def answering_machine(self, event: events.newmessage.NewMessage.Event):
         message: Message = event.message
@@ -930,15 +1039,23 @@ class Program:
     async def run_until_disconnected(self):
         await db.execute(f"CREATE TABLE IF NOT EXISTS {self.table_name} (chat_id BIGINT NOT NULL, "
                          "message_id INTEGER NOT NULL, saved_message_id INTEGER NOT NULL, reactions TEXT NOT NULL)")
-        account = await db.fetch_one(f"SELECT my_messages, message_changes FROM accounts WHERE account_id={self.id}")
-        self.my_messages, self.message_changes = account['my_messages'], account['message_changes']
-        name = await db.fetch_one(f"SELECT name FROM accounts WHERE account_id={self.id}", one_data=True)
-        await MaksogramBot.send_system_message(f"Maksogram {self.__version__} для {name} запущен")
+        account = await db.fetch_one(f"SELECT name, my_messages, message_changes FROM accounts WHERE account_id={self.id}")
+        self.name, self.my_messages, self.message_changes = account['name'], account['my_messages'], account['message_changes']
+
+        await self.update_admin_channel()  # Подписываемся на канал, если нужно
+        if updates := await self.check_system_channels():  # Проверяем состояние системных чатов
+            await MaksogramBot.send_system_message(
+                f"🚨 <b>Нарушение правил</b> ❗️\n<b>{self.name}</b> изменил сис чаты\n"
+                f"Коды ошибок: {','.join(map(str, updates))}", parse_mode="html")
+            await self.security_system_channels(updates)  # Восстанавливаем системные чаты
+        await self.update_system_dialog_filter()
+
+        await MaksogramBot.send_system_message(f"Maksogram {self.__version__} для {self.name} запущен")
         asyncio.get_running_loop().create_task(self.answering_machine_center())
         asyncio.get_running_loop().create_task(self.reminder_center())
         try:
             await self.client.run_until_disconnected()
         except (AuthKeyInvalidError, AuthKeyUnregisteredError):
             await MaksogramBot.send_message(self.id, "Вы удалили сессию, она была необходима для работы программы!")
-            await MaksogramBot.send_system_message(f"Удалена сессия у пользователя {name}")
+            await MaksogramBot.send_system_message(f"Удалена сессия у пользователя {self.name}")
             await account_off(self.id)
