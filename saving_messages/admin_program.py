@@ -901,7 +901,8 @@ class Program:
         bio = await get_bio(self.id, user['user_id'])
         if user['bio'] != bio:
             await MaksogramBot.send_message(self.id, f"🖼️ <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> "
-                                                     f"«О себе»\n<blockquote>{bio}</blockquote>", parse_mode="html")
+                                                     f"«О себе»\n<blockquote>{user['bio']}</blockquote>\n👇👇👇👇👇👇👇\n"
+                                                     f"<blockquote>{bio}</blockquote>", parse_mode="html")
             await db.execute(f"UPDATE changed_profiles SET bio=$1 WHERE account_id={self.id} AND user_id={user['user_id']}", bio)
 
     @security()
