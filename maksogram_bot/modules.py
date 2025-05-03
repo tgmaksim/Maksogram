@@ -62,7 +62,7 @@ async def calculator_menu(account_id: int) -> dict[str, Any]:
     else:
         status_button = IButton(text="🟢 Включить Калькулятор", callback_data="calculator_on")
     markup = IMarkup(inline_keyboard=[[status_button],
-                                      [IButton(text="Как работает Калькулятор?", url=f"{SITE}#калькулятор")],
+                                      [IButton(text="Обзор Калькулятора", url=f"{SITE}#калькулятор")],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
     return {"text": "🔢 <b>Калькулятор в чате</b>\nРешает примеры разных уровней сложности от обычного умножения до "
                     "длинных примеров\n<b>Для вызова укажите в конце \"=\"</b>\n<blockquote>10+5*15=</blockquote>",
@@ -95,7 +95,7 @@ async def qrcode_menu(account_id: int) -> dict[str, Any]:
     else:
         status_button = IButton(text="🟢 Включить Генератор", callback_data="qrcode_on")
     markup = IMarkup(inline_keyboard=[[status_button],
-                                      [IButton(text="Как работает Генератор QR?", url=f"{SITE}#генератор-qr")],
+                                      [IButton(text="Обзор Генератора QR", url=f"{SITE}#генератор-qr")],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
     return {"text": f"🔗 <b>Генератор QR-кода</b>\nГенерирует обычный QR-код с нужной ссылкой в чате\n<blockquote>Создай t.me/{channel}\n"
                     f"Создать t.me/{channel}\nСгенерировать t.me/{channel}\nСгенерируй t.me/{channel}\nQR t.me/{channel}</blockquote>",
@@ -128,10 +128,11 @@ async def audio_transcription_menu(account_id: int) -> dict[str, Any]:
     else:
         status_button = IButton(text="🟢 Включить Расшифровку", callback_data="audio_transcription_on")
     markup = IMarkup(inline_keyboard=[[status_button],
-                                      [IButton(text="Как расшифровать ГС?", url=f"{SITE}#расшифровка-гс")],
+                                      [IButton(text="Обзор Расшифровки ГС", url=f"{SITE}#расшифровка-гс")],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
-    return {"text": "🗣 <b>Расшифровка голосовых</b>\nНе хотите слушать голосовое или кружок? Расшифруйте его в текст\n"
-                    "<blockquote>Расшифруй, расшифровать, в текст</blockquote>", "reply_markup": markup, "parse_mode": html}
+    return {"text": "🗣 <b>Расшифровка голосовых</b>\nНе хотите слушать голосовое или кружок? Расшифруйте его в текст: "
+                    "свайпни и отправь команду\n<blockquote>Расшифруй\nРасшифровать\nВ текст</blockquote>",
+            "reply_markup": markup, "parse_mode": html}
 
 
 @dp.callback_query(F.data.in_(["audio_transcription_on", "audio_transcription_off"]))
@@ -165,7 +166,7 @@ async def weather_menu(account_id: int) -> dict[str, Any]:
         status_button_morning_weather = IButton(text="🟢 Включить утреннюю Погоду", callback_data="morning_weather_on")
     markup = IMarkup(inline_keyboard=[[status_button_weather],
                                       [status_button_morning_weather],
-                                      [IButton(text="Как получить прогноз?", url=f"{SITE}#погода")],
+                                      [IButton(text="Обзор функции", url=f"{SITE}#погода")],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
     warnings = f"<blockquote>❗️ Погода по утрам присылается, когда вы первый раз зашли в Telegram с {morning[0]}:00 " \
                f"до {morning[1]}:00</blockquote>\n<blockquote>❗️ Для улучшения точности выберите часовой пояс в /settings</blockquote>"
@@ -216,7 +217,7 @@ async def round_video_menu(account_id: int) -> dict[str, Any]:
     markup = IMarkup(inline_keyboard=[[status_button],
                                       [IButton(text="Как создать кружок?", url=f"{SITE}#видео-в-кружок")],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
-    return {"text": "🔄 <b>Конвертер видео в кружок</b>\nПонадобилось сделать из обычного видео кружок? Сделай это командой\n"
+    return {"text": "🔄 <b>Конвертер видео в кружок</b>\nПонадобилось сделать из обычного видео кружок? Свайпни и отправь\n"
                     "<blockquote>Кружок</blockquote>", "reply_markup": markup, "parse_mode": html}
 
 
@@ -246,7 +247,7 @@ async def reminder_menu(account_id: int) -> dict[str, Any]:
     else:
         status_button = IButton(text="🟢 Включить Напоминалку", callback_data="reminder_on")
     markup = IMarkup(inline_keyboard=[[status_button],
-                                      [IButton(text="Как пользоваться Напоминалкой?", url=f"{SITE}#напоминалка")],
+                                      [IButton(text="Обзор Напоминалки", url=f"{SITE}#напоминалка")],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
     return {"text": "⏰ <b>Напоминалка в чате</b>\nДля создания напоминания <b>нужно ответить</b> на любое сообщение в чате командой\n"
                     "<blockquote>❗️ Для правильной работы Напоминалки выберите часовой пояс в /settings</blockquote>\n"
@@ -281,7 +282,7 @@ async def randomizer_menu(account_id: int) -> dict[str, Any]:
     else:
         status_button = IButton(text="🟢 Включить Рандомайзер", callback_data="randomizer_on")
     markup = IMarkup(inline_keyboard=[[status_button],
-                                      [IButton(text="Как пользоваться Рандомайзером?", url=f"{SITE}#рандомайзер")],
+                                      [IButton(text="Обзор Рандомайзера", url=f"{SITE}#рандомайзер")],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
     return {"text": "🎲 <b>Рандомайзер в чате</b>\n<blockquote>Выбери да или нет\nВыбери число от 0 до 10\n"
                     "Выбери яблоко, банан или груша</blockquote>", "reply_markup": markup, "parse_mode": html}

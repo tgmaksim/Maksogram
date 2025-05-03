@@ -107,8 +107,8 @@ async def changed_profile_menu(account_id: int, user_id: int) -> dict[str, Any]:
                                                callback_data=f"changed_profile_bio_{command(user['bio'])}_{user_id}"),
                                        IButton(text="🚫 Удалить", callback_data=f"changed_profile_del{user_id}")],
                                       [IButton(text="◀️  Назад", callback_data="changed_profile")]])
-    return {"text": f"🖼️ <b>Профиль друга</b>\nМожно выбрать, о каких изменениях в профиле получать уведомления. Удалите "
-                    f"пользователя, если слежка больше не нужна\n", "parse_mode": html, "reply_markup": markup}
+    return {"text": f"🖼️ <b>Профиль друга</b>\nМожно выбрать, о каких изменениях в профиле у <b>{user['name']}</b> получать "
+                    f"уведомления. Удалите пользователя, если слежка больше не нужна\n", "parse_mode": html, "reply_markup": markup}
 
 
 @dp.callback_query(F.data.startswith("changed_profile_avatars_on").__or__(F.data.startswith("changed_profile_avatars_off")).__or__(
