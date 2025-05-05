@@ -1,6 +1,5 @@
 from typing import Any
 from asyncpg.exceptions import UniqueViolationError
-from telethon.utils import parse_username, parse_phone
 from core import (
     db,
     html,
@@ -10,7 +9,6 @@ from core import (
     get_gifts,
     get_avatars,
     json_encode,
-    telegram_clients,
 )
 
 from aiogram import F
@@ -24,6 +22,7 @@ from aiogram.types import InlineKeyboardButton as IButton
 from .core import (
     dp,
     bot,
+    new_user,
     UserState,
     new_message,
     new_callback_query,
@@ -80,40 +79,19 @@ async def _changed_profile(message: Message, state: FSMContext):
     message_id = (await state.get_data())['message_id']
     await state.clear()
     account_id = message.chat.id
-    if not await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={account_id}", one_data=True):
-        await message.answer(**await changed_profiles_menu(account_id, "<b>Maksogram выключен!</b>"))
-    elif message.text == "Отмена":
-        await message.answer(**await changed_profiles_menu(account_id))
-    else:  # Maksogram запущен
-        entity, user = None, None
-        username, phone = message.text and parse_username(message.text), message.text and parse_phone(message.text)
-        if message.content_type == "users_shared":
-            entity = message.users_shared.user_ids[0]
-        elif username[1] is False and username[0] is not None:  # Является ли строка username (не ссылка с приглашением)
-            entity = username[0]
-        elif phone and message.text.startswith('+'):
-            entity = f"+{phone}"
-        elif message.text and message.text.isdigit():  # ID пользователя
-            entity = int(message.text)
-        if entity:
-            try:
-                user = await telegram_clients[account_id].get_entity(entity)
-            except ValueError:  # Пользователь с такими данными не найден
-                pass
 
-        if user:
-            user_id = user.id
-            if user_id == account_id:  # Себя нельзя
-                await message.answer(**await changed_profiles_menu(account_id))
-            else:
-                name = f"{user.first_name} {user.last_name or ''}".strip()
-                try:
-                    await db.execute(f"INSERT INTO changed_profiles VALUES ({account_id}, {user_id}, $1, NULL, NULL, NULL)", name)
-                except UniqueViolationError:  # Уже есть
-                    pass
-                await message.answer(**await changed_profile_menu(account_id, user_id, dict(name=name, avatars=None, gifts=None, bio=None)))
+    user = await new_user(message, changed_profiles_menu)
+    if user:
+        user_id = user.id
+        if user_id == account_id:  # Себя нельзя
+            await message.answer(**await changed_profiles_menu(account_id))
         else:
-            await message.answer(**await changed_profiles_menu(account_id, "<b>Пользователь не найден!</b>"))
+            name = f"{user.first_name} {user.last_name or ''}".strip()
+            try:
+                await db.execute(f"INSERT INTO changed_profiles VALUES ({account_id}, {user_id}, $1, NULL, NULL, NULL)", name)
+            except UniqueViolationError:  # Уже есть
+                pass
+            await message.answer(**await changed_profile_menu(account_id, user_id, dict(name=name, avatars=None, gifts=None, bio=None)))
 
     await bot.delete_messages(chat_id=message.chat.id, message_ids=[message.message_id, message_id])
 

@@ -8,7 +8,6 @@ from calendar import monthrange
 from datetime import datetime, timedelta
 from asyncpg.exceptions import UniqueViolationError
 from matplotlib.colors import LinearSegmentedColormap
-from telethon.utils import parse_username, parse_phone
 from core import (
     db,
     html,
@@ -34,6 +33,7 @@ from aiogram.types import InlineKeyboardButton as IButton
 from .core import (
     dp,
     bot,
+    new_user,
     UserState,
     new_message,
     new_callback_query,
@@ -383,45 +383,22 @@ async def _new_status_user(message: Message, state: FSMContext):
     message_id = (await state.get_data())['message_id']
     await state.clear()
     account_id = message.chat.id
-    if not await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={account_id}", one_data=True):
-        await message.answer(**await status_users_menu(account_id, "<b>Maksogram выключен!</b>"))
-    elif message.text == "Отмена":
-        await message.answer(**await status_users_menu(account_id))
-    else:  # Maksogram запущен
-        entity, user = None, None
-        username, phone = message.text and parse_username(message.text), message.text and parse_phone(message.text)
-        if message.text == "Себя":
-            entity = account_id
-        elif message.content_type == "users_shared":
-            entity = message.users_shared.user_ids[0]
-        elif username[1] is False and username[0] is not None:  # Является ли строка username (не ссылка с приглашением)
-            entity = username[0]
-        elif phone and message.text.startswith('+'):
-            entity = f"+{phone}"
-        elif message.text and message.text.isdigit():  # ID пользователя
-            entity = int(message.text)
-        if entity:
-            try:
-                user = await telegram_clients[account_id].get_entity(entity)
-            except ValueError:  # Пользователь с такими данными не найден
-                pass
 
-        if user:
-            user_id = user.id
-            if user_id == account_id:
-                name = "Мой аккаунт"
-            else:
-                name = f"{user.first_name} {user.last_name or ''}".strip()
-                telegram_clients[account_id].list_event_handlers()[4][1].chats.add(user_id)
-            try:
-                await db.execute(f"INSERT INTO status_users VALUES ({account_id}, {user_id}, $1, "
-                                 f"false, false, false, NULL, false, NULL)", name)
-            except UniqueViolationError:  # Уже есть
-                pass
-            await message.answer(**await status_user_menu(account_id, user_id, dict(name=name, online=False, offline=False,
-                                                                                    reading=False, awake=None, statistics=False)))
+    user = await new_user(message, status_users_menu)
+    if user:
+        user_id = user.id
+        if user_id == account_id:
+            name = "Мой аккаунт"
         else:
-            await message.answer(**await status_users_menu(account_id, "<b>Пользователь не найден!</b>"))
+            name = f"{user.first_name} {user.last_name or ''}".strip()
+            telegram_clients[account_id].list_event_handlers()[4][1].chats.add(user_id)
+        try:
+            await db.execute(f"INSERT INTO status_users VALUES ({account_id}, {user_id}, $1, "
+                             f"false, false, false, NULL, false, NULL)", name)
+        except UniqueViolationError:  # Уже есть
+            pass
+        await message.answer(**await status_user_menu(account_id, user_id, dict(name=name, online=False, offline=False,
+                                                                                reading=False, awake=None, statistics=False)))
 
     await bot.delete_messages(chat_id=message.chat.id, message_ids=[message.message_id, message_id])
 

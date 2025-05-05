@@ -3,8 +3,9 @@ import aiohttp
 from html import escape
 from typing import Literal
 from decimal import Decimal
-from typing import Any, Union
 from sys_keys import crypto_api_key
+from telethon.utils import parse_username, parse_phone
+from typing import Any, Union, Callable, Coroutine, Optional
 from core import (
     n,
     db,
@@ -13,10 +14,12 @@ from core import (
     omsk_time,
     zip_int_data,
     resources_path,
+    telegram_clients,
 )
 
 from core import MaksogramBot
 from aiogram import Dispatcher
+from telethon.tl.types import User
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardMarkup as IMarkup
 from aiogram.types import InlineKeyboardButton as IButton
@@ -120,6 +123,40 @@ async def subscription_menu(account_id: int, subscription_id: int) -> dict[str, 
     return {"caption": f"Maksogram на {subscription['about'].lower()} {discount}\nСбер: {fee['RUB']} руб{without_discount}\n"
                        f"{n.join(payment_methods)}",
             "parse_mode": html, "reply_markup": markup}
+
+
+async def new_user(message: Message, menu_users: Callable[[int, Optional[str]], Coroutine[Any, Any, dict[str, Any]]]):
+    account_id = message.chat.id
+    if not await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={account_id}", one_data=True):
+        await message.answer(**await menu_users(account_id, "<b>Maksogram выключен!</b>"))
+    elif message.text == "Отмена":
+        await message.answer(**await menu_users(account_id, None))
+    else:  # Maksogram запущен
+        entity, user = None, None
+        username, phone = message.text and parse_username(message.text), message.text and parse_phone(message.text)
+        if message.text == "Себя":
+            entity = account_id
+        elif message.content_type == "users_shared":
+            entity = message.users_shared.user_ids[0]
+        elif username[1] is False and username[0] is not None:  # Является ли строка username (не ссылка с приглашением)
+            entity = username[0]
+        elif phone and message.text.startswith('+'):
+            entity = f"+{phone}"
+        elif message.text and message.text.isdigit():  # ID пользователя
+            entity = int(message.text)
+
+        if entity:
+            try:
+                user = await telegram_clients[account_id].get_entity(entity)
+            except ValueError:  # Пользователь с такими данными не найден
+                pass
+
+        if not user:  # Если не найден, не является User или не человек
+            await message.answer(**await menu_users(account_id, "<b>Пользователь не найден!</b>"))
+        elif not isinstance(user, User) or user.bot or user.support:  # Канал, группа, бот или поддержка
+            await message.answer(**await menu_users(account_id, "<b>Не является пользователем!</b>"))
+        else:
+            return user
 
 
 def referal_link(user_id: int) -> str:
