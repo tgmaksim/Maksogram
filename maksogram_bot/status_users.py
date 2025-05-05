@@ -8,6 +8,7 @@ from calendar import monthrange
 from datetime import datetime, timedelta
 from asyncpg.exceptions import UniqueViolationError
 from matplotlib.colors import LinearSegmentedColormap
+from telethon.utils import parse_username, parse_phone
 from core import (
     db,
     html,
@@ -209,12 +210,12 @@ async def _status_users(callback_query: CallbackQuery):
     await callback_query.message.edit_text(**await status_users_menu(callback_query.message.chat.id))
 
 
-async def status_users_menu(account_id: int) -> dict[str, Any]:
+async def status_users_menu(account_id: int, text: str = None) -> dict[str, Any]:
     buttons = []
     users = sorted(await db.fetch_all(f"SELECT user_id, name FROM status_users WHERE account_id={account_id}"),
                    key=lambda x: len(x['name']))  # Список друзей в сети, отсортированных по возрастанию длины имени
     i = 0
-    while i < len(users):
+    while i < len(users):  # Если длина имен достаточно короткая, то помещаем 2 в ряд, иначе 1
         if i+1 < len(users) and all(map(lambda x: len(x['name']) <= 15, users[i:i+1])):
             buttons.append([IButton(text=f"🌐 {users[i]['name']}", callback_data=f"status_user_menu{users[i]['user_id']}"),
                             IButton(text=f"🌐 {users[i+1]['name']}", callback_data=f"status_user_menu{users[i+1]['user_id']}")])
@@ -224,8 +225,8 @@ async def status_users_menu(account_id: int) -> dict[str, Any]:
         i += 1
     buttons.append([IButton(text="➕ Добавить нового пользователя", callback_data="new_status_user")])
     buttons.append([IButton(text="◀️  Назад", callback_data="menu")])
-    return {"text": "🌐 <b>Друг в сети</b>\nУведомления о входе/выходе из сети, пробуждении, прочтения сообщения, а также "
-                    "статистика онлайн\n<blockquote>⛔️ Не работает, если собеседник скрыл время последнего захода...</blockquote>",
+    return {"text": text or "🌐 <b>Друг в сети</b>\nУведомления о входе/выходе из сети, пробуждении, прочтения сообщения, а также "
+                            "статистика онлайн\n<blockquote>⛔️ Не работает, если собеседник скрыл время последнего захода...</blockquote>",
             "reply_markup": IMarkup(inline_keyboard=buttons), "parse_mode": html}
 
 
@@ -242,15 +243,16 @@ async def _status_user_menu(callback_query: CallbackQuery):
     await callback_query.message.edit_text(**await status_user_menu(callback_query.from_user.id, user_id))
 
 
-async def status_user_menu(account_id: int, user_id: int) -> dict[str, Any]:
+async def status_user_menu(account_id: int, user_id: int, user: dict = None) -> dict[str, Any]:
     def status(parameter: bool):
         return "🟢" if parameter else "🔴"
 
     def command(parameter: bool):
         return "off" if parameter else "on"
 
-    user = await db.fetch_one(f"SELECT name, online, offline, reading, awake, statistics FROM status_users "
-                              f"WHERE account_id={account_id} AND user_id={user_id}")  # Данные о друге в сети
+    if not user:
+        user = await db.fetch_one(f"SELECT name, online, offline, reading, awake, statistics FROM status_users "
+                                  f"WHERE account_id={account_id} AND user_id={user_id}")
     if user is None:
         return await status_users_menu(account_id)
     warning = "<blockquote>❗️ Для улучшения точности выберите часовой пояс в /settings</blockquote>" if user['awake'] else ''
@@ -362,15 +364,14 @@ async def _status_user_statistics_watch_period(callback_query: CallbackQuery):
 async def _new_status_user_start(callback_query: CallbackQuery, state: FSMContext):
     if await new_callback_query(callback_query): return
     if await db.fetch_one(f"SELECT COUNT(*) FROM status_users WHERE account_id={callback_query.from_user.id}", one_data=True) >= 3:
-        # Количество друзей в сети уже достигло максимума
         if callback_query.from_user.id != OWNER:
             return await callback_query.answer("У вас максимальное количество!", True)
     await state.set_state(UserState.status_user)
     request_users = KeyboardButtonRequestUsers(request_id=1, user_is_bot=False)
-    markup = KMarkup(keyboard=[[KButton(text="Выбрать", request_users=request_users),
-                                KButton(text="Себя")],
+    markup = KMarkup(keyboard=[[KButton(text="Выбрать", request_users=request_users), KButton(text="Себя")],
                                [KButton(text="Отмена")]], resize_keyboard=True)
-    message_id = (await callback_query.message.answer("Отправьте пользователя для отслеживания", reply_markup=markup)).message_id
+    message_id = (await callback_query.message.answer("Отправьте пользователя для отслеживания кнопкой, ID, username или "
+                                                      "номер телефона", reply_markup=markup)).message_id
     await state.update_data(message_id=message_id)
     await callback_query.message.delete()
 
@@ -379,26 +380,49 @@ async def _new_status_user_start(callback_query: CallbackQuery, state: FSMContex
 @security('state')
 async def _new_status_user(message: Message, state: FSMContext):
     if await new_message(message): return
-    account_id = message.chat.id
     message_id = (await state.get_data())['message_id']
     await state.clear()
-    if message.content_type == "users_shared" or message.text == "Себя":
-        user_id = account_id if message.text == "Себя" else message.users_shared.user_ids[0]
-        if user_id == account_id:
-            name = "Мой аккаунт"
+    account_id = message.chat.id
+    if not await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={account_id}", one_data=True):
+        await message.answer(**await status_users_menu(account_id, "<b>Maksogram выключен!</b>"))
+    elif message.text == "Отмена":
+        await message.answer(**await status_users_menu(account_id))
+    else:  # Maksogram запущен
+        entity, user = None, None
+        username, phone = message.text and parse_username(message.text), message.text and parse_phone(message.text)
+        if message.text == "Себя":
+            entity = account_id
+        elif message.content_type == "users_shared":
+            entity = message.users_shared.user_ids[0]
+        elif username[1] is False and username[0] is not None:  # Является ли строка username (не ссылка с приглашением)
+            entity = username[0]
+        elif phone and message.text.startswith('+'):
+            entity = f"+{phone}"
+        elif message.text and message.text.isdigit():  # ID пользователя
+            entity = int(message.text)
+        if entity:
+            try:
+                user = await telegram_clients[account_id].get_entity(entity)
+            except ValueError:  # Пользователь с такими данными не найден
+                pass
+
+        if user:
+            user_id = user.id
+            if user_id == account_id:
+                name = "Мой аккаунт"
+            else:
+                name = f"{user.first_name} {user.last_name or ''}".strip()
+                telegram_clients[account_id].list_event_handlers()[4][1].chats.add(user_id)
+            try:
+                await db.execute(f"INSERT INTO status_users VALUES ({account_id}, {user_id}, $1, "
+                                 f"false, false, false, NULL, false, NULL)", name)
+            except UniqueViolationError:  # Уже есть
+                pass
+            await message.answer(**await status_user_menu(account_id, user_id, dict(name=name, online=False, offline=False,
+                                                                                    reading=False, awake=None, statistics=False)))
         else:
-            user = await telegram_clients[message.chat.id].get_entity(user_id)
-            name = user.first_name + (f" {user.last_name}" if user.last_name else "")
-            name = (name[:30] + "...") if len(name) > 30 else name
-            telegram_clients[account_id].list_event_handlers()[4][1].chats.add(user_id)
-        try:
-            await db.execute(f"INSERT INTO status_users VALUES ({account_id}, {user_id}, $1, false, false, "
-                             f"false, NULL, false, NULL)", name)
-        except UniqueViolationError:  # Уже есть
-            pass
-        await message.answer(**await status_user_menu(message.chat.id, user_id))
-    else:
-        await message.answer(**await status_users_menu(message.chat.id))
+            await message.answer(**await status_users_menu(account_id, "<b>Пользователь не найден!</b>"))
+
     await bot.delete_messages(chat_id=message.chat.id, message_ids=[message.message_id, message_id])
 
 

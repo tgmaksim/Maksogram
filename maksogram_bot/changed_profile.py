@@ -1,8 +1,10 @@
 from typing import Any
 from asyncpg.exceptions import UniqueViolationError
+from telethon.utils import parse_username, parse_phone
 from core import (
     db,
     html,
+    OWNER,
     get_bio,
     security,
     get_gifts,
@@ -35,23 +37,23 @@ async def _changed_profile(callback_query: CallbackQuery):
     await callback_query.message.edit_text(**await changed_profiles_menu(callback_query.from_user.id))
 
 
-async def changed_profiles_menu(account_id: int) -> dict[str, Any]:
+async def changed_profiles_menu(account_id: int, text: str = None) -> dict[str, Any]:
     buttons = []
     users = sorted(await db.fetch_all(f"SELECT user_id, name FROM changed_profiles WHERE account_id={account_id}"),
                    key=lambda x: len(x['name']))  # Список пользователей, отсортированных по возрастанию длины имени
     i = 0
-    while i < len(users):
-        if i + 1 < len(users) and all(map(lambda x: len(x['name']) <= 15, users[i:i + 1])):
+    while i < len(users):  # Если длина имен достаточно короткая, то помещаем 2 в ряд, иначе 1
+        if i + 1 < len(users) and all(map(lambda x: len(x['name']) <= 15, users[i:i+1])):
             buttons.append([IButton(text=f"🖼️ {users[i]['name']}", callback_data=f"changed_profile_menu{users[i]['user_id']}"),
-                            IButton(text=f"🖼️ {users[i + 1]['name']}", callback_data=f"changed_profile_menu{users[i + 1]['user_id']}")])
+                            IButton(text=f"🖼️ {users[i+1]['name']}", callback_data=f"changed_profile_menu{users[i+1]['user_id']}")])
             i += 1
         else:
             buttons.append([IButton(text=f"🖼️ {users[i]['name']}", callback_data=f"changed_profile_menu{users[i]['user_id']}")])
         i += 1
     buttons.append([IButton(text="➕ Добавить пользователя", callback_data="new_changed_profile")])
     buttons.append([IButton(text="◀️  Назад", callback_data="menu")])
-    return {"text": "🖼️ <b>Профиль друга</b>\nДобавьте пользователя и первым узнавайте о новой аватарке, новом подарке или "
-                    "измененном «О себе» в профиле собеседника", "parse_mode": html, "reply_markup": IMarkup(inline_keyboard=buttons)}
+    return {"text": text or "🖼️ <b>Профиль друга</b>\nДобавьте пользователя и первым узнавайте о новой аватарке, новом подарке или "
+                            "измененном «О себе» в профиле собеседника", "parse_mode": html, "reply_markup": IMarkup(inline_keyboard=buttons)}
 
 
 @dp.callback_query(F.data.startswith("new_changed_profile"))
@@ -59,12 +61,14 @@ async def changed_profiles_menu(account_id: int) -> dict[str, Any]:
 async def _new_changed_profile_start(callback_query: CallbackQuery, state: FSMContext):
     if await new_callback_query(callback_query): return
     if await db.fetch_one(f"SELECT COUNT(*) FROM changed_profiles WHERE account_id={callback_query.from_user.id}", one_data=True) >= 4:
-        return await callback_query.answer("У вас максимальное количество \"новых аватарок\"")
+        if callback_query.from_user.id != OWNER:
+            return await callback_query.answer("У вас максимальное количество отслеживаемых пользователей", True)
     await state.set_state(UserState.changed_profile)
     request_users = KeyboardButtonRequestUsers(request_id=1, user_is_bot=False)
     markup = KMarkup(keyboard=[[KButton(text="Выбрать", request_users=request_users)],
                                [KButton(text="Отмена")]], resize_keyboard=True)
-    message_id = (await callback_query.message.answer("Отправьте пользователя для отслеживания", reply_markup=markup)).message_id
+    message_id = (await callback_query.message.answer("Отправьте пользователя для отслеживания кнопкой, ID, username или "
+                                                      "номер телефона", reply_markup=markup)).message_id
     await state.update_data(message_id=message_id)
     await callback_query.message.delete()
 
@@ -75,28 +79,51 @@ async def _changed_profile(message: Message, state: FSMContext):
     if await new_message(message): return
     message_id = (await state.get_data())['message_id']
     await state.clear()
-    if message.content_type == "users_shared":
-        user_id = message.users_shared.user_ids[0]
-        account_id = message.chat.id
-        if user_id == account_id:  # Себя нельзя
-            await message.answer(**await changed_profiles_menu(account_id))
-        else:
-            user = await telegram_clients[account_id].get_entity(user_id)
-            name = f"{user.first_name} {user.last_name or ''}".strip()
+    account_id = message.chat.id
+    if not await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={account_id}", one_data=True):
+        await message.answer(**await changed_profiles_menu(account_id, "<b>Maksogram выключен!</b>"))
+    elif message.text == "Отмена":
+        await message.answer(**await changed_profiles_menu(account_id))
+    else:  # Maksogram запущен
+        entity, user = None, None
+        username, phone = message.text and parse_username(message.text), message.text and parse_phone(message.text)
+        if message.content_type == "users_shared":
+            entity = message.users_shared.user_ids[0]
+        elif username[1] is False and username[0] is not None:  # Является ли строка username (не ссылка с приглашением)
+            entity = username[0]
+        elif phone and message.text.startswith('+'):
+            entity = f"+{phone}"
+        elif message.text and message.text.isdigit():  # ID пользователя
+            entity = int(message.text)
+        if entity:
             try:
-                await db.execute(f"INSERT INTO changed_profiles VALUES ({account_id}, {user_id}, $1, NULL, NULL, NULL)", name)
-            except UniqueViolationError:  # Уже есть
+                user = await telegram_clients[account_id].get_entity(entity)
+            except ValueError:  # Пользователь с такими данными не найден
                 pass
-            await message.answer(**await changed_profile_menu(account_id, user_id))
-    else:
-        await message.answer(**await changed_profiles_menu(message.chat.id))
+
+        if user:
+            user_id = user.id
+            if user_id == account_id:  # Себя нельзя
+                await message.answer(**await changed_profiles_menu(account_id))
+            else:
+                name = f"{user.first_name} {user.last_name or ''}".strip()
+                try:
+                    await db.execute(f"INSERT INTO changed_profiles VALUES ({account_id}, {user_id}, $1, NULL, NULL, NULL)", name)
+                except UniqueViolationError:  # Уже есть
+                    pass
+                await message.answer(**await changed_profile_menu(account_id, user_id, dict(name=name, avatars=None, gifts=None, bio=None)))
+        else:
+            await message.answer(**await changed_profiles_menu(account_id, "<b>Пользователь не найден!</b>"))
+
     await bot.delete_messages(chat_id=message.chat.id, message_ids=[message.message_id, message_id])
 
 
-async def changed_profile_menu(account_id: int, user_id: int) -> dict[str, Any]:
+async def changed_profile_menu(account_id: int, user_id: int, user: dict = None) -> dict[str, Any]:
     indicator = lambda status: "🔴" if status is None else "🟢"
     command = lambda status: "on" if status is None else "off"
-    user = await db.fetch_one(f"SELECT name, avatars, gifts, bio FROM changed_profiles WHERE account_id={account_id} AND user_id={user_id}")
+    if not user:
+        user = await db.fetch_one(f"SELECT name, avatars, gifts, bio FROM changed_profiles "
+                                  f"WHERE account_id={account_id} AND user_id={user_id}")
     if user is None:
         return await changed_profiles_menu(account_id)
     markup = IMarkup(inline_keyboard=[[IButton(text=f"{indicator(user['avatars'])} Аватарка 📷",
