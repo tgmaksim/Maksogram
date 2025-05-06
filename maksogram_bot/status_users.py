@@ -203,17 +203,21 @@ async def online_statistics(account_id: int, user_id: int, user: dict[str, str],
     return path
 
 
-@dp.callback_query(F.data == "status_users")
+@dp.callback_query((F.data == "status_users").__or__(F.data == "status_usersPrev"))
 @security()
 async def _status_users(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
-    await callback_query.message.edit_text(**await status_users_menu(callback_query.message.chat.id))
+    prev = "Prev" if callback_query.data == "status_usersPrev" else ""
+    await callback_query.message.edit_text(**await status_users_menu(callback_query.message.chat.id, prev=prev))
 
 
-async def status_users_menu(account_id: int, text: str = None) -> dict[str, Any]:
+async def status_users_menu(account_id: int, text: str = None, prev: str = "") -> dict[str, Any]:
     buttons = []
-    users = sorted(await db.fetch_all(f"SELECT user_id, name FROM status_users WHERE account_id={account_id}"),
-                   key=lambda x: len(x['name']))  # Список друзей в сети, отсортированных по возрастанию длины имени
+    if prev:
+        users = []
+    else:
+        users = sorted(await db.fetch_all(f"SELECT user_id, name FROM status_users WHERE account_id={account_id}"),
+                       key=lambda x: len(x['name']))  # Список друзей в сети, отсортированных по возрастанию длины имени
     i = 0
     while i < len(users):  # Если длина имен достаточно короткая, то помещаем 2 в ряд, иначе 1
         if i+1 < len(users) and all(map(lambda x: len(x['name']) <= 15, users[i:i+1])):
@@ -223,7 +227,7 @@ async def status_users_menu(account_id: int, text: str = None) -> dict[str, Any]
         else:
             buttons.append([IButton(text=f"🌐 {users[i]['name']}", callback_data=f"status_user_menu{users[i]['user_id']}")])
         i += 1
-    buttons.append([IButton(text="➕ Добавить нового пользователя", callback_data="new_status_user")])
+    buttons.append([IButton(text="➕ Добавить нового пользователя", callback_data=f"new_status_user{prev}")])
     buttons.append([IButton(text="◀️  Назад", callback_data="menu")])
     return {"text": text or "🌐 <b>Друг в сети</b>\nУведомления о входе/выходе из сети, пробуждении, прочтения сообщения, а также "
                             "статистика онлайн\n<blockquote>⛔️ Не работает, если собеседник скрыл время последнего захода...</blockquote>",
@@ -357,6 +361,13 @@ async def _status_user_statistics_watch_period(callback_query: CallbackQuery):
     await callback_query.message.edit_text(
         **await status_user_statistics_menu(account_id, user_id, period, int(offset), "себя" if user_id == account_id else user['name']),
         link_preview_options=preview_options(f"{path}?time={time_now().timestamp()}", WWW_SITE, show_above_text=True))
+
+
+@dp.callback_query(F.data == "new_status_userPrev")
+@security()
+async def _new_status_user_prev(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    await callback_query.answer("Следить за онлайном и получать статистику доступно только пользователям Maksogram", True)
 
 
 @dp.callback_query(F.data == "new_status_user")

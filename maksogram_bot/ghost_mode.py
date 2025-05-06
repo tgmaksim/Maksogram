@@ -29,18 +29,26 @@ from .core import (
 )
 
 
-@dp.callback_query(F.data == "ghost_mode")
+@dp.callback_query((F.data == "ghost_mode").__or__(F.data == "ghost_modePrev"))
 @security()
 async def _ghost_mode(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
-    await callback_query.message.edit_text(**await ghost_mode_menu())
+    prev = "Prev" if callback_query.data == "ghost_modePrev" else ""
+    await callback_query.message.edit_text(**await ghost_mode_menu(prev=prev))
 
 
-async def ghost_mode_menu(_: int = None, text: str = None) -> dict[str, Any]:
-    markup = IMarkup(inline_keyboard=[[IButton(text="📸 Посмотреть историю", callback_data="ghost_stories")],
+async def ghost_mode_menu(_: int = None, text: str = None, prev: str = "") -> dict[str, Any]:
+    markup = IMarkup(inline_keyboard=[[IButton(text="📸 Посмотреть историю", callback_data=f"ghost_stories{prev}")],
                                       [IButton(text="◀️  Назад", callback_data="menu")]])
     return {"text": text or "👀 <b>Режим призрака</b>\nЗдесь вы можете совершить какое-то действие в «режиме призрака» (незаметно). "
                             "Ни один пользователь кроме вас об этом не узнает 🙈", "parse_mode": html, "reply_markup": markup}
+
+
+@dp.callback_query(F.data == "ghost_storiesPrev")
+@security()
+async def _ghost_stories_prev(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    await callback_query.answer("Посмотреть историю в режиме призрака доступно только пользователям Maksogram", True)
 
 
 @dp.callback_query(F.data == "ghost_stories")

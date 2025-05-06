@@ -99,7 +99,13 @@ async def menu(account_id: int) -> dict[str, Any]:
     status = await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={account_id}", one_data=True)  # Вкл/выкл Maksogram
     if status is None:
         markup = IMarkup(inline_keyboard=[[IButton(text="🟢 Включить Maksogram", callback_data="registration")],
-                                          [IButton(text="ℹ️ Узнать все возможности", url=await generate_sensitive_link(account_id))]])
+                                          [IButton(text="🤖 Автоответчик", callback_data="answering_machinePrev"),
+                                           IButton(text="👨‍🏫 Профиль друга", callback_data="changed_profilePrev")],
+                                          [IButton(text="🌐 Друг в сети", callback_data="status_usersPrev"),
+                                           IButton(text="👀 Призрак", callback_data="ghost_modePrev")],
+                                          [IButton(text="⚙️ Настройки", callback_data="settingsPrev"),
+                                           IButton(text="💬 Maksogram в чате", callback_data="modulesPrev")],  # IButton(text="🛡 Защита аккаунта", callback_data="security")
+                                          [IButton(text="ℹ️ Памятка по функциям", url=await generate_sensitive_link(account_id))]])
     elif status is False:
         markup = IMarkup(inline_keyboard=[[IButton(text="🟢 Включить Maksogram", callback_data="on")],
                                           [IButton(text="⚙️ Настройки", callback_data="settings")],
@@ -121,6 +127,13 @@ async def menu(account_id: int) -> dict[str, Any]:
 async def _settings(message: Message):
     if await new_message(message): return
     await message.answer(**await settings(message.chat.id))
+
+
+@dp.callback_query(F.data == "settingsPrev")
+@security()
+async def _settings_prev(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    await callback_query.answer("Ваши настройки не найдены!", True)
 
 
 @dp.callback_query(F.data == "settings")

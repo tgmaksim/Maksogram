@@ -102,17 +102,21 @@ def get_weekdays_list_by_string(weekdays: str) -> list[int]:
     return list({dictionary[weekday] for weekday in weekdays.replace(" ", "").split(",")})
 
 
-@dp.callback_query(F.data == "answering_machine")
+@dp.callback_query((F.data == "answering_machine").__or__(F.data == "answering_machinePrev"))
 @security()
 async def _answering_machine(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
-    await callback_query.message.edit_text(**await answering_machine_menu(callback_query.message.chat.id))
+    prev = "Prev" if callback_query.data == "answering_machinePrev" else ""
+    await callback_query.message.edit_text(**await answering_machine_menu(callback_query.message.chat.id, prev=prev))
 
 
-async def answering_machine_menu(account_id: int, text: str = None) -> dict[str, Any]:
+async def answering_machine_menu(account_id: int, text: str = None, prev: str = "") -> dict[str, Any]:
     buttons = []
-    answers = await AutoAnswer.get_all(account_id)
-    enabled_answer = await get_enabled_auto_answer(account_id)
+    if prev:
+        answers, enabled_answer = [], 0
+    else:
+        answers = await AutoAnswer.get_all(account_id)
+        enabled_answer = await get_enabled_auto_answer(account_id)
     for answer in answers:
         indicator = ""
         if answer.answer_id == enabled_answer:  # Автоответ активен
@@ -121,7 +125,7 @@ async def answering_machine_menu(account_id: int, text: str = None) -> dict[str,
             elif answer.type == 'ordinary':  # Обычный автоответ
                 indicator = "🟢 "
         buttons.append([IButton(text=f"{indicator}{answer.short_text}", callback_data=f"answering_machine_menu{answer.answer_id}")])
-    buttons.append([IButton(text="➕ Создать новый ответ", callback_data="new_answering_machine")])
+    buttons.append([IButton(text="➕ Создать новый ответ", callback_data=f"new_answering_machine{prev}")])
     buttons.append([IButton(text="◀️  Назад", callback_data="menu")])
     markup = IMarkup(inline_keyboard=buttons)
     return {
@@ -135,12 +139,18 @@ async def answering_machine_menu(account_id: int, text: str = None) -> dict[str,
                     "<b>только обыкновенный</b></blockquote>", "reply_markup": markup, "parse_mode": html}
 
 
+@dp.callback_query(F.data == "new_answering_machinePrev")
+@security()
+async def _new_answering_machine_prev(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    await callback_query.answer("Автоответчик работает только для пользователей Maksogram", True)
+
+
 @dp.callback_query(F.data == "new_answering_machine")
 @security('state')
 async def _new_answering_machine_start(callback_query: CallbackQuery, state: FSMContext):
     if await new_callback_query(callback_query): return
     if await db.fetch_one(f"SELECT COUNT(*) FROM answering_machine WHERE account_id={callback_query.from_user.id}", one_data=True) >= 5:
-        # Количество автоответов уже достигло максимума
         return await callback_query.answer("У вас максимальное количество автоответов", True)
     await state.set_state(UserState.answering_machine)
     markup = KMarkup(keyboard=[[KButton(text="Отмена")]], resize_keyboard=True)

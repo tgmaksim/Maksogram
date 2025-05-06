@@ -2,10 +2,10 @@ from typing import Any
 from core import (
     db,
     html,
-    SITE,
     morning,
     channel,
     security,
+    generate_sensitive_link,
 )
 
 from aiogram import F
@@ -28,7 +28,7 @@ async def _menu_chat(message: Message):
     await message.answer(**modules_menu())
 
 
-@dp.callback_query(F.data == "modules")
+@dp.callback_query((F.data == "modules").__or__(F.data == "modulesPrev"))
 @security()
 async def _modules(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
@@ -61,8 +61,9 @@ async def calculator_menu(account_id: int) -> dict[str, Any]:
         status_button = IButton(text="🔴 Выключить Калькулятор", callback_data="calculator_off")
     else:
         status_button = IButton(text="🟢 Включить Калькулятор", callback_data="calculator_on")
+    link = await generate_sensitive_link(account_id, "module-calculator", "калькулятор")
     markup = IMarkup(inline_keyboard=[[status_button],
-                                      [IButton(text="Обзор Калькулятора", url=f"{SITE}#калькулятор")],
+                                      [IButton(text="Обзор Калькулятора", url=link)],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
     return {"text": "🔢 <b>Калькулятор в чате</b>\nРешает примеры разных уровней сложности от обычного умножения до "
                     "длинных примеров\n<b>Для вызова укажите в конце \"=\"</b>\n<blockquote>10+5*15=</blockquote>",
@@ -74,12 +75,15 @@ async def calculator_menu(account_id: int) -> dict[str, Any]:
 async def _calculator_switch(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     command = callback_query.data.split("_")[-1]
+    account_id = callback_query.from_user.id
+    if await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={account_id}", one_data=True) is None:
+        return await callback_query.answer("Maksogram в чате доступен только пользователям Maksogram", True)
     match command:
         case "on":
-            await db.execute(f"UPDATE modules SET calculator=true WHERE account_id={callback_query.from_user.id}")
+            await db.execute(f"UPDATE modules SET calculator=true WHERE account_id={account_id}")
         case "off":
-            await db.execute(f"UPDATE modules SET calculator=false WHERE account_id={callback_query.from_user.id}")
-    await callback_query.message.edit_text(**await calculator_menu(callback_query.message.chat.id))
+            await db.execute(f"UPDATE modules SET calculator=false WHERE account_id={account_id}")
+    await callback_query.message.edit_text(**await calculator_menu(account_id))
 
 
 @dp.callback_query(F.data == "qrcode")
@@ -94,8 +98,9 @@ async def qrcode_menu(account_id: int) -> dict[str, Any]:
         status_button = IButton(text="🔴 Выключить Генератор", callback_data="qrcode_off")
     else:
         status_button = IButton(text="🟢 Включить Генератор", callback_data="qrcode_on")
+    link = await generate_sensitive_link(account_id, "module-qr_code", "генератор-qr")
     markup = IMarkup(inline_keyboard=[[status_button],
-                                      [IButton(text="Обзор Генератора QR", url=f"{SITE}#генератор-qr")],
+                                      [IButton(text="Обзор Генератора QR", url=link)],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
     return {"text": f"🔗 <b>Генератор QR-кода</b>\nГенерирует обычный QR-код с нужной ссылкой в чате\n<blockquote>Создай t.me/{channel}\n"
                     f"Создать t.me/{channel}\nСгенерировать t.me/{channel}\nСгенерируй t.me/{channel}\nQR t.me/{channel}</blockquote>",
@@ -107,12 +112,15 @@ async def qrcode_menu(account_id: int) -> dict[str, Any]:
 async def _qrcode_switch(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     command = callback_query.data.split("_")[-1]
+    account_id = callback_query.from_user.id
+    if await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={account_id}", one_data=True) is None:
+        return await callback_query.answer("Maksogram в чате доступен только пользователям Maksogram", True)
     match command:
         case "on":
-            await db.execute(f"UPDATE modules SET qrcode=true WHERE account_id={callback_query.from_user.id}")  # Включение QR
+            await db.execute(f"UPDATE modules SET qrcode=true WHERE account_id={account_id}")  # Включение QR
         case "off":
-            await db.execute(f"UPDATE modules SET qrcode=false WHERE account_id={callback_query.from_user.id}")  # Выключение QR
-    await callback_query.message.edit_text(**await qrcode_menu(callback_query.message.chat.id))
+            await db.execute(f"UPDATE modules SET qrcode=false WHERE account_id={account_id}")  # Выключение QR
+    await callback_query.message.edit_text(**await qrcode_menu(account_id))
 
 
 @dp.callback_query(F.data == "audio_transcription")
@@ -127,8 +135,9 @@ async def audio_transcription_menu(account_id: int) -> dict[str, Any]:
         status_button = IButton(text="🔴 Выключить Расшифровку", callback_data="audio_transcription_off")
     else:
         status_button = IButton(text="🟢 Включить Расшифровку", callback_data="audio_transcription_on")
+    link = await generate_sensitive_link(account_id, "module-audio_transcription", "расшифровка-сг")
     markup = IMarkup(inline_keyboard=[[status_button],
-                                      [IButton(text="Обзор Расшифровки ГС", url=f"{SITE}#расшифровка-гс")],
+                                      [IButton(text="Обзор Расшифровки ГС", url=link)],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
     return {"text": "🗣 <b>Расшифровка голосовых</b>\nНе хотите слушать голосовое или кружок? Расшифруйте его в текст: "
                     "свайпни и отправь команду\n<blockquote>Расшифруй\nРасшифровать\nВ текст</blockquote>",
@@ -140,12 +149,15 @@ async def audio_transcription_menu(account_id: int) -> dict[str, Any]:
 async def _audio_transcription_switch(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     command = callback_query.data.split("_")[-1]
+    account_id = callback_query.from_user.id
+    if await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={account_id}", one_data=True) is None:
+        return await callback_query.answer("Maksogram в чате доступен только пользователям Maksogram", True)
     match command:
         case "on":
-            await db.execute(f"UPDATE modules SET audio_transcription=true WHERE account_id={callback_query.from_user.id}")  # Включение расшифровки
+            await db.execute(f"UPDATE modules SET audio_transcription=true WHERE account_id={account_id}")  # Включение расшифровки
         case "off":
-            await db.execute(f"UPDATE modules SET audio_transcription=false WHERE account_id={callback_query.from_user.id}")  # Выключение расшифровки
-    await callback_query.message.edit_text(**await audio_transcription_menu(callback_query.message.chat.id))
+            await db.execute(f"UPDATE modules SET audio_transcription=false WHERE account_id={account_id}")  # Выключение расшифровки
+    await callback_query.message.edit_text(**await audio_transcription_menu(account_id))
 
 
 @dp.callback_query(F.data == "weather")
@@ -164,9 +176,10 @@ async def weather_menu(account_id: int) -> dict[str, Any]:
         status_button_morning_weather = IButton(text="🔴 Выключить утреннюю Погоду", callback_data="morning_weather_off")
     else:
         status_button_morning_weather = IButton(text="🟢 Включить утреннюю Погоду", callback_data="morning_weather_on")
+    link = await generate_sensitive_link(account_id, "module-weather", "погода")
     markup = IMarkup(inline_keyboard=[[status_button_weather],
                                       [status_button_morning_weather],
-                                      [IButton(text="Обзор функции", url=f"{SITE}#погода")],
+                                      [IButton(text="Обзор функции", url=link)],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
     warnings = f"<blockquote>❗️ Погода по утрам присылается, когда вы первый раз зашли в Telegram с {morning[0]}:00 " \
                f"до {morning[1]}:00</blockquote>\n<blockquote>❗️ Для улучшения точности выберите часовой пояс в /settings</blockquote>"
@@ -180,12 +193,15 @@ async def weather_menu(account_id: int) -> dict[str, Any]:
 async def _weather_switch(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     command = callback_query.data.split("_")[-1]
+    account_id = callback_query.from_user.id
+    if await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={account_id}", one_data=True) is None:
+        return await callback_query.answer("Maksogram в чате доступен только пользователям Maksogram", True)
     match command:
         case "on":
-            await db.execute(f"UPDATE modules SET weather=true WHERE account_id={callback_query.from_user.id}")  # Включение погоды
+            await db.execute(f"UPDATE modules SET weather=true WHERE account_id={account_id}")  # Включение погоды
         case "off":
-            await db.execute(f"UPDATE modules SET weather=false WHERE account_id={callback_query.from_user.id}")  # Выключение погоды
-    await callback_query.message.edit_text(**await weather_menu(callback_query.message.chat.id))
+            await db.execute(f"UPDATE modules SET weather=false WHERE account_id={account_id}")  # Выключение погоды
+    await callback_query.message.edit_text(**await weather_menu(account_id))
 
 
 @dp.callback_query(F.data.in_(["morning_weather_on", "morning_weather_off"]))
@@ -194,12 +210,14 @@ async def _morning_weather_switch(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     command = callback_query.data.split("_")[-1]
     account_id = callback_query.from_user.id
+    if await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={account_id}", one_data=True) is None:
+        return await callback_query.answer("Maksogram в чате доступен только пользователям Maksogram", True)
     match command:
         case "on":
             await db.execute(f"UPDATE modules SET morning_weather=true WHERE account_id={account_id}")  # Включение погоды по утрам
         case "off":
             await db.execute(f"UPDATE modules SET morning_weather=false WHERE account_id={account_id}")  # Выключение погоды по утрам
-    await callback_query.message.edit_text(**await weather_menu(callback_query.message.chat.id))
+    await callback_query.message.edit_text(**await weather_menu(account_id))
 
 
 @dp.callback_query(F.data == "round_video")
@@ -214,8 +232,9 @@ async def round_video_menu(account_id: int) -> dict[str, Any]:
         status_button = IButton(text="🔴 Выключить Конвертер", callback_data="round_video_off")
     else:
         status_button = IButton(text="🟢 Включить Конвертер", callback_data="round_video_on")
+    link = await generate_sensitive_link(account_id, "module-round_video", "видео-в-кружок")
     markup = IMarkup(inline_keyboard=[[status_button],
-                                      [IButton(text="Как создать кружок?", url=f"{SITE}#видео-в-кружок")],
+                                      [IButton(text="Как создать кружок?", url=link)],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
     return {"text": "🔄 <b>Конвертер видео в кружок</b>\nПонадобилось сделать из обычного видео кружок? Свайпни и отправь\n"
                     "<blockquote>Кружок</blockquote>", "reply_markup": markup, "parse_mode": html}
@@ -226,12 +245,15 @@ async def round_video_menu(account_id: int) -> dict[str, Any]:
 async def _round_video_switch(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     command = callback_query.data.split("_")[-1]
+    account_id = callback_query.from_user.id
+    if await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={account_id}", one_data=True) is None:
+        return await callback_query.answer("Maksogram в чате доступен только пользователям Maksogram", True)
     match command:
         case "on":
-            await db.execute(f"UPDATE modules SET round_video=true WHERE account_id={callback_query.from_user.id}")  # Включение конвертера
+            await db.execute(f"UPDATE modules SET round_video=true WHERE account_id={account_id}")  # Включение конвертера
         case "off":
-            await db.execute(f"UPDATE modules SET round_video=false WHERE account_id={callback_query.from_user.id}")  # Выключение конвертера
-    await callback_query.message.edit_text(**await round_video_menu(callback_query.message.chat.id))
+            await db.execute(f"UPDATE modules SET round_video=false WHERE account_id={account_id}")  # Выключение конвертера
+    await callback_query.message.edit_text(**await round_video_menu(account_id))
 
 
 @dp.callback_query(F.data == "reminder")
@@ -246,8 +268,9 @@ async def reminder_menu(account_id: int) -> dict[str, Any]:
         status_button = IButton(text="🔴 Выключить Напоминалку", callback_data="reminder_off")
     else:
         status_button = IButton(text="🟢 Включить Напоминалку", callback_data="reminder_on")
+    link = await generate_sensitive_link(account_id, "module-reminder", "напоминалка")
     markup = IMarkup(inline_keyboard=[[status_button],
-                                      [IButton(text="Обзор Напоминалки", url=f"{SITE}#напоминалка")],
+                                      [IButton(text="Обзор Напоминалки", url=link)],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
     return {"text": "⏰ <b>Напоминалка в чате</b>\nДля создания напоминания <b>нужно ответить</b> на любое сообщение в чате командой\n"
                     "<blockquote>❗️ Для правильной работы Напоминалки выберите часовой пояс в /settings</blockquote>\n"
@@ -261,12 +284,15 @@ async def reminder_menu(account_id: int) -> dict[str, Any]:
 async def _reminder_switch(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     command = callback_query.data.split("_")[-1]
+    account_id = callback_query.from_user.id
+    if await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={account_id}", one_data=True) is None:
+        return await callback_query.answer("Maksogram в чате доступен только пользователям Maksogram", True)
     match command:
         case "on":
-            await db.execute(f"UPDATE modules SET reminder=true WHERE account_id={callback_query.from_user.id}")  # Включение напоминалки
+            await db.execute(f"UPDATE modules SET reminder=true WHERE account_id={account_id}")  # Включение напоминалки
         case "off":
-            await db.execute(f"UPDATE modules SET reminder=false WHERE account_id={callback_query.from_user.id}")  # Выключение напоминалки
-    await callback_query.message.edit_text(**await reminder_menu(callback_query.message.chat.id))
+            await db.execute(f"UPDATE modules SET reminder=false WHERE account_id={account_id}")  # Выключение напоминалки
+    await callback_query.message.edit_text(**await reminder_menu(account_id))
 
 
 @dp.callback_query(F.data == "randomizer")
@@ -281,8 +307,9 @@ async def randomizer_menu(account_id: int) -> dict[str, Any]:
         status_button = IButton(text="🔴 Выключить Рандомайзер", callback_data="randomizer_off")
     else:
         status_button = IButton(text="🟢 Включить Рандомайзер", callback_data="randomizer_on")
+    link = await generate_sensitive_link(account_id, "module-randomizer", "рандомайзер")
     markup = IMarkup(inline_keyboard=[[status_button],
-                                      [IButton(text="Обзор Рандомайзера", url=f"{SITE}#рандомайзер")],
+                                      [IButton(text="Обзор Рандомайзера", url=link)],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
     return {"text": "🎲 <b>Рандомайзер в чате</b>\n<blockquote>Выбери да или нет\nВыбери число от 0 до 10\n"
                     "Выбери яблоко, банан или груша</blockquote>", "reply_markup": markup, "parse_mode": html}
@@ -293,12 +320,15 @@ async def randomizer_menu(account_id: int) -> dict[str, Any]:
 async def _randomizer_switch(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     command = callback_query.data.split("_")[-1]
+    account_id = callback_query.from_user.id
+    if await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={account_id}", one_data=True) is None:
+        return await callback_query.answer("Maksogram в чате доступен только пользователям Maksogram", True)
     match command:
         case "on":
-            await db.execute(f"UPDATE modules SET randomizer=true WHERE account_id={callback_query.from_user.id}")  # Включение рандомайзера
+            await db.execute(f"UPDATE modules SET randomizer=true WHERE account_id={account_id}")  # Включение рандомайзера
         case "off":
-            await db.execute(f"UPDATE modules SET randomizer=false WHERE account_id={callback_query.from_user.id}")  # Выключение рандомайзера
-    await callback_query.message.edit_text(**await randomizer_menu(callback_query.message.chat.id))
+            await db.execute(f"UPDATE modules SET randomizer=false WHERE account_id={account_id}")  # Выключение рандомайзера
+    await callback_query.message.edit_text(**await randomizer_menu(account_id))
 
 
 def modules_initial():

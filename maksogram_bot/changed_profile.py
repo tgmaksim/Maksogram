@@ -29,17 +29,21 @@ from .core import (
 )
 
 
-@dp.callback_query(F.data == "changed_profile")
+@dp.callback_query((F.data == "changed_profile").__or__(F.data == "changed_profilePrev"))
 @security()
 async def _changed_profile(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
-    await callback_query.message.edit_text(**await changed_profiles_menu(callback_query.from_user.id))
+    prev = "Prev" if callback_query.data == "changed_profilePrev" else ""
+    await callback_query.message.edit_text(**await changed_profiles_menu(callback_query.from_user.id, prev=prev))
 
 
-async def changed_profiles_menu(account_id: int, text: str = None) -> dict[str, Any]:
+async def changed_profiles_menu(account_id: int, text: str = None, prev: str = "") -> dict[str, Any]:
     buttons = []
-    users = sorted(await db.fetch_all(f"SELECT user_id, name FROM changed_profiles WHERE account_id={account_id}"),
-                   key=lambda x: len(x['name']))  # Список пользователей, отсортированных по возрастанию длины имени
+    if prev:
+        users = []
+    else:
+        users = sorted(await db.fetch_all(f"SELECT user_id, name FROM changed_profiles WHERE account_id={account_id}"),
+                       key=lambda x: len(x['name']))  # Список пользователей, отсортированных по возрастанию длины имени
     i = 0
     while i < len(users):  # Если длина имен достаточно короткая, то помещаем 2 в ряд, иначе 1
         if i + 1 < len(users) and all(map(lambda x: len(x['name']) <= 15, users[i:i+1])):
@@ -49,13 +53,20 @@ async def changed_profiles_menu(account_id: int, text: str = None) -> dict[str, 
         else:
             buttons.append([IButton(text=f"🖼️ {users[i]['name']}", callback_data=f"changed_profile_menu{users[i]['user_id']}")])
         i += 1
-    buttons.append([IButton(text="➕ Добавить пользователя", callback_data="new_changed_profile")])
+    buttons.append([IButton(text="➕ Добавить пользователя", callback_data=f"new_changed_profile{prev}")])
     buttons.append([IButton(text="◀️  Назад", callback_data="menu")])
     return {"text": text or "🖼️ <b>Профиль друга</b>\nДобавьте пользователя и первым узнавайте о новой аватарке, новом подарке или "
                             "измененном «О себе» в профиле собеседника", "parse_mode": html, "reply_markup": IMarkup(inline_keyboard=buttons)}
 
 
-@dp.callback_query(F.data.startswith("new_changed_profile"))
+@dp.callback_query(F.data == "new_changed_profilePrev")
+@security()
+async def _new_changed_profile_prev(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    await callback_query.answer("Следить за профилем друга доступно только для пользователей Maksogram", True)
+
+
+@dp.callback_query(F.data == "new_changed_profile")
 @security('state')
 async def _new_changed_profile_start(callback_query: CallbackQuery, state: FSMContext):
     if await new_callback_query(callback_query): return
