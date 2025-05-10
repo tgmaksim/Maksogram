@@ -178,6 +178,8 @@ async def account_off(account_id: int):
 
 async def account_on(account_id: int, Program):
     telegram_client = telegram_clients[account_id]
+    if not async_processes.get(account_id):
+        async_processes[account_id] = []
     if not await check_connection(telegram_client):  # Требуется соединение
         if not await telegram_client_connect(telegram_client):
             raise ConnectionError("За десять попыток соединение не установлено")
@@ -323,7 +325,7 @@ async def send_email_message(to: str, subject: str, text: str, *, subtype: str =
 
 class Variables:
     version = "2.7"
-    version_string = "2.7.4 (99)"
+    version_string = "2.7.4 (100)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])
