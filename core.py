@@ -25,6 +25,7 @@ import aiosmtplib
 
 from math import ceil
 from aiogram import Bot
+from asyncio import Task
 from typing import Union, Any
 from database import Database
 from email.header import Header
@@ -58,6 +59,7 @@ class UserIsNotAuthorized(Exception):
 
 
 telegram_clients: dict[int, TelegramClient] = {}
+async_processes: dict[int, list[Task[None]]] = {}
 
 
 def resources_path(path: str) -> str:
@@ -167,6 +169,8 @@ async def telegram_client_connect(telegram_client: TelegramClient) -> bool:
 async def account_off(account_id: int):
     phone_number = f"+{await db.fetch_one(f'SELECT phone_number FROM accounts WHERE account_id={account_id}', one_data=True)}"
     await db.execute(f"UPDATE settings SET is_started=false WHERE account_id={account_id}")
+    for task in async_processes[account_id]:
+        task.cancel("account_off")
     telegram_client, telegram_clients[account_id] = telegram_clients[account_id], new_telegram_client(phone_number)
     if telegram_client.is_connected():
         await telegram_client.disconnect()
@@ -319,7 +323,7 @@ async def send_email_message(to: str, subject: str, text: str, *, subtype: str =
 
 class Variables:
     version = "2.7"
-    version_string = "2.7.4 (98)"
+    version_string = "2.7.4 (99)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])

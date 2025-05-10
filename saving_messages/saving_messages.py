@@ -7,6 +7,7 @@ from core import (
     time_now,
     account_on,
     MaksogramBot,
+    async_processes,
     telegram_clients,
     new_telegram_client,
     UserIsNotAuthorized,
@@ -14,9 +15,10 @@ from core import (
 
 
 async def main():
-    for account in await db.fetch_all("SELECT account_id, phone_number, name FROM accounts", one_data=True):
+    for account in await db.fetch_all("SELECT account_id, phone_number, name FROM accounts"):
         account_id: int = account['account_id']
         telegram_clients[account_id] = new_telegram_client(f"+{account['phone_number']}")
+        async_processes[account_id] = []
         is_started: bool = await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={account_id}", one_data=True)
         payment = await db.fetch_one(f"SELECT \"user\", is_paid, next_payment, second_notification FROM payment WHERE account_id={account_id}")
         if payment['user'] == 'user' and payment['is_paid']:

@@ -22,6 +22,7 @@ from asyncpg.exceptions import UniqueViolationError
 from telethon.tl.patched import Message, MessageService
 from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.functions.account import UpdateStatusRequest
+from telethon.tl.functions.channels import GetAdminLogRequest
 from telethon.tl.functions.messages import GetCustomEmojiDocumentsRequest
 from telethon.errors import ChatForwardsRestrictedError, FileReferenceExpiredError
 from core import (
@@ -33,12 +34,14 @@ from core import (
     www_path,
     Variables,
     get_gifts,
+    channel_id,
     json_encode,
     account_off,
     human_bytes,
     get_avatars,
     MaksogramBot,
     resources_path,
+    async_processes,
     get_enabled_auto_answer,
 )
 from telethon.errors.rpcerrorlist import (
@@ -842,7 +845,7 @@ class Program:
     @security()
     async def answering_machine_center(self):
         auto_answer = await get_enabled_auto_answer(self.id)
-        while await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={self.id}", one_data=True):
+        while True:  # Остановка через account_off (async_processes)
             if auto_answer != (new_auto_answer := await get_enabled_auto_answer(self.id)):  # Сменился работающий автоответ
                 auto_answer = new_auto_answer
                 await db.execute(f"UPDATE functions SET answering_machine_sending='[]' WHERE account_id={self.id}")
@@ -851,7 +854,7 @@ class Program:
 
     @security()
     async def reminder_center(self):
-        while await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={self.id}", one_data=True):
+        while True:  # Остановка через account_off (async_processes)
             for remind in await db.fetch_all("SELECT chat_id, message_id, time, chat_name FROM reminds WHERE "
                                              f"account_id={self.id} AND (time - now()) < INTERVAL '0 seconds'"):
                 text = {MaksogramBot.id: "", self.id: "в Избранном"}.get(remind['chat_id'], f"в чате с {remind['chat_name']}")
@@ -907,7 +910,7 @@ class Program:
 
     @security()
     async def changed_profile_center(self):
-        while await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={self.id}", one_data=True):
+        while True:  # Остановка через account_off (async_processes)
             for user in await db.fetch_all(f"SELECT user_id, name, avatars, gifts, bio FROM changed_profiles WHERE account_id={self.id}"):
                 if user['avatars'] is not None:
                     await self.avatars_center(user)
@@ -917,15 +920,30 @@ class Program:
                     await self.bio_center(user)
             await asyncio.sleep(5*60)
 
+    @security()
+    async def admin_logger(self):
+        while True:  # Остановка через account_off (async_processes)
+            min_id = await db.fetch_one(f"SELECT min_id FROM channel_event_logger WHERE account_id={self.id} AND channel_id={channel_id}", one_data=True)
+            admin_events = (await self.client(GetAdminLogRequest(channel_id, '', max_id=0, min_id=min_id, limit=100))).events
+            if admin_events:
+                messages = []
+                for event in admin_events:
+                    messages.append(event.action.__class__.__name__.replace("ChannelAdminLogEventAction", ""))
+                new_min_id = max(map(lambda x: x.id, admin_events))
+                await db.execute(f"UPDATE channel_event_logger SET min_id={new_min_id} WHERE account_id={self.id} AND channel_id={channel_id}")
+                await MaksogramBot.send_system_message("<b>Недавние действия</b>\n" + '\n'.join(messages))
+            await asyncio.sleep(60*60)
+
     async def run_until_disconnected(self):
         await db.execute(f"CREATE TABLE IF NOT EXISTS {self.table_name} (chat_id BIGINT NOT NULL, "
                          "message_id INTEGER NOT NULL, saved_message_id INTEGER NOT NULL, reactions TEXT NOT NULL)")
         account = await db.fetch_one(f"SELECT my_messages, message_changes FROM accounts WHERE account_id={self.id}")
         self.my_messages, self.message_changes = account['my_messages'], account['message_changes']
         await MaksogramBot.send_system_message(f"Maksogram {self.__version__} для меня запущен")
-        asyncio.get_running_loop().create_task(self.changed_profile_center())
-        asyncio.get_running_loop().create_task(self.answering_machine_center())
-        asyncio.get_running_loop().create_task(self.reminder_center())
+        async_processes[self.id].append(asyncio.get_running_loop().create_task(self.changed_profile_center()))
+        async_processes[self.id].append(asyncio.get_running_loop().create_task(self.answering_machine_center()))
+        async_processes[self.id].append(asyncio.get_running_loop().create_task(self.reminder_center()))
+        async_processes[self.id].append(asyncio.get_running_loop().create_task(self.admin_logger()))
         try:
             await self.client.run_until_disconnected()
         except (AuthKeyInvalidError, AuthKeyUnregisteredError):
