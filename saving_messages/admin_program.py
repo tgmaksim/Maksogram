@@ -940,10 +940,10 @@ class Program:
         account = await db.fetch_one(f"SELECT my_messages, message_changes FROM accounts WHERE account_id={self.id}")
         self.my_messages, self.message_changes = account['my_messages'], account['message_changes']
         await MaksogramBot.send_system_message(f"Maksogram {self.__version__} для меня запущен")
-        async_processes[self.id].append(asyncio.get_running_loop().create_task(self.changed_profile_center()))
-        async_processes[self.id].append(asyncio.get_running_loop().create_task(self.answering_machine_center()))
-        async_processes[self.id].append(asyncio.get_running_loop().create_task(self.reminder_center()))
-        async_processes[self.id].append(asyncio.get_running_loop().create_task(self.admin_logger()))
+        async_processes[self.id] = [asyncio.get_running_loop().create_task(self.changed_profile_center()),
+                                    asyncio.get_running_loop().create_task(self.answering_machine_center()),
+                                    asyncio.get_running_loop().create_task(self.reminder_center()),
+                                    asyncio.get_running_loop().create_task(self.admin_logger())]
         try:
             await self.client.run_until_disconnected()
         except (AuthKeyInvalidError, AuthKeyUnregisteredError):

@@ -1053,9 +1053,9 @@ class Program:
         await self.update_system_dialog_filter()
 
         await MaksogramBot.send_system_message(f"Maksogram {self.__version__} для {self.name} запущен")
-        async_processes[self.id].append(asyncio.get_running_loop().create_task(self.changed_profile_center()))
-        async_processes[self.id].append(asyncio.get_running_loop().create_task(self.answering_machine_center()))
-        async_processes[self.id].append(asyncio.get_running_loop().create_task(self.reminder_center()))
+        async_processes[self.id] = [asyncio.get_running_loop().create_task(self.changed_profile_center()),
+                                    asyncio.get_running_loop().create_task(self.answering_machine_center()),
+                                    asyncio.get_running_loop().create_task(self.reminder_center())]
         try:
             await self.client.run_until_disconnected()
         except (AuthKeyInvalidError, AuthKeyUnregisteredError):

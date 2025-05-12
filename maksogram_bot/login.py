@@ -14,6 +14,7 @@ from core import (
     support_link,
     feedback_link,
     unzip_int_data,
+    async_processes,
     telegram_clients,
     UserIsNotAuthorized,
     new_telegram_client,
@@ -190,6 +191,7 @@ async def _contact(message: Message, state: FSMContext):
         return await message.reply("Это не ваш номер! Пожалуйста, воспользуйтесь кнопкой")
     phone_number = f'+{int(message.contact.phone_number)}'
     telegram_client = new_telegram_client(phone_number)
+    async_processes[message.contact.user_id] = []
     if not await telegram_client_connect(telegram_client):
         await state.clear()
         await message.answer("Произошла ошибка... Попробуйте начать сначала :)", reply_markup=KRemove())
