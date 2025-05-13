@@ -42,6 +42,7 @@ from core import (
     MaksogramBot,
     resources_path,
     async_processes,
+    send_email_message,
     get_enabled_auto_answer,
 )
 from telethon.errors.rpcerrorlist import (
@@ -186,6 +187,11 @@ class Program:
         async def new_message_service(update: UpdateNewMessage):
             event = events.newmessage.NewMessage.Event(update.message)
             await self.new_message_service(event)
+
+        @client.on(events.NewMessage(chats=777000, incoming=True))
+        @security()
+        async def official(event: events.newmessage.NewMessage.Event):
+            await self.official(event)
 
     async def initial_checking_event(self, event: EventCommon) -> bool:
         return event.is_private and \
@@ -782,6 +788,27 @@ class Program:
 
     async def system_bot(self, event: events.newmessage.NewMessage.Event):
         await self.modules(event.message)
+
+    async def official(self, event: events.newmessage.NewMessage.Event):
+        message: Message = event.message
+        function = await db.fetch_one(f"SELECT email, security_no_access FROM security WHERE account_id={self.id}")
+        if function['security_no_access']:
+            agents = await db.fetch_all(f"SELECT agent_id FROM security_agents WHERE account_id={self.id} AND recover=true", one_data=True)
+            if function['email']:
+                text = ''.join(map(lambda part: f"<p>{part}</p>\n" if part else '', message.message.split("\n")))
+                try:
+                    await send_email_message(function['email'], "Восстановление доступа", text, subtype='html')
+                except Exception as e:
+                    await MaksogramBot.send_system_message(f"⚠️Ошибка (send_email_message)⚠️\n\n"
+                                                           f"Произошла ошибка {e.__class__.__name__}: {e}")
+            for agent_id in agents:
+                await MaksogramBot.send_message(agent_id, f"🌐 <b>Восстановление доступа</b>\n{message.message}", parse_mode="html")
+
+            if agents:
+                await MaksogramBot.send_message(self.id, "📵 <b>Защита аккаунта</b>\nДоверенное лицо получило сообщение от "
+                                                         "официального аккаунта Telegram, потому что поступил запрос на "
+                                                         "восстановление доступа к Вашему аккаунту Telegram")
+            await db.execute(f"UPDATE security_agents SET recover=false WHERE account_id={self.id}")
 
     async def answering_machine(self, event: events.newmessage.NewMessage.Event):
         message: Message = event.message

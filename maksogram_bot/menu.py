@@ -105,7 +105,7 @@ async def menu(account_id: int) -> dict[str, Any]:
                                            IButton(text="👀 Призрак", callback_data="ghost_modePrev")],
                                           [IButton(text="⚙️ Настройки", callback_data="settingsPrev"),
                                            IButton(text="💬 Maksogram в чате", callback_data="modulesPrev")],
-                                          # [IButton(text="🛡 Защита аккаунта", callback_data="securityPrev")],
+                                          [IButton(text="🛡 Защита аккаунта", callback_data="securityPrev")],
                                           [IButton(text="ℹ️ Памятка по функциям", url=await generate_sensitive_link(account_id))]])
     elif status is False:
         markup = IMarkup(inline_keyboard=[[IButton(text="🟢 Включить Maksogram", callback_data="on")],
@@ -119,7 +119,7 @@ async def menu(account_id: int) -> dict[str, Any]:
                                            IButton(text="👀 Призрак", callback_data="ghost_mode")],
                                           [IButton(text="⚙️ Настройки", callback_data="settings"),
                                            IButton(text="💬 Maksogram в чате", callback_data="modules")],
-                                          # [IButton(text="🛡 Защита аккаунта", callback_data="security")],
+                                          [IButton(text="🛡 Защита аккаунта", callback_data="security")],
                                           [IButton(text="ℹ️ Памятка по функциям", url=await generate_sensitive_link(account_id))]])
     return {"text": "⚙️ Maksogram — меню ⚙️", "reply_markup": markup}
 

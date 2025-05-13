@@ -1,12 +1,13 @@
 import random
 
 from typing import Any
+from asyncpg.exceptions import UniqueViolationError
 from core import (
     db,
     html,
     OWNER,
     security,
-    json_encode,
+    support_link,
     send_email_message,
 )
 
@@ -42,15 +43,19 @@ email_message = """<p>Ваш код: <code>. Его можно использо�
 @security()
 async def _security(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
-    if callback_query.from_user.id != OWNER:
-        return await callback_query.answer("Функция в разработке!", True)
     prev = "Prev" if callback_query.data == "securityPrev" else ""
     await callback_query.message.edit_text(**await security_menu(callback_query.from_user.id, prev=prev))
 
 
-async def security_menu(_: int, text: str = None, prev: str = "") -> dict[str, Any]:
+async def security_menu(account_id: int, text: str = None, prev: str = "") -> dict[str, Any]:
+    agent = await db.fetch_one(f"SELECT account_id FROM security_agents WHERE agent_id={account_id}", one_data=True)
+    if agent:
+        buttons = [[IButton(text="🌐 Восстановить доступ", callback_data="security_agent")]]
+    else:
+        buttons = []
     markup = IMarkup(inline_keyboard=[[IButton(text="💀 Защита от взлома", callback_data=f"security_hack{prev}")],
                                       [IButton(text="📵 Защита от потери телефона", callback_data=f"security_no_access{prev}")],
+                                      *buttons,
                                       [IButton(text="⚙️ Настройки функции", callback_data=f"security_settings{prev}")],
                                       [IButton(text="◀️  Назад", callback_data="menu")]])
     return {"text": text or "🛡 <b>Защита аккаунта</b>\nДанная функция поможет защитить аккаунт от взлома, а также помочь "
@@ -72,13 +77,13 @@ async def _security_settings_prev(callback_query: CallbackQuery):
 
 
 async def security_settings_menu(account_id: int) -> dict[str, Any]:
-    params = await db.fetch_one(f"SELECT email, agents FROM security WHERE account_id={account_id}")
-    markup = IMarkup(inline_keyboard=[[IButton(text=f"📨 {'Добавить' if not params['email'] else 'Изменить'} почту",
-                                               callback_data="security_email")],
+    email = await db.fetch_one(f"SELECT email FROM security WHERE account_id={account_id}", one_data=True)
+    agents = await db.fetch_all(f"SELECT agent_id, name FROM security_agents WHERE account_id={account_id}")
+    markup = IMarkup(inline_keyboard=[[IButton(text=f"📨 {'Добавить' if not email else 'Изменить'} почту", callback_data="security_email")],
                                       [IButton(text="🫡 Доверенные лица", callback_data="security_agents")],
                                       [IButton(text="◀️  Назад", callback_data="security")]])
-    email = params['email'] or "не указана"
-    agents = "\n".join(map(lambda user: f"    • <a href='tg://user?id={user['user_id']}'>{user['name']}</a>", params['agents'].values()))
+    email = email or "не указана"
+    agents = "\n".join(map(lambda agent: f"    • <a href='tg://user?id={agent['agent_id']}'>{agent['name']}</a>", agents))
     agents = ('\n' + agents) if agents else "никого"
     return {"text": f"⚙️ <b>Настройки защиты аккаунта</b>\nПочта: {email}\nДоверенные лица: {agents}",
             "parse_mode": html, "reply_markup": markup}
@@ -93,15 +98,15 @@ async def _security_agents(callback_query: CallbackQuery):
 
 async def security_agents_menu(account_id: int, text: str = None) -> dict[str, Any]:
     buttons = []
-    agents = list((await db.fetch_one(f"SELECT agents FROM security WHERE account_id={account_id}", one_data=True)).values())
+    agents = await db.fetch_all(f"SELECT agent_id, name FROM security_agents WHERE account_id={account_id}")
     i = 0
     while i < len(agents):  # Если длина имен достаточно короткая, то помещаем 2 в ряд, иначе 1
         if i + 1 < len(agents) and all(map(lambda x: len(x['name']) <= 15, agents[i:i+1])):
-            buttons.append([IButton(text=f"🚫 {agents[i]['name']}", callback_data=f"security_agent_del{agents[i]['user_id']}"),
-                            IButton(text=f"🚫 {agents[i+1]['name']}", callback_data=f"security_agent_del{agents[i+1]['user_id']}")])
+            buttons.append([IButton(text=f"🚫 {agents[i]['name']}", callback_data=f"security_agent_del{agents[i]['agent_id']}"),
+                            IButton(text=f"🚫 {agents[i+1]['name']}", callback_data=f"security_agent_del{agents[i+1]['agent_id']}")])
             i += 1
         else:
-            buttons.append([IButton(text=f"🚫 {agents[i]['name']}", callback_data=f"security_agent_del{agents[i]['user_id']}")])
+            buttons.append([IButton(text=f"🚫 {agents[i]['name']}", callback_data=f"security_agent_del{agents[i]['agent_id']}")])
         i += 1
     buttons.append([IButton(text="➕ Пригласить", callback_data="security_new_agent")])
     buttons.append([IButton(text="◀️  Назад", callback_data="security_settings")])
@@ -114,8 +119,7 @@ async def security_agents_menu(account_id: int, text: str = None) -> dict[str, A
 async def _security_new_agent_start(callback_query: CallbackQuery, state: FSMContext):
     if await new_callback_query(callback_query): return
     account_id = callback_query.from_user.id
-    if await db.fetch_one(f"SELECT COUNT(*) FROM jsonb_object_keys((SELECT agents FROM security "
-                          f"WHERE account_id={account_id}))", one_data=True) >= 3:
+    if await db.fetch_one(f"SELECT COUNT(*) FROM security_agents WHERE account_id={account_id}", one_data=True) >= 3:
         return await callback_query.answer("У ва максимальное количество доверенных лиц", True)
     await state.set_state(UserState.security_new_agent)
     request_users = KeyboardButtonRequestUsers(request_id=1, user_is_bot=False)
@@ -142,9 +146,13 @@ async def _security_new_agent(message: Message, state: FSMContext):
             await message.answer(**await security_agents_menu(account_id))
         else:
             name = f"{user.first_name} {user.last_name or ''}".strip()
-            json_agent = json_encode({str(user_id): {"user_id": user_id, "name": name}})
-            await db.execute(f"UPDATE security SET agents=agents || $1 WHERE account_id={account_id}", json_agent)
-            await message.answer(**await security_agents_menu(account_id))
+            try:
+                await db.execute(f"INSERT INTO security_agents VALUES ({account_id}, {user_id}, $1, false)", name)
+            except UniqueViolationError:  # Уже есть agent_id
+                await message.answer(**await security_agents_menu(account_id, "<b>Этот пользователь уже является "
+                                                                              "чьим-то доверительным лицом</b>"))
+            else:
+                await message.answer(**await security_agents_menu(account_id))
     await bot.delete_messages(chat_id=message.chat.id, message_ids=[message.message_id, message_id])
 
 
@@ -154,7 +162,7 @@ async def _security_agent_menu(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     account_id = callback_query.from_user.id
     agent_id = int(callback_query.data.replace("security_agent_del", ""))
-    await db.execute(f"UPDATE security SET agents=agents - '{agent_id}' WHERE account_id={account_id}")
+    await db.execute(f"DELETE FROM security_agents WHERE account_id={account_id} AND agent_id={agent_id}")
     await callback_query.message.edit_text(**await security_agents_menu(callback_query.from_user.id))
 
 
@@ -234,13 +242,6 @@ async def _confirm_security_email(message: Message, state: FSMContext):
         await bot.delete_messages(chat_id=message.chat.id, message_ids=[message_id, message.message_id])
 
 
-@dp.callback_query(F.data == "security_hack")
-@security()
-async def _security_hack(callback_query: CallbackQuery):
-    if await new_callback_query(callback_query): return
-    await callback_query.answer("В разработке!", True)
-
-
 @dp.callback_query(F.data == "security_hackPrev")
 @security()
 async def _security_hack_prev(callback_query: CallbackQuery):
@@ -248,9 +249,9 @@ async def _security_hack_prev(callback_query: CallbackQuery):
     await callback_query.answer("Для защиты аккаунта от взлома запустите Maksogram!", True)
 
 
-@dp.callback_query(F.data == "security_no_access")
+@dp.callback_query(F.data == "security_hack")
 @security()
-async def _security_no_access(callback_query: CallbackQuery):
+async def _security_hack(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     await callback_query.answer("В разработке!", True)
 
@@ -260,6 +261,100 @@ async def _security_no_access(callback_query: CallbackQuery):
 async def _security_no_access_prev(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     await callback_query.answer("Для защиты аккаунта от потери телефона запустите Maksogram!", True)
+
+
+@dp.callback_query(F.data == "security_no_access")
+@security()
+async def _security_no_access(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    await callback_query.message.edit_text(**await security_no_access_menu(callback_query.from_user.id))
+
+
+async def security_no_access_menu(account_id: int) -> dict[str, Any]:
+    function = await db.fetch_one(f"SELECT security_no_access FROM security WHERE account_id={account_id}", one_data=True)
+    if not function:
+        markup = IMarkup(inline_keyboard=[[IButton(text="🟢 Включить защиту", callback_data="security_no_access_on")],
+                                          [IButton(text="◀️  Назад", callback_data="security")]])
+    else:
+        markup = IMarkup(inline_keyboard=[[IButton(text="🔴 Выключить защиту", callback_data="security_no_access_off")],
+                                          [IButton(text="◀️  Назад", callback_data="security")]])
+    return dict(
+        text=
+        "📵 <b>Защита от потери доступа</b>\n"
+        "<blockquote expandable>🧐 <b>Когда пригодится?</b>\n"
+        "    • Вы потеряли доступ к аккаунту (нет доступа к телефону или другое)\n"
+        "😔 <b>Что делать тогда?</b>\n"
+        "    • Попросите доверенное лицо запустить <b>@MaksogramBot</b>\n"
+        "    • Выберите режим восстановления доступа в меню. Если такой кнопки нет, значит пользователь не является доверенным лицом\n"
+        "    • Попытайтесь войти в аккаунт на своем новом устройстве (новый телефон или ноутбук). <b>Код для входа придет вашему "
+        "доверенному лицу в чате с ботом</b>\n"
+        "⚠️ <b>Предупреждение!</b>\n"
+        "    • Пока включена Защита от потери доступа и пользователь в списке доверенных лиц, доверенное лицо сможет в любой момент"
+        "получить доступ к вашему аккаунту! Вы узнаете об этом, но все равно Будьте осторожны!</blockquote>",
+        parse_mode=html, reply_markup=markup)
+
+
+@dp.callback_query((F.data == "security_no_access_on").__or__(F.data == "security_no_access_off"))
+@security()
+async def _security_no_access_switch(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    account_id = callback_query.from_user.id
+    command = callback_query.data == "security_no_access_on"
+    if not command:
+        await db.execute(f"UPDATE security_agents SET recover=false WHERE account_id={account_id}")
+    await db.execute(f"UPDATE security SET security_no_access={str(command).lower()} WHERE account_id={account_id}")
+    await callback_query.message.edit_text(**await security_no_access_menu(account_id))
+
+
+@dp.callback_query(F.data == "security_agent")
+@security()
+async def _security_agent(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    await callback_query.message.edit_text(**await security_agent_menu(callback_query.from_user.id))
+
+
+async def security_agent_menu(agent_id: int):
+    function = await db.fetch_one(f"SELECT account_id, recover FROM security_agents WHERE agent_id={agent_id}")
+    buttons = []
+    if function['account_id']:
+        if function['recover']:
+            buttons = [[IButton(text="🔴 Выключить восст-ние", callback_data="security_agent_off")]]
+        else:
+            buttons = [[IButton(text="🟢 Включить восст-ние", callback_data="security_agent_on")]]
+    buttons.append([IButton(text="◀️  Назад", callback_data="menu")])
+    return {"text": "🌐 <b>Восстановление доступа</b>\nПосле включения Вы будете получать все сообщения от официального аккаунта "
+                    f"Telegram, в том числе и коды для авторизации\nДля подробной информации или помощи напишите {support_link}",
+            "parse_mode": html, "reply_markup": IMarkup(inline_keyboard=buttons)}
+
+
+@dp.callback_query((F.data == "security_agent_on").__or__(F.data == "security_agent_off"))
+@security()
+async def _security_agent_switch(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    agent_id = callback_query.from_user.id
+    command = callback_query.data == "security_agent_on"
+    account_id = await db.fetch_one(f"SELECT account_id FROM security_agents WHERE agent_id={agent_id}", one_data=True)
+    if not account_id:
+        await callback_query.answer("Вы не являетесь чьим-то доверенным лицом...", True)
+        return await callback_query.message.edit_text(**await security_agent_menu(agent_id))
+    edit = True
+    if command:
+        is_started = await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={account_id}", one_data=True)
+        if not is_started:
+            edit = False
+            await callback_query.answer("Maksogram для аккаунта выключен! Напишите тех. поддержке", True)
+        else:
+            function = await db.fetch_one(f"SELECT security_no_access FROM security WHERE account_id={account_id}", one_data=True)
+            if function:
+                await callback_query.answer("Попытайтесь зайти в аккаунт с нового устройства. Код для входа придет здесь", True)
+            else:
+                edit = False
+                await callback_query.answer("Пользователь не включил Защиту от потери доступа, поэтому вы не получите коды", True)
+    else:
+        await callback_query.answer("Восстановление доступа отключено!", True)
+    if edit:
+        await db.execute(f"UPDATE security_agents SET recover={str(command).lower()} WHERE agent_id={agent_id}")
+        await callback_query.message.edit_text(**await security_agent_menu(agent_id))
 
 
 def security_initial():
