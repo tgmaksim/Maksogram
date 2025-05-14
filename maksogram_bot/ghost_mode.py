@@ -1,3 +1,6 @@
+import re
+import time
+
 from typing import Any
 from core import (
     html,
@@ -5,11 +8,12 @@ from core import (
     security,
     www_path,
     telegram_clients,
+    bot_entities_from_tl,
 )
 
 from aiogram import F
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery
+from telethon.tl.patched import Message as Post
 from telethon.tl.types.stories import PeerStories
 from aiogram.types import KeyboardButton as KButton
 from aiogram.types import KeyboardButtonRequestUsers
@@ -18,7 +22,8 @@ from aiogram.types import ReplyKeyboardRemove as KRemove
 from aiogram.types import InlineKeyboardMarkup as IMarkup
 from aiogram.types import InlineKeyboardButton as IButton
 from telethon.tl.functions.stories import GetPeerStoriesRequest
-from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument
+from aiogram.types import Message, CallbackQuery, LinkPreviewOptions
+from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument, Channel
 from .core import (
     dp,
     bot,
@@ -39,6 +44,7 @@ async def _ghost_mode(callback_query: CallbackQuery):
 
 async def ghost_mode_menu(_: int = None, text: str = None, prev: str = "") -> dict[str, Any]:
     markup = IMarkup(inline_keyboard=[[IButton(text="📸 Посмотреть историю", callback_data=f"ghost_stories{prev}")],
+                                      [IButton(text="⬇️ Скачать пост", callback_data=f"ghost_copy{prev}")],
                                       [IButton(text="◀️  Назад", callback_data="menu")]])
     return {"text": text or "👀 <b>Режим призрака</b>\nЗдесь вы можете совершить какое-то действие в «режиме призрака» (незаметно). "
                             "Ни один пользователь кроме вас об этом не узнает 🙈", "parse_mode": html, "reply_markup": markup}
@@ -49,6 +55,13 @@ async def ghost_mode_menu(_: int = None, text: str = None, prev: str = "") -> di
 async def _ghost_stories_prev(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     await callback_query.answer("Посмотреть историю в режиме призрака доступно только пользователям Maksogram", True)
+
+
+@dp.callback_query(F.data == "ghost_copyPrev")
+@security()
+async def _ghost_stories_prev(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    await callback_query.answer("Скачать пост с запретом копирования доступно только пользователям Maksogram", True)
 
 
 @dp.callback_query(F.data == "ghost_stories")
@@ -85,9 +98,9 @@ async def _ghost_stories_watch(message: Message, state: FSMContext):
             paths = []
             for story in stories.stories.stories:
                 if isinstance(story.media, MessageMediaDocument) and story.media.video:
-                    paths.append(path := f"stories/{account_id}.{user_id}.{story.id}.mp4")
+                    paths.append(path := f"stories/{account_id}.{user_id}.{story.id}-{int(time.time())}.mp4")
                 elif isinstance(story.media, MessageMediaPhoto):
-                    paths.append(path := f"stories/{account_id}.{user_id}.{story.id}.png")
+                    paths.append(path := f"stories/{account_id}.{user_id}.{story.id}-{int(time.time())}.png")
                 else:
                     continue
                 await telegram_client.download_media(story.media, www_path(path))
@@ -99,6 +112,66 @@ async def _ghost_stories_watch(message: Message, state: FSMContext):
             await wait_message.delete()
 
     await bot.delete_messages(chat_id=message.chat.id, message_ids=[message.message_id, message_id])
+
+
+@dp.callback_query(F.data == "ghost_copy")
+@security('state')
+async def _ghost_copy_start(callback_query: CallbackQuery, state: FSMContext):
+    if await new_callback_query(callback_query): return
+    await state.set_state(UserState.ghost_copy)
+    markup = KMarkup(keyboard=[[KButton(text="Отмена")]], resize_keyboard=True)
+    message_id = (await callback_query.message.answer("Отправьте ссылку на пост, который нужно скачать", reply_markup=markup)).message_id
+    await state.update_data(message_id=message_id)
+    await callback_query.message.delete()
+
+
+@dp.message(UserState.ghost_copy)
+@security('state')
+async def _ghost_copy(message: Message, state: FSMContext):
+    if await new_message(message): return
+    message_id = (await state.get_data())['message_id']
+    await state.clear()
+    account_id = message.chat.id
+
+    if message.text == "Отмена":
+        await message.answer(**await ghost_mode_menu())
+    elif link := re.fullmatch(r'(?:(?:https|http)://)?t\.me/c/(?P<channel_id>\d+)/(?P<post_id>\d+)', message.text):
+        channel_id, post_id = map(int, link.groups())
+        telegram_client = telegram_clients[account_id]
+        try:
+            channel: Channel = await telegram_client.get_entity(channel_id)
+        except ValueError:
+            await message.answer(**await ghost_mode_menu(text="<b>Данный канал не найден</b>"))
+        else:
+            post: Post = await telegram_client.get_messages(channel, ids=post_id)
+            if post:
+                posts = [post]
+                if grouped_id := post.grouped_id:
+                    async for post in telegram_client.iter_messages(channel, min_id=post_id-10, max_id=post_id):
+                        if post.grouped_id != grouped_id:
+                            break
+                        posts.append(post)
+                for post in posts:
+                    entities = bot_entities_from_tl(post.entities or [])
+                    if post.photo:
+                        path = f"posts/{account_id}.{channel_id}.{post.id}-{int(time.time())}.png"
+                    elif post.video or post.video_note:
+                        path = f"posts/{account_id}.{channel_id}.{post.id}-{int(time.time())}.mp4"
+                    elif post.voice:
+                        path = f"posts/{account_id}.{channel_id}.{post.id}-{int(time.time())}.mp3"
+                    else:
+                        if not post.media:
+                            await message.answer(post.text, entities=entities)
+                        continue
+                    await telegram_client.download_media(post, file=www_path(path))
+                    link_preview_options = LinkPreviewOptions(url=f"{WWW_SITE}/{path}", show_above_text=True, prefer_large_media=True)
+                    await message.answer(post.text or "media", entities=entities, link_preview_options=link_preview_options)
+            else:
+                await message.answer(**await ghost_mode_menu(text="<b>Пост на канале не найден!</b>"))
+    else:
+        await message.answer("<b>Ссылка на пост не распознана!</b>\nЗайдите на канал, в котором запрещены пересылка и копирование "
+                             "контента, и нажмите рядом с нужным постом, чтобы открылось меню. Нажмите на кнопку для копирования ссылки")
+    await bot.delete_messages(chat_id=message.chat.id, message_ids=[message_id, message.message_id])
 
 
 def ghost_mode_initial():

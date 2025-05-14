@@ -71,6 +71,7 @@ class UserState(StatesGroup):
     add_chat = State('add_chat')
     remove_chat = State('remove_chat')
     ghost_stories = State('ghost_stories')
+    ghost_copy = State('ghost_copy')
 
 
 async def convert_ruble(amount_rub: int, currencies: dict[str, Union[str, int]]):

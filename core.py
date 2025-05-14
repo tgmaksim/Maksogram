@@ -24,6 +24,7 @@ import traceback
 import aiosmtplib
 
 from math import ceil
+from html import escape
 from aiogram import Bot
 from asyncio import Task
 from typing import Union, Any
@@ -35,13 +36,26 @@ from email.mime.text import MIMEText
 from datetime import datetime, timedelta
 from telethon.tl.types.users import UserFull
 from telethon.tl.types.photos import PhotosSlice
-from telethon.tl.types import StarGiftUnique, Photo
 from telethon.tl.types.payments import SavedStarGifts
 from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.functions.photos import GetUserPhotosRequest
 from telethon.tl.functions.payments import GetSavedStarGiftsRequest
 from sys_keys import sessions_path, TOKEN, BOT_ID, USERNAME_BOT, email
+from telethon.tl.types import StarGiftUnique, Photo, TypeMessageEntity
 from aiogram.types import LinkPreviewOptions, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+
+from aiogram.types.message_entity import MessageEntity
+from telethon.tl.types import (
+    MessageEntityPre,
+    MessageEntityCode,
+    MessageEntityBold,
+    MessageEntityStrike,
+    MessageEntityItalic,
+    MessageEntityTextUrl,
+    MessageEntitySpoiler,
+    MessageEntityUnderline,
+    MessageEntityBlockquote,
+)
 
 
 @dataclass
@@ -228,7 +242,7 @@ def security(*arguments):
                 await fun(_object, **{kw: kwargs[kw] for kw in kwargs if kw in arguments})
             except Exception as e:
                 exception = "".join(traceback.format_exception(e))
-                await MaksogramBot.send_system_message(f"⚠️Ошибка⚠️\n\n{exception}")
+                await MaksogramBot.send_system_message(f"⚠️Ошибка⚠️\n\n{escape(exception)}")
 
         return new
 
@@ -249,6 +263,34 @@ def human_bytes(size: int):
         return '{0:.2f} МБ'.format(b / Mb)
     elif Gb <= b:
         return '{0:.2f} ГБ'.format(b / Gb)
+
+
+def bot_entities_from_tl(entities: list[TypeMessageEntity]) -> list[MessageEntity]:
+    result = []
+    for entity in entities:
+        if isinstance(entity, MessageEntityPre):
+            result.append(MessageEntity(type="pre", offset=entity.offset, length=entity.length))
+        elif isinstance(entity, MessageEntityCode):
+            result.append(MessageEntity(type="pre", offset=entity.offset, length=entity.length))
+        elif isinstance(entity, MessageEntityBold):
+            result.append(MessageEntity(type="bold", offset=entity.offset, length=entity.length))
+        elif isinstance(entity, MessageEntityStrike):
+            result.append(MessageEntity(type="strikethrough", offset=entity.offset, length=entity.length))
+        elif isinstance(entity, MessageEntityItalic):
+            result.append(MessageEntity(type="italic", offset=entity.offset, length=entity.length))
+        elif isinstance(entity, MessageEntityTextUrl):
+            result.append(MessageEntity(type="text_url", offset=entity.offset, length=entity.length, url=entity.url))
+        elif isinstance(entity, MessageEntitySpoiler):
+            result.append(MessageEntity(type="spoiler", offset=entity.offset, length=entity.length))
+        elif isinstance(entity, MessageEntityUnderline):
+            result.append(MessageEntity(type="underline", offset=entity.offset, length=entity.length))
+        elif isinstance(entity, MessageEntityBlockquote):
+            if entity.collapsed:
+                result.append(MessageEntity(type="expandable_blockquote", offset=entity.offset, length=entity.length))
+            else:
+                result.append(MessageEntity(type="blockquote", offset=entity.offset, length=entity.length))
+
+    return result
 
 
 def human_time(seconds: int) -> str:
@@ -325,7 +367,7 @@ async def send_email_message(to: str, subject: str, text: str, *, subtype: str =
 
 class Variables:
     version = "2.7"
-    version_string = "2.8.0 (103)"
+    version_string = "2.8.0 (104)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])
