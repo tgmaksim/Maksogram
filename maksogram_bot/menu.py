@@ -85,7 +85,9 @@ async def _start(message: Message, state: FSMContext):
 @security()
 async def _menu(message: Message):
     if await new_message(message): return
+    service_message = await message.answer("...", reply_markup=KRemove())
     await message.answer(**await menu(message.chat.id))
+    await service_message.delete()
 
 
 @dp.callback_query(F.data == "menu")

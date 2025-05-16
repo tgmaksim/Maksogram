@@ -1,11 +1,9 @@
 from typing import Any
-from datetime import timedelta
 from core import (
     db,
     html,
     SITE,
     OWNER,
-    time_now,
     security,
     Variables,
     support_link,
@@ -219,25 +217,7 @@ async def _other_message(message: Message):
         return await message.answer("Привет! /menu", reply_markup=KRemove())
 
 
-async def check_payment_datetime():
-    for account_id in await db.fetch_all("SELECT account_id FROM accounts", one_data=True):
-        account_id: int
-        payment = await db.fetch_one(f"SELECT \"user\", next_payment FROM payment WHERE account_id={account_id}")
-        if payment['user'] != 'user': continue
-        if time_now() <= payment['next_payment'] <= (time_now() + timedelta(days=1)):  # За день до конца
-            first_notification = await db.fetch_one(f"SELECT first_notification FROM payment WHERE account_id={account_id}", one_data=True)
-            if (time_now() - first_notification).total_seconds() < 23*60*60 + 50*60:  # Прошлое уведомление было менее 23 часов 50 минут назад
-                continue
-            await db.execute(f"UPDATE payment SET first_notification=now() WHERE account_id={account_id}")
-            await bot.send_message(account_id, "Текущая подписка заканчивается! Произведите следующий "
-                                               "платеж до конца завтрашнего дня")
-            message = await payment_menu()
-            await bot.send_photo(account_id, **message)
-
-
 async def start_bot():
-    await check_payment_datetime()
-
     Data.banned = await db.fetch_all("SELECT account_id FROM banned", one_data=True)
 
     await bot.send_message(OWNER, f"<b>Бот запущен!🚀</b>", parse_mode=html)
