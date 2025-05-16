@@ -1,4 +1,5 @@
 from typing import Union
+from httpx import Timeout
 from dataclasses import dataclass
 from deepgram import DeepgramClient, ClientOptionsFromEnv, PrerecordedOptions, AsyncListenRESTClient
 
@@ -19,7 +20,7 @@ options: PrerecordedOptions = PrerecordedOptions(
 
 
 async def transcription(data: bytes) -> str:
-    response = await deepgram.transcribe_file(dict(buffer=data), options)
+    response = await deepgram.transcribe_file(dict(buffer=data), options, timeout=Timeout(120.0, connect=10.0))
     result = response['results']['channels'][0]['alternatives'][0]['transcript']
 
     return result
