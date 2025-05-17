@@ -8,6 +8,7 @@ from core import (
     OWNER,
     security,
     support_link,
+    telegram_clients,
     send_email_message,
 )
 
@@ -17,6 +18,8 @@ from aiogram.types import KeyboardButton as KButton
 from aiogram.types import ReplyKeyboardMarkup as KMarkup
 from aiogram.types import InlineKeyboardMarkup as IMarkup
 from aiogram.types import InlineKeyboardButton as IButton
+from telethon.errors.rpcerrorlist import HashInvalidError
+from telethon.tl.functions.account import ResetAuthorizationRequest
 from .core import (
     dp,
     bot,
@@ -253,7 +256,60 @@ async def _security_hack_prev(callback_query: CallbackQuery):
 @security()
 async def _security_hack(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
-    await callback_query.answer("В разработке!", True)
+    await callback_query.message.edit_text(**await security_hack_menu(callback_query.from_user.id))
+
+
+async def security_hack_menu(account_id: int) -> dict[str, Any]:
+    function = await db.fetch_one(f"SELECT security_hack FROM security WHERE account_id={account_id}", one_data=True)
+    if not function:
+        markup = IMarkup(inline_keyboard=[[IButton(text="🟢 Включить защиту", callback_data="security_hack_on")],
+                                          [IButton(text="◀️  Назад", callback_data="security")]])
+    else:
+        markup = IMarkup(inline_keyboard=[[IButton(text="🔴 Выключить защиту", callback_data="security_hack_off")],
+                                          [IButton(text="◀️  Назад", callback_data="security")]])
+    return dict(
+        text=
+        "💀 <b>Защита от взлома</b>\n"
+        "<blockquote expandable>🧐 <b>Когда пригодится?</b>\n"
+        "    • Напрямую Telegram-аккаунт взломать невозможно"
+        "    • Некоторые сервисы требуют официальный и безопасный вход, но некоторые получают полный доступ к аккаунту\n"
+        "💪 <b>Как осуществляется защита?</b>\n"
+        "    • При обнаружении нового входа (сессии) Maksogram отправит уведомление об опасности такого действия\n"
+        "    • Только если вход был осуществлен через официальное приложения, можно выдохнуть\n"
+        "⚠️ Таким образом Maksogram всегда предупредит о нежелательном входе и обезопасит от получения полного доступа мошенниками</blockquote>",
+        parse_mode=html, reply_markup=markup)
+
+
+@dp.callback_query((F.data == "security_hack_on").__or__(F.data == "security_hack_off"))
+@security()
+async def _security_hack_switch(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    account_id = callback_query.from_user.id
+    command = callback_query.data == "security_hack_on"
+    await db.execute(f"UPDATE security SET security_hack={str(command).lower()} WHERE account_id={account_id}")
+    await callback_query.message.edit_text(**await security_hack_menu(account_id))
+
+
+@dp.callback_query(F.data.startswith("reset_authorization"))
+@security()
+async def _reset_authorization(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    account_id = callback_query.from_user.id
+    auth_hash = int(callback_query.data.replace("reset_authorization", ""))
+    try:
+        await telegram_clients[account_id](ResetAuthorizationRequest(hash=auth_hash))
+    except HashInvalidError:  # Сессия не найдена
+        await callback_query.answer("Сессия уже удалена", True)
+    else:
+        await callback_query.answer("Сессия удалена! Будьте бдительны!", True)
+    await callback_query.message.edit_reply_markup()
+
+
+@dp.callback_query(F.data == "confirm_authorization")
+@security()
+async def _confirm_authorization(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    await callback_query.message.edit_reply_markup()
 
 
 @dp.callback_query(F.data == "security_no_accessPrev")
@@ -300,7 +356,7 @@ async def _security_no_access_switch(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     account_id = callback_query.from_user.id
     command = callback_query.data == "security_no_access_on"
-    if not command:
+    if command is False:
         await db.execute(f"UPDATE security_agents SET recover=false WHERE account_id={account_id}")
     await db.execute(f"UPDATE security SET security_no_access={str(command).lower()} WHERE account_id={account_id}")
     await callback_query.message.edit_text(**await security_no_access_menu(account_id))

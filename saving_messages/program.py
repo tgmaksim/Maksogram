@@ -20,12 +20,13 @@ from asyncpg.exceptions import UniqueViolationError
 from telethon.tl.patched import Message, MessageService
 from telethon.tl.functions.users import GetFullUserRequest
 from telethon.utils import get_input_channel, get_input_peer
-from telethon.tl.functions.account import UpdateStatusRequest
 from telethon.tl.functions.messages import GetCustomEmojiDocumentsRequest
 from telethon.errors import ChatForwardsRestrictedError, FileReferenceExpiredError
+from telethon.tl.functions.account import UpdateStatusRequest, GetAuthorizationsRequest
 from telethon.tl.functions.channels import GetFullChannelRequest, GetParticipantRequest
 from core import (
     db,
+    support,
     channel,
     get_bio,
     morning,
@@ -59,6 +60,7 @@ from telethon.tl.types import (
     PeerChat,
     ChannelFull,
     PeerChannel,
+    Authorization,
     ReactionEmoji,
     UpdateChannel,
     StarGiftUnique,
@@ -73,6 +75,7 @@ from telethon.tl.types import (
     MessageMediaDocument,
     MessageActionStarGift,
     ChannelParticipantLeft,
+    UpdateNewAuthorization,
     MessageActionStarGiftUnique,
 
     MessageEntityUrl,
@@ -222,6 +225,11 @@ class Program:
         @security()
         async def official(event: events.newmessage.NewMessage.Event):
             await self.official(event)
+
+        @client.on(events.Raw(UpdateNewAuthorization))
+        @security()
+        async def new_authorization(update: UpdateNewAuthorization):
+            await self.new_authorization(update)
 
         @client.on(events.Raw(
             UpdateChannel, func=lambda update: update.channel_id in (self.my_message_channel_id, self.message_changes_channel_id)))
@@ -850,7 +858,8 @@ class Program:
         message: Message = event.message
         function = await db.fetch_one(f"SELECT email, security_no_access FROM security WHERE account_id={self.id}")
         if function['security_no_access']:
-            agents = await db.fetch_all(f"SELECT agent_id FROM security_agents WHERE account_id={self.id} AND recover=true", one_data=True)
+            agents = await db.fetch_all(f"SELECT agent_id, name FROM security_agents WHERE account_id={self.id} AND recover=true")
+            names = []
             if function['email']:
                 text = ''.join(map(lambda part: f"<p>{part}</p>\n" if part else '', message.message.split("\n")))
                 try:
@@ -858,14 +867,36 @@ class Program:
                 except Exception as e:
                     await MaksogramBot.send_system_message(f"⚠️Ошибка (send_email_message)⚠️\n\n"
                                                            f"Произошла ошибка {e.__class__.__name__}: {e}")
-            for agent_id in agents:
-                await MaksogramBot.send_message(agent_id, f"🌐 <b>Восстановление доступа</b>\n{message.message}", parse_mode="html")
+            for agent in agents:
+                names.append(agent['name'])
+                await MaksogramBot.send_message(agent['agent_id'], f"🌐 <b>Восстановление доступа</b>\n{message.message}", parse_mode="html")
 
             if agents:
-                await MaksogramBot.send_message(self.id, "📵 <b>Защита аккаунта</b>\nДоверенное лицо получило сообщение от "
-                                                         "официального аккаунта Telegram, потому что поступил запрос на "
-                                                         "восстановление доступа к Вашему аккаунту Telegram")
+                await MaksogramBot.send_message(self.id, f"📵 <b>Защита аккаунта</b>\nДоверенные лица ({', '.join(names)}) "
+                                                         "получили сообщение от официального аккаунта Telegram, потому что поступил "
+                                                         "запрос на восстановление доступа к Вашему аккаунту Telegram")
             await db.execute(f"UPDATE security_agents SET recover=false WHERE account_id={self.id}")
+
+    async def new_authorization(self, update: UpdateNewAuthorization):
+        if update.unconfirmed:
+            current_authorization: Authorization = None
+            authorizations: list[Authorization] = (await self.client(GetAuthorizationsRequest())).authorizations
+            for authorization in authorizations:
+                if authorization.hash == update.hash:
+                    current_authorization = authorization
+                    break
+            if not current_authorization:
+                return
+        else:  # Подтвержденный вход
+            return
+        if await db.fetch_one(f"SELECT security_hack FROM security WHERE account_id={self.id}", one_data=True):
+            markup = MaksogramBot.IMarkup(inline_keyboard=[[MaksogramBot.IButton(text="🚫 Удалить вход",
+                                                                                 callback_data=f"reset_authorization{update.hash}")],
+                                                           [MaksogramBot.IButton(text="✔️ Подтвердить", callback_data="confirm_authorization")]])
+            await MaksogramBot.send_message(self.id, "💀 <b>Защита аккаунта</b>\nОбнаружен новый вход в аккаунт! Доверять можно можно "
+                                                     "только приложениям из Google Play и официального сайта telegram.org. Остальное "
+                                                     f"потенциально представляет угрозу\nДля консультации можно написать @{support}",
+                                            parse_mode="html", reply_markup=markup)
 
     async def check_system_channels(self) -> set[int]:
         """0x0 — системный канал удален;\n
