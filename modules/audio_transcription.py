@@ -1,7 +1,8 @@
 from typing import Union
+from core import WWW_SITE
 from httpx import Timeout
 from dataclasses import dataclass
-from deepgram import DeepgramClient, ClientOptionsFromEnv, PrerecordedOptions, AsyncListenRESTClient
+from deepgram import DeepgramClient, PrerecordedOptions, AsyncListenRESTClient, ClientOptionsFromEnv
 
 
 @dataclass
@@ -11,24 +12,24 @@ class ResultTranscription:
     error: Union[Exception, None]
 
 
-deepgram: AsyncListenRESTClient = DeepgramClient(config=ClientOptionsFromEnv()).listen.asyncrest.v("1")
+api_options = ClientOptionsFromEnv()
 options: PrerecordedOptions = PrerecordedOptions(
-    model="nova-2",  # Модель 2 версии с поддержкой нескольких языков
+    model="nova-3",
     smart_format=True,
-    language="ru-RU"  # Только русский язык
+    language="multi",
 )
 
 
-async def transcription(data: bytes) -> str:
-    response = await deepgram.transcribe_file(dict(buffer=data), options, timeout=Timeout(120.0, connect=10.0))
+async def transcription(path: str) -> str:
+    deepgram: AsyncListenRESTClient = DeepgramClient(config=api_options).listen.asyncrest.v("1")
+    response = await deepgram.transcribe_url(dict(url=f"{WWW_SITE}/{path}"), options, timeout=Timeout(120.0, connect=10.0))
     result = response['results']['channels'][0]['alternatives'][0]['transcript']
-
     return result
 
 
-async def main(data: bytes) -> ResultTranscription:
+async def main(path: str) -> ResultTranscription:
     try:
-        text = await transcription(data)
+        text = await transcription(path)
     except Exception as e:
         return ResultTranscription(
             ok=False,

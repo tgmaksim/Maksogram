@@ -11,7 +11,6 @@ from modules.round_video import main as round_video
 from modules.reminder import main as reminder
 from modules.randomizer import main as randomizer
 
-from io import BytesIO
 from html import escape
 from typing import Union
 from datetime import timedelta, datetime
@@ -357,9 +356,10 @@ class Program:
                     reply_message, message = message, await message.reply(**data)
                 else:
                     await message.edit(**data)
-                buffer = BytesIO()
-                await self.client.download_media(reply_message.media, file=buffer)
-                answer = await audio_transcription(buffer.getvalue())
+                path = f"sounds/{self.id}.{message.chat_id}.{message.id}-{time_now().timestamp()}.ogg"
+                await self.client.download_media(reply_message.media, file=www_path(path))
+                answer = await audio_transcription(path)
+                os.remove(www_path(path))
                 if answer.ok:
                     await message.edit(f"@MaksogramBot в чате\n<blockquote expandable>{answer.text}</blockquote>", parse_mode="HTML")
                 else:

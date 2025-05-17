@@ -145,6 +145,7 @@ async def _ghost_copy(message: Message, state: FSMContext):
         else:
             post: Post = await telegram_client.get_messages(channel, ids=post_id)
             if post:
+                wait_message = await message.answer_sticker("CAACAgIAAxkBAAIyQWeUrH2jAUkcqHGYerWNT3ySuFwbAAJBAQACzRswCPHwYhjf9pZYNgQ", reply_markup=KRemove())
                 posts = [post]
                 if grouped_id := post.grouped_id:
                     async for post in telegram_client.iter_messages(channel, min_id=post_id-10, max_id=post_id):
@@ -166,6 +167,7 @@ async def _ghost_copy(message: Message, state: FSMContext):
                     await telegram_client.download_media(post, file=www_path(path))
                     link_preview_options = LinkPreviewOptions(url=f"{WWW_SITE}/{path}", show_above_text=True, prefer_large_media=True)
                     await message.answer(post.text or "media", entities=entities, link_preview_options=link_preview_options)
+                await wait_message.delete()
             else:
                 await message.answer(**await ghost_mode_menu(text="<b>Пост на канале не найден!</b>"))
     else:
