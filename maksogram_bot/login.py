@@ -109,7 +109,7 @@ async def _relogin(message: Message, state: FSMContext):
     if message.text == "Отмена":
         await state.clear()
         return await message.answer("Почему вы больше не хотите пользоваться Maksogram? Если у вас есть вопрос, то вы можете "
-                                    f"задать его {support_link}", reply_markup=KRemove(), disable_web_page_preview=True)
+                                    f"задать его {support_link}", parse_mode=html, reply_markup=KRemove(), disable_web_page_preview=True)
     if message.content_type != "web_app_data":
         await state.clear()
         return await message.answer("Код можно отправлять только через кнопку! Telegram блокирует вход при отправке кода "

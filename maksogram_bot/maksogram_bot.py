@@ -51,6 +51,8 @@ from . ghost_mode import ghost_mode_initial
 ghost_mode_initial()
 from . changed_profile import changed_profile_initial
 changed_profile_initial()
+from . speed_answers import speed_answers_initial
+speed_answers_initial()
 
 
 @dp.message(Command('version'))

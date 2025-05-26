@@ -162,6 +162,8 @@ class Program:
                 await self.new_message(event)
                 if self.offline:
                     await self.client(UpdateStatusRequest(offline=True))
+                if event.is_private and event.message.out:
+                    await self.speed_answers(event)
                 if event.is_private and not event.message.out and self.offline and await get_enabled_auto_answer(self.id) \
                         and not await db.fetch_one(f"SELECT answering_machine_sending @> '{event.chat_id}' "
                                                    f"FROM functions WHERE account_id={self.id}", one_data=True):
@@ -312,8 +314,11 @@ class Program:
     async def modules(self, message: Message) -> bool:
         text = message.text.lower()
         bot = message.chat_id == MaksogramBot.id
-        bot_voice, bot_video, bot_video_note = bot and message.voice, bot and message.video, bot and message.video_note
-        if not (bot or text and "\n" not in text and message.out and (message.media is None or isinstance(message.media, MessageMediaWebPage))):
+        bot_voice, bot_video, bot_video_note = None, None, None
+        if bot and not message.web_preview:
+            bot_voice, bot_video, bot_video_note = message.voice, message.video, message.video_note
+        if not (bot or text and "\n" not in text and message.out and (
+                message.media is None or isinstance(message.media, MessageMediaWebPage))):
             return False
 
         reply_message = await self.get_message_by_id(message.chat_id, message.reply_to.reply_to_msg_id) if \
@@ -994,6 +999,38 @@ class Program:
             access_hash = answer['media'] // 10
             ext = 'png' if answer['media'] % 10 == 1 else 'mp4'
             return await self.client.send_file(message.chat_id, www_path(f"answering_machine/{self.id}.{answer_id}.{access_hash}.{ext}"),
+                                               caption=answer['text'], formatting_entities=entities)
+        return await self.client.send_message(message.chat_id, answer['text'], formatting_entities=entities)
+
+    async def speed_answers(self, event: events.newmessage.NewMessage.Event):
+        message: Message = event.message
+        answer = await db.fetch_one(f"SELECT answer_id, text, entities, media FROM speed_answers "
+                                    f"WHERE account_id={self.id} AND trigger=$1", message.text.lower())
+        if not answer: return
+        entities = []
+        for entity in answer['entities']:
+            match entity['type']:
+                case "bold":
+                    entities.append(MessageEntityBold(entity['offset'], entity['length']))
+                case "italic":
+                    entities.append(MessageEntityItalic(entity['offset'], entity['length']))
+                case "underline":
+                    entities.append(MessageEntityUnderline(entity['offset'], entity['length']))
+                case "strikethrough":
+                    entities.append(MessageEntityStrike(entity['offset'], entity['length']))
+                case "spoiler":
+                    entities.append(MessageEntitySpoiler(entity['offset'], entity['length']))
+                case "blockquote":
+                    entities.append(MessageEntityBlockquote(entity['offset'], entity['length']))
+                case "text_link":
+                    entities.append(MessageEntityTextUrl(entity['offset'], entity['length'], entity['url']))
+                case "custom_emoji":
+                    entities.append(MessageEntityCustomEmoji(entity['offset'], entity['length'], document_id=int(entity['custom_emoji_id'])))
+        await message.delete()
+        if answer['media']:
+            access_hash = answer['media'] // 10
+            ext = 'png' if answer['media'] % 10 == 1 else 'mp4'
+            return await self.client.send_file(message.chat_id, www_path(f"speed_answers/{self.id}.{answer['answer_id']}.{access_hash}.{ext}"),
                                                caption=answer['text'], formatting_entities=entities)
         return await self.client.send_message(message.chat_id, answer['text'], formatting_entities=entities)
 
