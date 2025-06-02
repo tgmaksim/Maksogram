@@ -1063,7 +1063,7 @@ class Program:
                 auto_answer = new_auto_answer
                 await db.execute(f"UPDATE functions SET answering_machine_sending='[]' WHERE account_id={self.id}")
             # Ожидание следующей минуты
-            await asyncio.sleep(((time_now() + timedelta(minutes=1)).replace(second=0, microsecond=0) - time_now()).seconds)
+            await asyncio.sleep(((time_now() + timedelta(minutes=1, seconds=5)).replace(second=0, microsecond=0) - time_now()).seconds)
 
     @security()
     async def reminder_center(self):
@@ -1077,7 +1077,7 @@ class Program:
                                                                     MessageEntityCustomEmoji(47, 1, 5274055917766202507)])
                 await db.execute(f"DELETE FROM reminds WHERE account_id={self.id} AND chat_id={remind['chat_id']} AND "
                                  f"message_id={remind['message_id']} AND time='{remind['time']}'")
-            await asyncio.sleep(((time_now() + timedelta(minutes=1)).replace(second=0, microsecond=0) - time_now()).seconds)
+            await asyncio.sleep(((time_now() + timedelta(minutes=1, seconds=5)).replace(second=0, microsecond=0) - time_now()).seconds)
 
     async def gifts_center(self, user: dict[str, Union[str, dict]]):
         gifts = await get_gifts(self.id, user['user_id'])
