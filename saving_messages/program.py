@@ -183,7 +183,7 @@ class Program:
         async def message_deleted(event: events.messagedeleted.MessageDeleted.Event):
             if event.is_private is False:  # Сообщение удалено в группе, супергруппе или канале
                 if event.chat_id not in (self.my_messages, self.message_changes) and \
-                        not await db.fetch_one(f"SELECT added_chats @> '{event.chat_id}' FROM settings WHERE account_id={self.id}", one_data=True):
+                        not await db.fetch_one(f"SELECT added_chats ? '{event.chat_id}' FROM settings WHERE account_id={self.id}", one_data=True):
                     return
             await self.sleep()
             await self.message_deleted(event)
@@ -521,6 +521,8 @@ class Program:
             await db.execute(f"UPDATE status_users SET last_message=now() "
                              f"WHERE account_id={self.id} AND user_id={message.chat_id} AND last_message IS NULL")
 
+        if not await db.fetch_one(f"SELECT saving_messages FROM settings WHERE account_id={self.id}", one_data=True):
+            return  # Сохранение сообщений выключено
         if isinstance(message.media, TTL_MEDIA) and message.media.ttl_seconds:  # Самоуничтожающееся медиа
             if message.file.size / 2**20 <= 10 or message.video_note or \
                     message.voice and message.voice.attributes[0].duration <= 480:  # меньше 10 МБ, или кружок, или гс (до 8 минут)
@@ -545,12 +547,13 @@ class Program:
                 return await MaksogramBot.send_message(self.id, f"В чате с {peer} замечено самоуничтожающееся медиа. Я не смог "
                                                                 "его сохранить, т. к. по размеру оно превышает 10 МБ")
 
-        if not await db.fetch_one(f"SELECT saving_messages FROM settings WHERE account_id={self.id}", one_data=True):
-            return  # Сохранение сообщений выключено
         try:
             saved_message = await self.client.forward_messages(self.my_messages, message)
-        except (MessageIdInvalidError, ChatForwardsRestrictedError, BroadcastPublicVotersForbiddenError):
-            return
+        except (MessageIdInvalidError, ChatForwardsRestrictedError, BroadcastPublicVotersForbiddenError) as e:
+            return print(f"{self.id}: {e.__class__.__name__}: {e}")
+        else:
+            if saved_message.button_count:
+                saved_message = await saved_message.reply("Сообщение выше с кнопкой")
 
         await db.execute(f"INSERT INTO {self.table_name} VALUES "
                          f"({message.chat_id}, {message.id}, {saved_message.id}, '')")
@@ -719,7 +722,7 @@ class Program:
     async def message_read(self, event: events.messageread.MessageRead.Event):
         if not event.is_private:
             return
-        chat_id = (await event.get_chat()).id
+        chat_id = event.chat_id
         name = await self.chat_name(chat_id)
         functions = await db.fetch_one(f"SELECT reading, statistics FROM status_users WHERE account_id={self.id} AND user_id={chat_id}")
         if functions and functions['reading']:
@@ -791,18 +794,47 @@ class Program:
             postcard = random.choice(os.listdir(resources_path("holidays/birthday")))
             photo = resources_path(f"holidays/birthday/{postcard}")
             await MaksogramBot.send_message(self.id, "Доброе утро! С днем рождения 🥳\nВсего самого лучшего! 🎊 🎁", photo=photo)
-        elif time.date().month == 3 and time.date().day == 1:  # Поздравление с первым днем весны
-            postcard = random.choice(os.listdir(resources_path("holidays/1march")))
-            photo = resources_path(f"holidays/1march/{postcard}")
-            await MaksogramBot.send_message(self.id, "Доброе утро!\nС первым днем весны ☀️", photo=photo)
+        elif time.date().month == 1 and time.date().day == 1:  # Поздравление с Новым годом
+            postcard = random.choice(os.listdir(resources_path("holidays/new_year")))
+            photo = resources_path(f"holidays/new_year/{postcard}")
+            await MaksogramBot.send_message(self.id, f"Доброе утро!\nС Новым {time.date().year} годом! 🎄", photo=photo)
         elif time.date().month == 2 and time.date().day == 23 and gender is True:  # Поздравление с 23 февраля
             postcard = random.choice(os.listdir(resources_path("holidays/man")))
             photo = resources_path(f"holidays/man/{postcard}")
             await MaksogramBot.send_message(self.id, "С добрым утром! Поздравляю с 23 февраля 😎", photo=photo)
+        elif time.date().month == 3 and time.date().day == 1:  # Поздравление с первым днем весны
+            postcard = random.choice(os.listdir(resources_path("holidays/1march")))
+            photo = resources_path(f"holidays/1march/{postcard}")
+            await MaksogramBot.send_message(self.id, "Доброе утро!\nС первым днем весны ☀️", photo=photo)
         elif time.date().month == 3 and time.date().day == 8 and gender is False:  # Поздравление с 8 марта
             postcard = random.choice(os.listdir(resources_path("holidays/woman")))
             photo = resources_path(f"holidays/woman/{postcard}")
             await MaksogramBot.send_message(self.id, "С добрым утром! Поздравляю с 8 марта 🥰", photo=photo)
+        elif time.date().month == 4 and time.date().day == 1:  # Поздравление с первым апреля
+            postcard = random.choice(os.listdir(resources_path("holidays/1april")))
+            photo = resources_path(f"holidays/1april/{postcard}")
+            await MaksogramBot.send_message(self.id, "С добрым утром! Поздравляю с днем веселья! 🤡", photo=photo)
+        elif time.date().month == 5 and time.date().day == 1:  # Поздравление с днем весны и труда
+            postcard = random.choice(os.listdir(resources_path("holidays/1may")))
+            photo = resources_path(f"holidays/1may/{postcard}")
+            await MaksogramBot.send_message(self.id, "С добрым утром!\nПоздравляю с днем весны и труда! ☀️", photo=photo)
+        elif time.date().month == 5 and time.date().day == 9:  # Поздравление с днем Великой Победы
+            postcard = random.choice(os.listdir(resources_path("holidays/victory_day")))
+            photo = resources_path(f"holidays/victory_day/{postcard}")
+            await MaksogramBot.send_message(self.id, "С добрым утром! Поздравляю с Днем Победы! ⭐️", photo=photo)
+        elif time.date().month == 6 and time.date().day == 1:  # Поздравление с первым днем лета
+            postcard = random.choice(os.listdir(resources_path("holidays/1june")))
+            photo = resources_path(f"holidays/1june/{postcard}")
+            await MaksogramBot.send_message(self.id, "С добрым утром! Поздравляю с первым днем лета! 🌤", photo=photo)
+        elif time.date().month == 9 and time.date().day == 1:  # Поздравление с днем знаний
+            postcard = random.choice(os.listdir(resources_path("holidays/1september")))
+            photo = resources_path(f"holidays/1september/{postcard}")
+            await MaksogramBot.send_message(self.id, "С добрым утром! Поздравляю с днем знаний! 🤓", photo=photo)
+        elif time.date().month == 12 and time.date().day == 9:  # Информация о дне рождении
+            postcard = random.choice(os.listdir(resources_path("holidays/owner_birthday")))
+            photo = resources_path(f"holidays/owner_birthday/{postcard}")
+            await MaksogramBot.send_message(self.id, "С добрым утром! Сегодня у создателя Maksogram день рождения! Поздравь его "
+                                                     "лично или в комментариях канала. Ему будет очень приятно", photo=photo)
         elif await db.fetch_one(f"SELECT morning_weather FROM modules WHERE account_id={self.id}", one_data=True):  # Погода по утрам
             if gender is True:  # Мужчина
                 postcard = random.choice(os.listdir(resources_path("good_morning/man")))
