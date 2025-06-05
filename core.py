@@ -384,7 +384,7 @@ async def convert_currencies(value: float, currency0: str, currency1: str) -> fl
 
 class Variables:
     version = "2.8"
-    version_string = "2.8.2 (115)"
+    version_string = "2.8.2 (116)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])
