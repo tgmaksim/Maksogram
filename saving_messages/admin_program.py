@@ -10,6 +10,7 @@ from modules.weather import main as weather
 from modules.round_video import main as round_video
 from modules.reminder import main as reminder
 from modules.randomizer import main as randomizer
+from modules.currencies import main as currencies
 
 from html import escape
 from typing import Union
@@ -426,6 +427,16 @@ class Program:
                 await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться рандомайзером? Данная функция отключена у вас! "
                                                          "Вы можете включить в настройках\n/menu_chat (Maksogram в чате)")
 
+        # Конвертер валют
+        elif amount := currencies(text):
+            if await db.fetch_one(f"SELECT currencies FROM modules WHERE account_id={self.id}", one_data=True):
+                await message.edit(f"🤖 @MaksogramBot в чате\n{await amount()}",
+                                   formatting_entities=[MessageEntityCustomEmoji(0, 2, 5418001570597986649)])
+                return "Конвертер валют"
+            else:
+                await MaksogramBot.send_message(self.id, "Вы хотели воспользоваться конвертером валют? Данная функция отключена у вас! "
+                                                         "Вы можете включить в настройках\n/menu_chat (Maksogram в чате)")
+
         return False
 
     async def new_message_service(self, event: events.newmessage.NewMessage.Event):
@@ -800,6 +811,7 @@ class Program:
         statistics = function['statistics']
         online = function['online'] and status is True
         offline = function['offline'] and status is False
+        status_str = None
         if statistics:
             if status is True:  # В сети - нужно добавить новую пару в данных в таблицу и удалить неполные пары
                 await db.execute(f"DELETE FROM statistics_status_users "
@@ -808,18 +820,18 @@ class Program:
             else:  # Офлайн - закончить пару данных или пропустить
                 await db.execute(f"UPDATE statistics_status_users SET offline_time=now() "
                                  f"WHERE account_id={self.id} AND user_id={event.chat_id} AND offline_time IS NULL")
-        if status_str := not (online or offline or awake):
-            return
-        if online or offline:
-            status_str = "в сети" if status else "вышел(а) из сети"
         if awake:
             time_zone: int = await db.fetch_one(f"SELECT time_zone FROM settings WHERE account_id={self.id}", one_data=True)
             time = time_now(time_zone)
             time_last_notification = awake + timedelta(hours=time_zone)
-            if morning[0] <= time.hour < morning[1] and not \
-                    (time_last_notification.date() == time.date() and morning[0] <= time_last_notification.hour < morning[1]):
+            if awake := (morning[0] <= time.hour < morning[1] and not
+                         (time_last_notification.date() == time.date() and morning[0] <= time_last_notification.hour < morning[1])):
                 await db.execute(f"UPDATE status_users SET awake=now() WHERE account_id={self.id} AND user_id={event.chat_id}")
                 status_str = "проснулся(лась)"
+        if not (online or offline or awake):
+            return
+        if online or offline:
+            status_str = "в сети" if status else "вышел(а) из сети"
         name = await self.chat_name(event.chat_id)
         await MaksogramBot.send_message(self.id, f"🌐 {name} {status_str}", reply_markup=MaksogramBot.IMarkup(
             inline_keyboard=[[MaksogramBot.IButton(text="Настройки", callback_data=f"status_user_menu{event.chat_id}|new")]]))

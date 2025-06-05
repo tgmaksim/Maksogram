@@ -19,14 +19,15 @@ import os
 import json
 import string
 import asyncio
+import aiohttp
 import sys_keys
 import traceback
 import aiosmtplib
 
-from math import ceil
 from html import escape
 from aiogram import Bot
 from asyncio import Task
+from math import ceil, log10
 from typing import Union, Any
 from database import Database
 from email.header import Header
@@ -40,8 +41,8 @@ from telethon.tl.types.payments import SavedStarGifts
 from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.functions.photos import GetUserPhotosRequest
 from telethon.tl.functions.payments import GetSavedStarGiftsRequest
-from sys_keys import sessions_path, TOKEN, BOT_ID, USERNAME_BOT, email
 from telethon.tl.types import StarGiftUnique, Photo, TypeMessageEntity
+from sys_keys import sessions_path, TOKEN, BOT_ID, USERNAME_BOT, email, crypto_api_key
 from aiogram.types import LinkPreviewOptions, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 
 from aiogram.types.message_entity import MessageEntity
@@ -365,9 +366,28 @@ async def send_email_message(to: str, subject: str, text: str, *, subtype: str =
     await smtp.quit()
 
 
+async def convert_currencies(value: float, currency0: str, currency1: str) -> float:
+    url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
+    headers = {"X-CMC_PRO_API_KEY": crypto_api_key}
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers, params={"symbol": "USDT", "convert": "USD"}) as response:
+            data = await response.json()
+            usdt = data['data']["USDT"]['quote']["USD"]['price']
+        async with session.get(url, headers=headers, params={"symbol": "USDT", "convert": currency0}) as response:
+            data = await response.json()
+            currency0 = data['data']["USDT"]['quote'][currency0]['price'] / usdt
+        async with session.get(url, headers=headers, params={"symbol": "USDT", "convert": currency1}) as response:
+            data = await response.json()
+            currency1 = data['data']["USDT"]['quote'][currency1]['price'] / usdt
+        res = value * (currency1 / currency0)
+        if res < 1:
+            return round(res, -round(log10(res))+2)
+        return round(res, max(0, 5 - round(log10(res))))
+
+
 class Variables:
     version = "2.8"
-    version_string = "2.8.2 (113)"
+    version_string = "2.8.2 (114)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])

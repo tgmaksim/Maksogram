@@ -340,7 +340,7 @@ async def start_program(account_id: int, username: str, phone_number: int, teleg
     await db.execute(f"INSERT INTO settings VALUES ({account_id}, '{{}}', '{{}}', true, 6, 'Омск', NULL, true, false);"
                      f"INSERT INTO payment VALUES ({account_id}, 'user', {Variables.fee}, '{next_payment}', true, now(), now());"
                      f"INSERT INTO functions VALUES ({account_id}, '[]');"
-                     f"INSERT INTO modules VALUES ({account_id}, false, false, false, false, false, false, false, false);"
+                     f"INSERT INTO modules VALUES ({account_id}, false, false, false, false, false, false, false, false, false);"
                      f"INSERT INTO statistics VALUES ({account_id}, now(), now(), now());"
                      f"INSERT INTO security VALUES ({account_id}, false, false, NULL);"
                      f"INSERT INTO confirm_email VALUES ({account_id}, NULL, NULL);")
