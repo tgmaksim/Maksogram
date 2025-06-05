@@ -1,5 +1,6 @@
 import re
 
+from typing import Union
 from core import convert_currencies
 
 
@@ -30,7 +31,10 @@ def get_currency(string: str) -> str:
             return id
 
 
-def main(text: str) -> Result:
+def main(text: str = None) -> Union[Result, list[Result]]:
+    if not text:  # Курсы всех доступных валют
+        return list(map(main, [f"Курс {currency}".lower() for currency in currencies]))
+
     match0 = re.fullmatch(rf'курс +({"|".join(sum(map(lambda x: list(x.values()), currencies.values()), []))})', text)
     match1 = re.fullmatch(rf'курс +({"|".join(sum(map(lambda x: list(x.values()), currencies.values()), []))}) +к +'
                           rf'({"|".join(sum(map(lambda x: list(x.values()), currencies.values()), []))})', text)

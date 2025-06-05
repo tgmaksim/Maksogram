@@ -846,7 +846,10 @@ class Program:
             photo = resources_path(f"holidays/owner_birthday/{postcard}")
             await MaksogramBot.send_message(self.id, "С добрым утром! Сегодня у создателя Maksogram день рождения! Поздравь его "
                                                      "лично или в комментариях канала. Ему будет очень приятно", photo=photo)
-        elif await db.fetch_one(f"SELECT morning_weather FROM modules WHERE account_id={self.id}", one_data=True):  # Погода по утрам
+        else:
+            morning_functions = await db.fetch_one(f"SELECT morning_weather, morning_currencies FROM modules WHERE account_id={self.id}")
+            if not any(morning_functions.values()):
+                return
             if gender is True:  # Мужчина
                 postcard = random.choice(os.listdir(resources_path("good_morning/man")))
                 photo = resources_path(f"good_morning/man/{postcard}")
@@ -855,8 +858,18 @@ class Program:
                 photo = resources_path(f"good_morning/woman/{postcard}")
             else:
                 photo = None
-            await MaksogramBot.send_message(self.id, f"Доброе утро! Как спалось? 😉\n\n{await weather(self.id)}",
-                                            photo=photo, parse_mode="HTML")
+
+            text = "Доброе утро! Как спалось? 😉\n\n"
+            if morning_functions['morning_weather']:
+                text += f"<blockquote expandable>{await weather(self.id)}</blockquote>\n\n"
+            if morning_functions['morning_currencies']:
+                results = []
+                for currency in currencies():
+                    results.append(await currency())
+                results = "\n".join(results)
+                text += f"<blockquote expandable><b>Курсы валют</b>\n\n{results}</blockquote>"
+
+            await MaksogramBot.send_message(self.id, text, photo=photo, parse_mode="HTML")
 
     async def user_update(self, event: events.userupdate.UserUpdate.Event):
         status = isinstance(event.status, UserStatusOnline)

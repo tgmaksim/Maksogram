@@ -370,15 +370,12 @@ async def convert_currencies(value: float, currency0: str, currency1: str) -> fl
     url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
     headers = {"X-CMC_PRO_API_KEY": crypto_api_key}
     async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers, params={"symbol": "USDT", "convert": "USD"}) as response:
-            data = await response.json()
-            usdt = data['data']["USDT"]['quote']["USD"]['price']
         async with session.get(url, headers=headers, params={"symbol": "USDT", "convert": currency0}) as response:
             data = await response.json()
-            currency0 = data['data']["USDT"]['quote'][currency0]['price'] / usdt
+            currency0 = data['data']["USDT"]['quote'][currency0]['price']
         async with session.get(url, headers=headers, params={"symbol": "USDT", "convert": currency1}) as response:
             data = await response.json()
-            currency1 = data['data']["USDT"]['quote'][currency1]['price'] / usdt
+            currency1 = data['data']["USDT"]['quote'][currency1]['price']
         res = value * (currency1 / currency0)
         if res < 1:
             return round(res, -round(log10(res))+2)
@@ -387,7 +384,7 @@ async def convert_currencies(value: float, currency0: str, currency1: str) -> fl
 
 class Variables:
     version = "2.8"
-    version_string = "2.8.2 (114)"
+    version_string = "2.8.2 (115)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])

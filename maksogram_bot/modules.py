@@ -340,31 +340,38 @@ async def _currencies(callback_query: CallbackQuery):
 
 
 async def currencies_menu(account_id: int) -> dict[str, Any]:
-    if await db.fetch_one(f"SELECT currencies FROM modules WHERE account_id={account_id}", one_data=True):  # Вкл/выкл конвертера валют
+    function = await db.fetch_one(f"SELECT currencies, morning_currencies FROM modules WHERE account_id={account_id}")
+    if function['currencies']:  # Вкл/выкл конвертера валют
         status_button = IButton(text="🔴 Выключить Конвертер", callback_data="currencies_off")
     else:
         status_button = IButton(text="🟢 Включить Конвертер", callback_data="currencies_on")
+    if function['morning_currencies']:
+        morning_status_button = IButton(text="🔴 Курсы валют утром", callback_data="morning_currencies_off")
+    else:
+        morning_status_button = IButton(text="🟢 Курсы валют утром", callback_data="morning_currencies_on")
     link = await generate_sensitive_link(account_id, "module-currencies", "конвертер валют")
     markup = IMarkup(inline_keyboard=[[status_button],
+                                      [morning_status_button],
                                       [IButton(text="Как узнать курс?", url=link)],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
     return {"text": "💱 <b>Конвертер валют в чате</b>\nКонвертирует валюты по запросу в любом чате\n<blockquote>Курс доллара\n"
                     "Курс доллара к рублю\n5 долларов\n10 usdt\n15 ton в рублях</blockquote>", "reply_markup": markup, "parse_mode": html}
 
 
-@dp.callback_query(F.data.in_(["currencies_on", "currencies_off"]))
+@dp.callback_query(F.data.in_(["currencies_on", "currencies_off", "morning_currencies_on", "morning_currencies_off"]))
 @security()
 async def _currencies_switch(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     command = callback_query.data.split("_")[-1]
+    function = "_".join(callback_query.data.split("_")[:-1])
     account_id = callback_query.from_user.id
     if await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={account_id}", one_data=True) is None:
         return await callback_query.answer("Maksogram в чате доступен только пользователям Maksogram", True)
     match command:
         case "on":
-            await db.execute(f"UPDATE modules SET currencies=true WHERE account_id={account_id}")  # Включение конвертера валют
+            await db.execute(f"UPDATE modules SET {function}=true WHERE account_id={account_id}")  # Включение конвертера валют
         case "off":
-            await db.execute(f"UPDATE modules SET currencies=false WHERE account_id={account_id}")  # Выключение конвертера валют
+            await db.execute(f"UPDATE modules SET {function}=false WHERE account_id={account_id}")  # Выключение конвертера валют
     await callback_query.message.edit_text(**await currencies_menu(account_id))
 
 
