@@ -75,6 +75,8 @@ class UserState(StatesGroup):
     speed_answer_trigger = State('speed_answer_trigger')
     speed_answer_text = State('speed_answer_text')
     speed_answer_edit = State('speed_answer_edit')
+    main_currency = State('main_currency')
+    my_currencies = State('my_currencies')
 
 
 async def convert_ruble(amount_rub: int, currencies: dict[str, Union[str, int]]):

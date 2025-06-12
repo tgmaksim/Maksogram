@@ -1,21 +1,28 @@
 from typing import Any
+from modules.currencies import currencies
 from core import (
     db,
     html,
     morning,
     channel,
     security,
+    json_encode,
     generate_sensitive_link,
 )
 
 from aiogram import F
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.types import KeyboardButton as KButton
+from aiogram.types import ReplyKeyboardMarkup as RMarkup
 from aiogram.types import InlineKeyboardMarkup as IMarkup
 from aiogram.types import InlineKeyboardButton as IButton
 from aiogram.types import Message, CallbackQuery, WebAppInfo
 from .core import (
     dp,
+    bot,
     Data,
+    UserState,
     new_message,
     new_callback_query,
 )
@@ -339,22 +346,25 @@ async def _currencies(callback_query: CallbackQuery):
     await callback_query.message.edit_text(**await currencies_menu(callback_query.message.chat.id))
 
 
-async def currencies_menu(account_id: int) -> dict[str, Any]:
-    function = await db.fetch_one(f"SELECT currencies, morning_currencies FROM modules WHERE account_id={account_id}")
+async def currencies_menu(account_id: int, text: str = None) -> dict[str, Any]:
+    buttons = []
+    function = await db.fetch_one(f"SELECT currencies, morning_currencies, main_currency FROM modules WHERE account_id={account_id}") or \
+               {'currencies': None, 'morning_currencies': None, 'main_currency': None}  # Для незарегистрированных пользователей
     if function['currencies']:  # Вкл/выкл конвертера валют
-        status_button = IButton(text="🔴 Выключить Конвертер", callback_data="currencies_off")
+        buttons.append([IButton(text="🔴 Выключить", callback_data="currencies_off"),
+                        IButton(text=function['main_currency'] or "Основная валюта", callback_data="main_currency")])
     else:
-        status_button = IButton(text="🟢 Включить Конвертер", callback_data="currencies_on")
+        buttons.append([IButton(text="🟢 Включить Конвертер", callback_data="currencies_on")])
     if function['morning_currencies']:
-        morning_status_button = IButton(text="🔴 Курсы валют утром", callback_data="morning_currencies_off")
+        buttons.append([IButton(text="🔴 Утром", callback_data="morning_currencies_off"),
+                        IButton(text="Список валют", callback_data="my_currencies")])
     else:
-        morning_status_button = IButton(text="🟢 Курсы валют утром", callback_data="morning_currencies_on")
-    link = await generate_sensitive_link(account_id, "module-currencies", "конвертер валют")
-    markup = IMarkup(inline_keyboard=[[status_button],
-                                      [morning_status_button],
+        buttons.append([IButton(text="🟢 Курсы валют утром", callback_data="morning_currencies_on")])
+    link = await generate_sensitive_link(account_id, "module-currencies", "курсы-валют")
+    markup = IMarkup(inline_keyboard=[*buttons,
                                       [IButton(text="Как узнать курс?", url=link)],
                                       [IButton(text="◀️  Назад", callback_data="modules")]])
-    return {"text": "💱 <b>Конвертер валют в чате</b>\nКонвертирует валюты по запросу в любом чате\n<blockquote>Курс доллара\n"
+    return {"text": text or "💱 <b>Конвертер валют в чате</b>\nКонвертирует валюты по запросу в любом чате\n<blockquote>Курс доллара\n"
                     "Курс доллара к рублю\n5 долларов\n10 usdt\n15 ton в рублях</blockquote>", "reply_markup": markup, "parse_mode": html}
 
 
@@ -367,12 +377,78 @@ async def _currencies_switch(callback_query: CallbackQuery):
     account_id = callback_query.from_user.id
     if await db.fetch_one(f"SELECT is_started FROM settings WHERE account_id={account_id}", one_data=True) is None:
         return await callback_query.answer("Maksogram в чате доступен только пользователям Maksogram", True)
+    text = "Теперь по команде в любом чате я буду сообщать о курсе нужной валюты" if function == "currencies" else \
+        "Теперь по утрам я буду сообщать о курсах выбранных валют"
     match command:
         case "on":
+            await callback_query.answer(text, True)
             await db.execute(f"UPDATE modules SET {function}=true WHERE account_id={account_id}")  # Включение конвертера валют
         case "off":
             await db.execute(f"UPDATE modules SET {function}=false WHERE account_id={account_id}")  # Выключение конвертера валют
     await callback_query.message.edit_text(**await currencies_menu(account_id))
+
+
+@dp.callback_query(F.data == "main_currency")
+@security('state')
+async def _main_currency_start(callback_query: CallbackQuery, state: FSMContext):
+    if await new_callback_query(callback_query): return
+    await state.set_state(UserState.main_currency)
+    markup = RMarkup(keyboard=[[KButton(text="Отмена")]], resize_keyboard=True)
+    currencies_list = ''.join([("" if i == 0 else "\n" if i % 2 == 0 else ",  ") + currency for i, currency in
+                               enumerate([f"{currency} ({currencies[currency][0]})" for currency in currencies])])
+    message_id = (await callback_query.message.answer(
+        "Выберите валюту по умолчанию (например, usd), в которую будет конвертироваться другие по команде, например:\n<blockquote>"
+        f"Курс биткоина</blockquote>\nДоступные валюты:\n<blockquote>{currencies_list}</blockquote>", parse_mode=html, reply_markup=markup)).message_id
+    await state.update_data(message_id=message_id)
+    await callback_query.message.delete()
+
+
+@dp.message(UserState.main_currency)
+@security('state')
+async def _main_currency(message: Message, state: FSMContext):
+    if await new_message(message): return
+    account_id = message.chat.id
+    message_id = (await state.get_data())['message_id']
+    await state.clear()
+    if message.text == "Отмена":
+        await message.answer(**await currencies_menu(account_id))
+    elif (currency := message.text.upper()) in currencies:
+        await db.execute(f"UPDATE modules SET main_currency='{currency}' WHERE account_id={account_id}")
+        await message.answer(**await currencies_menu(account_id))
+    else:
+        await message.answer(**await currencies_menu(account_id, "<b>Валюта не найдена!</b>"))
+    await bot.delete_messages(chat_id=message.chat.id, message_ids=[message.message_id, message_id])
+
+
+@dp.callback_query(F.data == "my_currencies")
+@security('state')
+async def _my_currencies_start(callback_query: CallbackQuery, state: FSMContext):
+    if await new_callback_query(callback_query): return
+    await state.set_state(UserState.my_currencies)
+    markup = RMarkup(keyboard=[[KButton(text="Отмена")]], resize_keyboard=True)
+    message_id = (await callback_query.message.answer(
+        "Выберите валюты через запятую, курсы которых будут присылаться по утрам, например:\n"
+        "<blockquote>RUB, USD, BTC, ETH</blockquote>", parse_mode=html, reply_markup=markup)).message_id
+    await state.update_data(message_id=message_id)
+    await callback_query.message.delete()
+
+
+@dp.message(UserState.my_currencies)
+@security('state')
+async def _my_currencies(message: Message, state: FSMContext):
+    if await new_message(message): return
+    account_id = message.chat.id
+    message_id = (await state.get_data())['message_id']
+    await state.clear()
+    if message.text == "Отмена":
+        await message.answer(**await currencies_menu(account_id))
+    elif all(map(lambda x: x.upper() in currencies, my_currencies := message.text.replace(" ", "").split(","))):
+        await db.execute(f"UPDATE modules SET my_currencies=$1 WHERE account_id={account_id}", json_encode(my_currencies))
+        await message.answer(**await currencies_menu(account_id, "Список валют изменен успешно, только их курсы будут утром"))
+    else:
+        await message.answer(**await currencies_menu(account_id, "<b>Одна из валют не определена! Пожалуйста, перечислите "
+                                                                 "нужные валюты через запятую, как в примере</b>"))
+    await bot.delete_messages(chat_id=message.chat.id, message_ids=[message.message_id, message_id])
 
 
 def modules_initial():

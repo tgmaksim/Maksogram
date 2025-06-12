@@ -1,7 +1,7 @@
 import re
 
 from typing import Union
-from core import convert_currencies
+from core import db, convert_currencies
 
 
 class Result:
@@ -10,7 +10,13 @@ class Result:
         self.currency0 = currency0
         self.currency1 = currency1
 
-    async def __call__(self) -> str:
+    async def __call__(self, account_id: int) -> str:
+        if self.currency1.lower() == "<main_currency>":
+            self.currency1 = await db.fetch_one(f"SELECT main_currency FROM modules WHERE account_id={account_id}", one_data=True)
+            if self.currency1 is None:
+                self.currency1 = "RUB"
+            if self.currency0 == self.currency1:
+                self.currency1 = "RUB" if self.currency0 == "USD" else "USD"
         res = await convert_currencies(self.value, self.currency0, self.currency1)
         return f"""{self.value} {self.currency0} ≈ {f"{res:,}".replace(',', "'")} {self.currency1}"""
 
@@ -39,9 +45,9 @@ def get_currency(string: str) -> str:
             return id
 
 
-def main(text: str = None) -> Union[Result, list[Result]]:
-    if not text:  # Курсы всех доступных валют
-        return list(map(main, [f"Курс {currency}".lower() for currency in currencies]))
+def main(text: str = None, my_currencies: list[str] = None) -> Union[Result, list[Result]]:
+    if my_currencies:  # Курсы нужных валют
+        return list(map(main, [f"Курс {currency}".lower() for currency in my_currencies]))
 
     match0 = re.fullmatch(rf'курс +({"|".join(sum(list(currencies.values()), []))})', text)
     match1 = re.fullmatch(rf'курс +({"|".join(sum(list(currencies.values()), []))}) +к +'
@@ -53,17 +59,17 @@ def main(text: str = None) -> Union[Result, list[Result]]:
                           rf'({"|".join(sum(list(currencies.values()), []))})', text)
 
     value = 1
-    currency1 = "RUB"
+    currency1 = "<main_currency>"
     if match := match0:
         currency0 = get_currency(match.group(1))
-        currency1 = "RUB" if currency0 != "RUB" else "USD"
     elif match := (match1 or match2):
         currency0 = get_currency(match.group(1))
         currency1 = get_currency(match.group(2))
     elif match := (match3 or match4):
         value = float(match.group(1))
         currency0 = get_currency(match.group(2))
-        if match4: currency1 = get_currency(match.group(3))
+        if match4:
+            currency1 = get_currency(match.group(3))
     else:
         return
 

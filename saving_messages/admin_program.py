@@ -430,7 +430,7 @@ class Program:
         # Конвертер валют
         elif amount := currencies(text):
             if await db.fetch_one(f"SELECT currencies FROM modules WHERE account_id={self.id}", one_data=True):
-                await message.edit(f"🤖 @MaksogramBot в чате\n{await amount()}",
+                await message.edit(f"🤖 @MaksogramBot в чате\n{await amount(self.id)}",
                                    formatting_entities=[MessageEntityCustomEmoji(0, 2, 5418001570597986649)])
                 return "Конвертер валют"
             else:
@@ -800,9 +800,10 @@ class Program:
             if morning_functions['morning_weather']:
                 text += f"<blockquote expandable>{await weather(self.id)}</blockquote>\n\n"
             if morning_functions['morning_currencies']:
+                my_currencies = await db.fetch_one(f"SELECT my_currencies FROM modules WHERE account_id={self.id}", one_data=True)
                 results = []
-                for currency in currencies():
-                    results.append(await currency())
+                for currency in currencies(my_currencies=my_currencies):
+                    results.append(await currency(self.id))
                 results = "\n".join(results)
                 text += f"<blockquote expandable><b>Курсы валют</b>\n\n{results}</blockquote>"
 

@@ -94,7 +94,7 @@ async def _menu(message: Message):
 @security()
 async def _menu_button(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
-    await callback_query.message.edit_text(**await menu(callback_query.message.chat.id))
+    await callback_query.message.edit_text(**await menu(callback_query.from_user.id))
 
 
 async def menu(account_id: int) -> dict[str, Any]:
@@ -105,9 +105,9 @@ async def menu(account_id: int) -> dict[str, Any]:
                                            IButton(text="👨‍🏫 Профиль друга", callback_data="changed_profilePrev")],
                                           [IButton(text="🌐 Друг в сети", callback_data="status_usersPrev"),
                                            IButton(text="👀 Призрак", callback_data="ghost_modePrev")],
-                                          [IButton(text="⚙️ Настройки", callback_data="settingsPrev"),
                                           [IButton(text="🪧 Быстрые ответы", callback_data="speed_answersPrev"),
                                            IButton(text="🛡 Защита аккаунта", callback_data="securityPrev")],
+                                          [IButton(text="⚙️ Настройки", callback_data="settingsPrev"),
                                            IButton(text="💬 Maksogram в чате", callback_data="modulesPrev")],
                                           [IButton(text="ℹ️ Памятка по функциям", url=await generate_sensitive_link(account_id))]])
     elif status is False:
