@@ -272,7 +272,7 @@ def bot_entities_from_tl(entities: list[TypeMessageEntity]) -> list[MessageEntit
         if isinstance(entity, MessageEntityPre):
             result.append(MessageEntity(type="pre", offset=entity.offset, length=entity.length))
         elif isinstance(entity, MessageEntityCode):
-            result.append(MessageEntity(type="pre", offset=entity.offset, length=entity.length))
+            result.append(MessageEntity(type="code", offset=entity.offset, length=entity.length))
         elif isinstance(entity, MessageEntityBold):
             result.append(MessageEntity(type="bold", offset=entity.offset, length=entity.length))
         elif isinstance(entity, MessageEntityStrike):
@@ -280,7 +280,7 @@ def bot_entities_from_tl(entities: list[TypeMessageEntity]) -> list[MessageEntit
         elif isinstance(entity, MessageEntityItalic):
             result.append(MessageEntity(type="italic", offset=entity.offset, length=entity.length))
         elif isinstance(entity, MessageEntityTextUrl):
-            result.append(MessageEntity(type="text_url", offset=entity.offset, length=entity.length, url=entity.url))
+            result.append(MessageEntity(type="text_link", offset=entity.offset, length=entity.length, url=entity.url))
         elif isinstance(entity, MessageEntitySpoiler):
             result.append(MessageEntity(type="spoiler", offset=entity.offset, length=entity.length))
         elif isinstance(entity, MessageEntityUnderline):
@@ -384,7 +384,7 @@ async def convert_currencies(value: float, currency0: str, currency1: str) -> fl
 
 class Variables:
     version = "2.8"
-    version_string = "2.8.3 (117)"
+    version_string = "2.8.3 (118)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])

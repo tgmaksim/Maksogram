@@ -23,7 +23,7 @@ from aiogram.types import InlineKeyboardMarkup as IMarkup
 from aiogram.types import InlineKeyboardButton as IButton
 from telethon.tl.functions.stories import GetPeerStoriesRequest
 from aiogram.types import Message, CallbackQuery, LinkPreviewOptions
-from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument, Channel
+from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument, Channel, PeerChannel
 from .core import (
     dp,
     bot,
@@ -135,11 +135,14 @@ async def _ghost_copy(message: Message, state: FSMContext):
 
     if message.text == "Отмена":
         await message.answer(**await ghost_mode_menu())
-    elif link := re.fullmatch(r'(?:(?:https|http)://)?t\.me/c/(?P<channel_id>\d+)/(?P<post_id>\d+)', message.text):
-        channel_id, post_id = map(int, link.groups())
+    elif link := (re.fullmatch(r'(?:(?:https|http)://)?t\.me/c/(?P<channel_id>\d+)/(?P<post_id>\d+)', message.text) or
+                  re.fullmatch(r'(?:(?:https|http)://)?t\.me/(?P<channel_username>[a-zA-Z0-9_]+)/(?P<post_id>\d+)', message.text)):
+        channel_id, post_id = link.groups()
+        post_id = int(post_id)
         telegram_client = telegram_clients[account_id]
         try:
-            channel: Channel = await telegram_client.get_entity(channel_id)
+            peer_channel = PeerChannel(channel_id=int(channel_id)) if channel_id.isdigit() else channel_id
+            channel: Channel = await telegram_client.get_entity(peer_channel)
         except ValueError:
             await message.answer(**await ghost_mode_menu(text="<b>Данный канал не найден</b>"))
         else:
@@ -162,17 +165,17 @@ async def _ghost_copy(message: Message, state: FSMContext):
                         path = f"posts/{account_id}.{channel_id}.{post.id}-{int(time.time())}.mp3"
                     else:
                         if not post.media:
-                            await message.answer(post.text, entities=entities)
+                            await message.answer(post.message, entities=entities)
                         continue
                     await telegram_client.download_media(post, file=www_path(path))
                     link_preview_options = LinkPreviewOptions(url=f"{WWW_SITE}/{path}", show_above_text=True, prefer_large_media=True)
-                    await message.answer(post.text or "media", entities=entities, link_preview_options=link_preview_options)
+                    await message.answer(post.message or "media", entities=entities, link_preview_options=link_preview_options)
                 await wait_message.delete()
             else:
                 await message.answer(**await ghost_mode_menu(text="<b>Пост на канале не найден!</b>"))
     else:
         await message.answer("<b>Ссылка на пост не распознана!</b>\nЗайдите на канал, в котором запрещены пересылка и копирование "
-                             "контента, и нажмите рядом с нужным постом, чтобы открылось меню. Нажмите на кнопку для копирования ссылки")
+                             "контента, и нажмите рядом с нужным постом, чтобы открылось меню. Нажмите на кнопку для копирования ссылки", parse_mode=html)
     await bot.delete_messages(chat_id=message.chat.id, message_ids=[message_id, message.message_id])
 
 
