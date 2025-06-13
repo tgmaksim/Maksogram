@@ -79,7 +79,7 @@ class UserState(StatesGroup):
     my_currencies = State('my_currencies')
 
 
-async def convert_ruble(amount_rub: int, currencies: dict[str, Union[str, int]]):
+async def convert_ruble(amount_rub: int, currencies: dict[str, Union[str, int]]) -> dict[str, Union[dict[str, int], int]]:
     url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
     headers = {"X-CMC_PRO_API_KEY": crypto_api_key}
     params = {"symbol": ",".join(map(lambda x: x['name'], currencies)), "convert": "RUB"}

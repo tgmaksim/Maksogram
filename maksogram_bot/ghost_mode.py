@@ -14,15 +14,15 @@ from core import (
 from aiogram import F
 from aiogram.fsm.context import FSMContext
 from telethon.tl.patched import Message as Post
-from telethon.tl.types.stories import PeerStories
 from aiogram.types import KeyboardButton as KButton
 from aiogram.types import KeyboardButtonRequestUsers
 from aiogram.types import ReplyKeyboardMarkup as KMarkup
 from aiogram.types import ReplyKeyboardRemove as KRemove
 from aiogram.types import InlineKeyboardMarkup as IMarkup
 from aiogram.types import InlineKeyboardButton as IButton
-from telethon.tl.functions.stories import GetPeerStoriesRequest
+from telethon.tl.types.stories import PeerStories, Stories
 from aiogram.types import Message, CallbackQuery, LinkPreviewOptions
+from telethon.tl.functions.stories import GetPeerStoriesRequest, GetPinnedStoriesRequest
 from telethon.tl.types import MessageMediaPhoto, MessageMediaDocument, Channel, PeerChannel
 from .core import (
     dp,
@@ -94,21 +94,34 @@ async def _ghost_stories_watch(message: Message, state: FSMContext):
             await message.answer(**await ghost_mode_menu())
         else:
             wait_message = await message.answer_sticker("CAACAgIAAxkBAAIyQWeUrH2jAUkcqHGYerWNT3ySuFwbAAJBAQACzRswCPHwYhjf9pZYNgQ", reply_markup=KRemove())
-            stories: PeerStories = await telegram_client(GetPeerStoriesRequest(user_id))
-            paths = []
-            for story in stories.stories.stories:
+            peer_stories: PeerStories = await telegram_client(GetPeerStoriesRequest(user_id))
+            all_stories: Stories = await telegram_client(GetPinnedStoriesRequest(peer=user_id, offset_id=0, limit=10))
+            links, all_links = "", ""
+            for story in peer_stories.stories.stories:
                 if isinstance(story.media, MessageMediaDocument) and story.media.video:
-                    paths.append(path := f"stories/{account_id}.{user_id}.{story.id}-{int(time.time())}.mp4")
+                    path = f"stories/{account_id}.{user_id}.{story.id}-{int(time.time())}.mp4"
+                    links += f"<a href='{WWW_SITE}/{path}'>Видео №{story.id} ({int(story.media.document.attributes[0].duration)} " \
+                             f"сек) от {story.media.document.date.strftime('%d-%m %H:%M')}</a>\n"
                 elif isinstance(story.media, MessageMediaPhoto):
-                    paths.append(path := f"stories/{account_id}.{user_id}.{story.id}-{int(time.time())}.png")
-                else:
-                    continue
+                    path = f"stories/{account_id}.{user_id}.{story.id}-{int(time.time())}.png"
+                    links += f"<a href='{WWW_SITE}/{path}'>Фото №{story.id} от {story.media.photo.date.strftime('%d-%m %H:%M')}</a>\n"
+                else: continue
                 await telegram_client.download_media(story.media, www_path(path))
-            links = '\n'.join([f"<a href='{WWW_SITE}/{path}'>История №{i+1}</a>" for i, path in enumerate(paths)]) if paths \
-                else "<b>Истории не найдены</b>"
+            for story in all_stories.stories:
+                if isinstance(story.media, MessageMediaDocument) and story.media.video:
+                    path = f"stories/{account_id}.{user_id}.{story.id}.profile-{int(time.time())}.mp4"
+                    all_links += f"<a href='{WWW_SITE}/{path}'>Видео №{story.id} ({int(story.media.document.attributes[0].duration)} " \
+                                 f"сек) от {story.media.document.date.strftime('%d-%m %H:%M')}</a>\n"
+                elif isinstance(story.media, MessageMediaPhoto):
+                    path = f"stories/{account_id}.{user_id}.{story.id}.profile-{int(time.time())}.png"
+                    all_links += f"<a href='{WWW_SITE}/{path}'>Фото №{story.id} от {story.media.photo.date.strftime('%d-%m %H:%M')}</a>\n"
+                else: continue
+                await telegram_client.download_media(story.media, www_path(path))
+            text = f"{links or '<b>Активные истории не найдены</b>'}\nПоследние 10 историй в профиле\n" \
+                   f"<blockquote expandable>{all_links or '<b>Истории не найдены</b>'}</blockquote>"
             markup = IMarkup(inline_keyboard=[[IButton(text="◀️  Назад", callback_data="ghost_mode")]])
-            await message.answer(f"👀 <b>Режим призрака</b>\nПосмотреть истории в «режиме призрака» можно по ссылкам ниже\n"
-                                 f"{links}", disable_web_page_preview=True, parse_mode=html, reply_markup=markup)
+            await message.answer(f"👀 <b>Режим призрака</b>\nПосмотреть истории в «режиме призрака» можно по ссылкам ниже\n\n{text}",
+                                 disable_web_page_preview=True, parse_mode=html, reply_markup=markup)
             await wait_message.delete()
 
     await bot.delete_messages(chat_id=message.chat.id, message_ids=[message.message_id, message_id])

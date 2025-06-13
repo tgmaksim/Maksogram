@@ -72,7 +72,9 @@ from telethon.tl.types import (
     MessageMediaDocument,
     MessageActionStarGift,
     UpdateNewAuthorization,
+    UpdateNewScheduledMessage,
     MessageActionStarGiftUnique,
+    UpdateDeleteScheduledMessages,
 
     MessageEntityUrl,
     MessageEntityBold,
@@ -202,6 +204,14 @@ class Program:
         @security()
         async def new_authorization(update: UpdateNewAuthorization):
             await self.new_authorization(update)
+
+        @client.on(events.Raw([UpdateNewScheduledMessage, UpdateDeleteScheduledMessages]))
+        @security()
+        async def new_scheduled_message(update: Union[UpdateNewScheduledMessage, UpdateDeleteScheduledMessages]):
+            if isinstance(update, UpdateNewScheduledMessage):
+                await self.new_scheduled_message(update)
+            else:
+                await self.delete_scheduled_messages(update)
 
     async def initial_checking_event(self, event: EventCommon) -> bool:
         return event.is_private and \
@@ -896,6 +906,12 @@ class Program:
                                                      "только приложениям из Google Play и официального сайта telegram.org. Остальное "
                                                      f"потенциально представляет угрозу\nДля консультации можно написать @{support}",
                                             parse_mode="html", reply_markup=markup)
+
+    async def new_scheduled_message(self, update: UpdateNewScheduledMessage):
+        print(self.id, update.stringify())
+
+    async def delete_scheduled_messages(self, update: UpdateDeleteScheduledMessages):
+        print(self.id, update.stringify())
 
     async def answering_machine(self, event: events.newmessage.NewMessage.Event):
         message: Message = event.message

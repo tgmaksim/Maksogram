@@ -369,8 +369,8 @@ async def profile_menu(account_id: int) -> dict[str, Any]:
         subscription['next_payment'] = "конца жизни 😎"
         subscription['fee'] = "бесплатно"
     count = await db.fetch_one(f"SELECT MAX(message_id) AS m, COUNT(*) AS sm FROM zz{account_id}")
-    return {"text": f"👁 <b>Профиль</b>\nID: {account_id} (аккаунт ≈{registration_date_by_id(account_id)} года)\n"
-                    f"Регистрация: {account['registration_date']}\nСообщений в личках: {count['m']}\nСохранено: {count['sm']}\n"
+    return {"text": f"👁 <b>Профиль пользователя</b>\nID: {account_id} (аккаунт ≈{registration_date_by_id(account_id)} года)\n\n"
+                    f"Регистрация: {account['registration_date']}\nСообщений в личках: {count['m']:,}\nСохранено: {count['sm']:,}\n\n"
                     f"Меня пригласил: {my_referal}\nПодписка до {subscription['next_payment']}\nСтоимость: {subscription['fee']}",
             "parse_mode": html, "reply_markup": reply_markup}
 
