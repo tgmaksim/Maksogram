@@ -8,7 +8,9 @@ from core import (
     html,
     OWNER,
     security,
+    time_now,
     Variables,
+    human_time,
     unzip_int_data,
 )
 
@@ -58,13 +60,30 @@ async def _sender(message: Message):
 @security()
 async def _admin(message: Message):
     if await developer_command(message): return
+    markup = IMarkup(inline_keyboard=[[IButton(text="📊 Статистика", callback_data="admin_statistics")]])
     await message.answer("Команды разработчика:\n"
                          "/reload - перезапустить программу\n"
                          "/stop - остановить программу\n"
                          "/critical_stop - экстренная остановка\n"
                          "/mailing - рассылка\n"
                          "/login - Web App ввода кода\n"
-                         "/payment - меню оплаты подписки")
+                         "/payment - меню оплаты подписки", reply_markup=markup)
+
+
+@dp.callback_query(F.data == "admin_statistics")
+@security()
+async def _admin_statistics(callback_query: CallbackQuery):
+    count_all = await db.fetch_one("SELECT COUNT(*) FROM users", one_data=True)
+    count_accounts = await db.fetch_one("SELECT COUNT(*) FROM accounts", one_data=True)
+    count_active = await db.fetch_one("SELECT COUNT(*) FROM settings WHERE is_started=true", one_data=True)
+    work_time = time_now() - await db.fetch_one(f"SELECT registration_date FROM accounts WHERE account_id={OWNER}", one_data=True)
+    info = f"📊 <b>Статистика Maksogram</b>\n" \
+           f"Запустили бота: {count_all}\n" \
+           f"Зарегистрировались: {count_accounts}\n" \
+           f"Пользуются: {count_active}\n" \
+           f"\n" \
+           f"В работе: {human_time(work_time.total_seconds())}\n"
+    await callback_query.message.edit_text(info, parse_mode=html)
 
 
 @dp.message(Command('reload'))

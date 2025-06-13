@@ -7,6 +7,7 @@ from core import (
     html,
     SITE,
     OWNER,
+    time_now,
     security,
     json_encode,
     unzip_int_data,
@@ -49,35 +50,42 @@ from aiogram.types import (
 @security('state')
 async def _start(message: Message, state: FSMContext):
     if await new_message(message): return
+    account_id = message.chat.id
     await state.clear()
     service_message = await message.answer("...", reply_markup=KRemove())
     if await db.fetch_one(f"SELECT true FROM accounts WHERE account_id={message.chat.id}", one_data=True):  # Зарегистрирован(а)
         markup = IMarkup(inline_keyboard=[[IButton(text="⚙️ Меню и настройки", callback_data="menu")]])
     else:
         markup = IMarkup(inline_keyboard=[[IButton(text="🚀 Запустить бота", callback_data="menu")]])
-    acquaintance = await username_acquaintance(message.chat.id, message.from_user.first_name, 'first_name')
+    try:
+        await db.execute(f"INSERT INTO users VALUES ({account_id}, '{time_now()}')")  # Новый пользователь
+    except UniqueViolationError:  # Пользователь уже ранее запускал бота
+        pass
+    else:
+        await message.forward(OWNER)
+    acquaintance = await username_acquaintance(account_id, message.from_user.first_name, 'first_name')
     start_message = await message.answer(f"Привет, {escape(acquaintance)} 👋\n"
                                          f"<a href='{SITE}'>Обзор всех функций</a> 👇",
                                          parse_mode=html, reply_markup=markup, link_preview_options=preview_options())
     params = message.text.replace("/start ", "").split()
     if message.text.startswith('/start r'):
         friend_id = unzip_int_data(message.text.replace('/start r', ''))
-        if message.chat.id == friend_id:
+        if account_id == friend_id:
             await message.answer("Вы не можете зарегистрироваться по своей реферальной ссылке!")
         elif not await db.fetch_one(f"SELECT true FROM accounts WHERE account_id={friend_id}", one_data=True):
             await message.answer("Реферальная ссылка не найдена!")
-        elif await db.fetch_one(f"SELECT true FROM accounts WHERE account_id={message.chat.id}", one_data=True):
+        elif await db.fetch_one(f"SELECT true FROM accounts WHERE account_id={account_id}", one_data=True):
             await message.answer("Вы уже зарегистрированы и не можете использовать чьи-то реферальные ссылки")
         else:
             try:
-                await db.execute(f"INSERT INTO referals VALUES ({friend_id}, {message.chat.id})")
+                await db.execute(f"INSERT INTO referals VALUES ({friend_id}, {account_id})")
             except UniqueViolationError:
-                await db.execute(f"UPDATE referals SET account_id={friend_id} WHERE referal_id={message.chat.id}")
+                await db.execute(f"UPDATE referals SET account_id={friend_id} WHERE referal_id={account_id}")
             await bot.send_message(friend_id, "По вашей реферальной ссылке зарегистрировался новый пользователь. Если он "
                                               "подключит бота, то вы получите месяц подписки в подарок")
             await bot.send_message(OWNER, f"Регистрация по реферальной ссылке #r{friend_id}")
     elif "menu" in params:
-        await start_message.edit_text(**await menu(message.chat.id))
+        await start_message.edit_text(**await menu(account_id))
     await service_message.delete()
 
 

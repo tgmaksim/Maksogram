@@ -295,12 +295,12 @@ def bot_entities_from_tl(entities: list[TypeMessageEntity]) -> list[MessageEntit
 
 
 def human_time(seconds: int) -> str:
-    days = f"{int(seconds / 86400)}д" if int(seconds / 86400) > 1 else None
-    hours = f"{int(seconds % 86400 / 3600)}ч"
+    years = f"{int(seconds / 31536000)}г " if int(seconds / 31536000) > 0 else ""
+    months = f"{int(seconds % 31536000 / 2592000)}м " if int(seconds / 2592000) > 0 else ""
+    days = f"{int(seconds % 2592000 / 86400)}д " if int(seconds / 86400) > 0 else ""
+    hours = f"{int(seconds % 86400 / 3600)}ч "
     minutes = f"{ceil(seconds % 3600 / 60)}мин"
-    if days:
-        return f"{days} {hours} {minutes}"
-    return f"{hours} {minutes}"
+    return f"{years}{months}{days}{hours}{minutes}"
 
 
 def time_now(time_zone: int = 0) -> datetime:
@@ -384,7 +384,7 @@ async def convert_currencies(value: float, currency0: str, currency1: str) -> fl
 
 class Variables:
     version = "2.8"
-    version_string = "2.8.3 (119)"
+    version_string = "2.8.3 (120)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])
