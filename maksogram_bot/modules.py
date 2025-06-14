@@ -427,8 +427,8 @@ async def _my_currencies_start(callback_query: CallbackQuery, state: FSMContext)
     await state.set_state(UserState.my_currencies)
     markup = RMarkup(keyboard=[[KButton(text="Отмена")]], resize_keyboard=True)
     message_id = (await callback_query.message.answer(
-        "Выберите валюты через запятую, курсы которых будут присылаться по утрам, например:\n"
-        "<blockquote>RUB, USD, BTC, ETH</blockquote>", parse_mode=html, reply_markup=markup)).message_id
+        "Выберите валюты, курсы которых будут присылаться по утрам\nСписок доступных:\n"
+        f"<blockquote>{', '.join(currencies)}</blockquote>", parse_mode=html, reply_markup=markup)).message_id
     await state.update_data(message_id=message_id)
     await callback_query.message.delete()
 

@@ -220,8 +220,8 @@ async def auto_answer_menu(account_id: int, answer_id: int, text: str = None):
                                   callback_data=f"answering_machine_triggers{answer_id}")
     if answer.type == 'timetable' or answer.triggers:
         type_buttons = ([time_button], [triggers_button])
-    status_button = IButton(text="🔴 Выкл", callback_data=f"answering_machine_off_{answer_id}") if answer.status \
-        else IButton(text="🟢 Вкл", callback_data=f"answering_machine_on_{answer_id}")
+    status_button = IButton(text="🟢", callback_data=f"answering_machine_off_{answer_id}") if answer.status \
+        else IButton(text="🔴", callback_data=f"answering_machine_on_{answer_id}")
     contacts = IButton(text="🤝 Только контактам", callback_data=f"answering_machine_contacts_off_{answer_id}") \
         if answer.contacts else IButton(text="🤝 Отвечаю всем", callback_data=f"answering_machine_contacts_on_{answer_id}")
     markup = IMarkup(inline_keyboard=[[IButton(text="🚫 Удал", callback_data=f"answering_machine_del_answer{answer_id}"),
@@ -285,6 +285,7 @@ async def _answering_machine_switch(callback_query: CallbackQuery):
                 pass  # Автоответы пересекаются по времени, но работают в разные дни
             else:
                 return await callback_query.answer("Расписание данного автоответа пересекается с расписанием уже включенного", True)
+    await callback_query.answer(f"Автоответ теперь {'включен' if command == 'on' else 'выключен'}!")
     await db.execute(f"UPDATE answering_machine SET status={status} WHERE account_id={account_id} AND answer_id={answer_id}")
     if await db.fetch_all(f"SELECT true FROM answering_machine WHERE status=true AND account_id={account_id}", one_data=True):
         await db.execute(f"UPDATE statistics SET answering_machine=NULL WHERE account_id={account_id}")

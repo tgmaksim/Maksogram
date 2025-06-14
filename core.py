@@ -127,14 +127,19 @@ class db:
             return await conn.fetch_one(sql, *params, one_data=one_data)
 
 
-async def get_avatars(account_id: int, user_id: int) -> Union[dict[str, Photo], None]:
+async def get_avatars(account_id: int, user_id: int, download: bool = False) -> Union[dict[str, Photo], None]:
     results = {}
     response = await telegram_clients[account_id](GetUserPhotosRequest(user_id, 0, 0, 64))
     if isinstance(response, PhotosSlice):  # Количество аватарок превышает 64
         return None
     avatars: list[Photo] = response.photos
     for avatar in avatars:
-        results[avatar.id] = avatar
+        results[str(avatar.id)] = avatar
+    if download:
+        for avatar in avatars:
+            ext = 'mp4' if avatar.video_sizes else 'png'
+            path = resources_path(f"avatars/{account_id}.{user_id}.{avatar.id}.{ext}")
+            await telegram_clients[account_id].download_media(avatar, path)
     return results
 
 
@@ -384,7 +389,7 @@ async def convert_currencies(value: float, currency0: str, currency1: str) -> fl
 
 class Variables:
     version = "2.8"
-    version_string = "2.8.3 (120)"
+    version_string = "2.8.3 (121)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])

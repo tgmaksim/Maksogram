@@ -1,3 +1,5 @@
+import os
+
 from typing import Any
 from asyncpg.exceptions import UniqueViolationError
 from core import (
@@ -9,6 +11,7 @@ from core import (
     get_gifts,
     get_avatars,
     json_encode,
+    resources_path,
 )
 
 from aiogram import F
@@ -144,15 +147,23 @@ async def _changed_profile_function_switch(callback_query: CallbackQuery):
     data, warning = None, "Произошла ошибка..."
     if command == "on":
         if function == "avatars":
-            data = json_encode(list(map(lambda x: x.id, (await get_avatars(account_id, user_id)).values())))
+            await callback_query.answer("Подождите зеленого сигнала, пока скачиваются все аватарки...", True)
+            data = json_encode({avatar[0]: 'mp4' if avatar[1].video_sizes else 'png' for avatar in
+                                (await get_avatars(account_id, user_id, download=True) or {}).items()})
             warning = f"У пользователя {user['name']} слишком много аватарок"
         elif function == "gifts":
-            data = json_encode({gift.id: gift.__dict__ for gift in (await get_gifts(account_id, user_id)).values()})
+            data = json_encode({gift.id: gift.__dict__ for gift in (await get_gifts(account_id, user_id) or {}).values()})
             warning = f"У пользователя {user['name']} слишком много подарков"
         elif function == "bio":
             data = await get_bio(account_id, user_id)
         if data is None:
             return await callback_query.answer(warning, True)
+    else:
+        if function == "avatars":  # Удаляем ранее сохраненные аватарки
+            path = resources_path("avatars")
+            for avatar in os.listdir(path):
+                if avatar.startswith(f"{account_id}.{user_id}"):
+                    os.remove(resources_path(f"avatars/{avatar}"))
     await db.execute(f"UPDATE changed_profiles SET {function}=$1 WHERE account_id={account_id} AND user_id={user_id}", data)
     await callback_query.message.edit_text(**await changed_profile_menu(account_id, int(user_id)))
 
@@ -171,6 +182,10 @@ async def _changed_profile_del(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     account_id = callback_query.from_user.id
     user_id = int(callback_query.data.replace("changed_profile_del", ""))
+    path = resources_path("avatars")
+    for avatar in os.listdir(path):
+        if avatar.startswith(f"{account_id}.{user_id}"):
+            os.remove(resources_path(f"avatars/{avatar}"))
     await db.execute(f"DELETE FROM changed_profiles WHERE account_id={account_id} AND user_id={user_id}")
     await callback_query.message.edit_text(**await changed_profiles_menu(account_id))
 

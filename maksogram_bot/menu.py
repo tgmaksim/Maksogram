@@ -184,13 +184,13 @@ async def saving_messages_menu(account_id: int) -> dict[str, Any]:
     account_settings = await db.fetch_one(f"SELECT added_chats, removed_chats, saving_messages, notify_changes "
                                           f"FROM settings WHERE account_id={account_id}")
     if account_settings['saving_messages']:  # Сохранение сообщений включено
-        indicator, command = ("🔴", "off") if account_settings['notify_changes'] else ("🟢", "on")
-        markup = IMarkup(inline_keyboard=[[IButton(text="🔴 Выкл", callback_data="saving_messages_off"),
+        indicator, command = ("🟢", "off") if account_settings['notify_changes'] else ("🔴", "on")
+        markup = IMarkup(inline_keyboard=[[IButton(text="🟢 Сохр сообщ", callback_data="saving_messages_off"),
                                            IButton(text="Чаты работы", callback_data="chats")],
                                           [IButton(text=f"{indicator} Увед об изменении сообщений", callback_data=f"notify_changes_{command}")],
                                           [IButton(text="◀️  Назад", callback_data="settings")]])
     else:
-        markup = IMarkup(inline_keyboard=[[IButton(text="🟢 Включить", callback_data="saving_messages_on")],
+        markup = IMarkup(inline_keyboard=[[IButton(text="🔴 Сохранение сообщений", callback_data="saving_messages_on")],
                                           [IButton(text="◀️  Назад", callback_data="settings")]])
     return {"text": "💬 Сохранение сообщений\n<blockquote expandable>⚠️ По умолчанию Maksogram работает только в личных чатах. "
                     "Можно добавить нужные группы и удалить ненужные лички\n\n• При выключении Сохранения сообщений остальные функции "
