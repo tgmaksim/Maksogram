@@ -35,13 +35,7 @@ from dataclasses import dataclass
 from telethon import TelegramClient
 from email.mime.text import MIMEText
 from datetime import datetime, timedelta
-from telethon.tl.types.users import UserFull
-from telethon.tl.types.photos import PhotosSlice
-from telethon.tl.types.payments import SavedStarGifts
-from telethon.tl.functions.users import GetFullUserRequest
-from telethon.tl.functions.photos import GetUserPhotosRequest
-from telethon.tl.functions.payments import GetSavedStarGiftsRequest
-from telethon.tl.types import StarGiftUnique, Photo, TypeMessageEntity
+from telethon.tl.types import TypeMessageEntity, User
 from sys_keys import sessions_path, TOKEN, BOT_ID, USERNAME_BOT, email, crypto_api_key
 from aiogram.types import LinkPreviewOptions, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 
@@ -125,46 +119,6 @@ class db:
     async def fetch_one(sql: str, *params, one_data: bool = False) -> Union[dict, Any]:
         async with Database() as conn:
             return await conn.fetch_one(sql, *params, one_data=one_data)
-
-
-async def get_avatars(account_id: int, user_id: int, download: bool = False) -> Union[dict[str, Photo], None]:
-    results = {}
-    response = await telegram_clients[account_id](GetUserPhotosRequest(user_id, 0, 0, 64))
-    if isinstance(response, PhotosSlice):  # Количество аватарок превышает 64
-        return None
-    avatars: list[Photo] = response.photos
-    for avatar in avatars:
-        results[str(avatar.id)] = avatar
-    if download:
-        for avatar in avatars:
-            ext = 'mp4' if avatar.video_sizes else 'png'
-            path = resources_path(f"avatars/{account_id}.{user_id}.{avatar.id}.{ext}")
-            await telegram_clients[account_id].download_media(avatar, path)
-    return results
-
-
-async def get_gifts(account_id: int, user_id: int) -> Union[dict[str, Gift], None]:
-    result = {}
-    saved_gifts: SavedStarGifts = (await telegram_clients[account_id](GetSavedStarGiftsRequest(peer=user_id, offset="", limit=64)))
-    if saved_gifts.count > 64:
-        return None
-    for saved_gift in saved_gifts.gifts:
-        gift = saved_gift.gift
-        giver = None
-        if saved_gift.from_id:
-            giver_user = [user for user in saved_gifts.users if user.id == saved_gift.from_id.user_id][0]
-            giver = {"user_id": giver_user.id, "name": f"{giver_user.first_name} {giver_user.last_name}".strip(),
-                     "username": giver_user.username}
-        if isinstance(gift, StarGiftUnique):
-            result[str(gift.id)] = Gift(str(gift.id), True, giver, None, None, gift.slug)
-        else:
-            result[str(gift.id)] = Gift(str(gift.id), False, giver, gift.limited, gift.stars, None)
-    return result
-
-
-async def get_bio(account_id: int, user_id: int) -> str:
-    full_user: UserFull = await telegram_clients[account_id](GetFullUserRequest(user_id))
-    return full_user.full_user.about
 
 
 async def check_connection(telegram_client: TelegramClient) -> bool:
@@ -357,6 +311,12 @@ def new_telegram_client(phone_number: str) -> TelegramClient:
     )
 
 
+def full_name(user: User):
+    if user.last_name:
+        return f"{user.first_name} {user.last_name}"
+    return user.first_name
+
+
 async def send_email_message(to: str, subject: str, text: str, *, subtype: str = 'plain'):
     msg = MIMEText(text, subtype, 'utf-8')
     msg['Subject'] = Header(subject, 'utf-8')
@@ -389,7 +349,7 @@ async def convert_currencies(value: float, currency0: str, currency1: str) -> fl
 
 class Variables:
     version = "2.8"
-    version_string = "2.8.3 (121)"
+    version_string = "3.0.0 (122)"
     fee = 150
 
     TelegramApplicationId = int(os.environ['TelegramApplicationId'])

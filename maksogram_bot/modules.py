@@ -351,15 +351,15 @@ async def currencies_menu(account_id: int, text: str = None) -> dict[str, Any]:
     function = await db.fetch_one(f"SELECT currencies, morning_currencies, main_currency FROM modules WHERE account_id={account_id}") or \
                {'currencies': None, 'morning_currencies': None, 'main_currency': None}  # Для незарегистрированных пользователей
     if function['currencies']:  # Вкл/выкл конвертера валют
-        buttons.append([IButton(text="🔴 Выключить", callback_data="currencies_off"),
+        buttons.append([IButton(text="🟢 Выключить", callback_data="currencies_off"),
                         IButton(text=function['main_currency'] or "Основная валюта", callback_data="main_currency")])
     else:
-        buttons.append([IButton(text="🟢 Включить Конвертер", callback_data="currencies_on")])
+        buttons.append([IButton(text="🔴 Включить Конвертер", callback_data="currencies_on")])
     if function['morning_currencies']:
-        buttons.append([IButton(text="🔴 Утром", callback_data="morning_currencies_off"),
+        buttons.append([IButton(text="🟢 Утром", callback_data="morning_currencies_off"),
                         IButton(text="Список валют", callback_data="my_currencies")])
     else:
-        buttons.append([IButton(text="🟢 Курсы валют утром", callback_data="morning_currencies_on")])
+        buttons.append([IButton(text="🔴 Курсы валют утром", callback_data="morning_currencies_on")])
     link = await generate_sensitive_link(account_id, "module-currencies", "курсы-валют")
     markup = IMarkup(inline_keyboard=[*buttons,
                                       [IButton(text="Как узнать курс?", url=link)],

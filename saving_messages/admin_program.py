@@ -29,17 +29,14 @@ from core import (
     db,
     support,
     morning,
-    get_bio,
     security,
     time_now,
     www_path,
     Variables,
-    get_gifts,
     channel_id,
     json_encode,
     account_off,
     human_bytes,
-    get_avatars,
     MaksogramBot,
     resources_path,
     async_processes,
@@ -85,6 +82,16 @@ from telethon.tl.types import (
     MessageEntityUnderline,
     MessageEntityBlockquote,
     MessageEntityCustomEmoji,
+)
+
+from changed_profile.types import FullUser
+from changed_profile.functions import (
+    get_bio,
+    get_gifts,
+    get_avatars,
+    delete_avatars,
+    download_avatars,
+    get_saved_full_users,
 )
 
 
@@ -983,27 +990,32 @@ class Program:
                                                caption=answer['text'], formatting_entities=entities)
         return await self.client.send_message(message.chat_id, answer['text'], formatting_entities=entities)
 
-    async def avatars_center(self, user: dict[str, Union[str, dict[str, str]]]):
-        avatars = await get_avatars(self.id, user['user_id'])
+    async def avatars_center(self, user: FullUser):
+        avatars = await get_avatars(self.id, user.user_id)
         if avatars is None:  # Количество аватарок превышает допустимое
-            return await db.execute(f"UPDATE changed_profiles SET avatars=NULL WHERE account_id={self.id} AND user_id={user['user_id']}")
+            delete_avatars(self.id, user.user_id)
+            await db.execute(f"UPDATE changed_profiles SET avatars=NULL WHERE account_id={self.id} AND user_id={user.user_id}")
+            return
+
         for avatar in avatars.values():
-            if str(avatar.id) not in user['avatars']:  # Новая аватарка
-                ext = 'mp4' if avatar.video_sizes else 'png'
-                path = resources_path(f"avatars/{self.id}.{user['user_id']}.{avatar.id}.{ext}")
-                await self.client.download_media(avatar, path)
+            if avatar.avatar_id not in user.avatars:  # Новая аватарка
+                path = (await download_avatars(self.id, user.user_id, avatars={avatar.avatar_id: avatar}))[0]
                 await MaksogramBot.send_message(
-                    self.id, f"📸 <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> добавил(а) аватарку",
-                    parse_mode="html", **{f"{'video' if avatar.video_sizes else 'photo'}": path})
-            else: del user['avatars'][str(avatar.id)]
-        for avatar_id, ext in user['avatars'].items():  # Удаленные аватарки
-            path = resources_path(f"avatars/{self.id}.{user['user_id']}.{avatar_id}.{ext}")
+                    self.id, f"📸 <b><a href='tg://user?id={user.user_id}'>{user.name}</a></b> добавил(а) аватарку",
+                    parse_mode="html", **{f"{'video' if avatar.video else 'photo'}": path})
+
+            else:
+                user.avatars.pop(avatar.avatar_id)
+
+        for avatar_id, saved_avatar in user.avatars.items():  # Удаленные аватарки
+            path = resources_path(f"avatars/{self.id}.{user.user_id}.{avatar_id}.{saved_avatar.ext}")
             await MaksogramBot.send_message(
-                self.id, f"📸 <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> удалил(а) аватарку",
-                parse_mode="html", **{'video' if ext == 'mp4' else 'photo': path})
+                self.id, f"📸 <b><a href='tg://user?id={user.user_id}'>{user.name}</a></b> удалил(а) аватарку",
+                parse_mode="html", **{'video' if saved_avatar.video else 'photo': path})
             os.remove(path)
-        new_avatars = json_encode({id: 'mp4' if avatars[id].video_sizes else 'png' for id in avatars})
-        await db.execute(f"UPDATE changed_profiles SET avatars=$1 WHERE account_id={self.id} AND user_id={user['user_id']}", new_avatars)
+
+        new_avatars = json_encode({str(id): avatar.to_dict() for id, avatar in avatars.items()})
+        await db.execute(f"UPDATE changed_profiles SET avatars=$1 WHERE account_id={self.id} AND user_id={user.user_id}", new_avatars)
 
     @security()
     async def answering_machine_center(self):
@@ -1029,58 +1041,71 @@ class Program:
                                  f"message_id={remind['message_id']} AND time='{remind['time']}'")
             await asyncio.sleep(((time_now() + timedelta(minutes=1, seconds=5)).replace(second=0, microsecond=0) - time_now()).seconds)
 
-    async def gifts_center(self, user: dict[str, Union[str, dict]]):
-        gifts = await get_gifts(self.id, user['user_id'])
+    async def gifts_center(self, user: FullUser):
+        gifts = await get_gifts(self.id, user.user_id)
         if gifts is None:  # Количество подарков превышает допустимое
-            return await db.execute(f"UPDATE changed_profiles SET gifts=NULL WHERE account_id={self.id} AND user_id={user['user_id']}")
+            await db.execute(f"UPDATE changed_profiles SET gifts=NULL WHERE account_id={self.id} AND user_id={user.user_id}")
+            return
+
+        user_link = f"<a href='tg://user?id={user.user_id}'>{user.name}</a>"
+
         for gift in gifts.values():
-            if user['gifts'].get(gift.id):  # Подарок присутствует
-                if gift.unique is True and user['gifts'][gift.id]['unique'] is False:  # Подарок стал уникальным
+            if gift.gift_id not in user.gifts:  # Новый подарок
+                giver = gift.giver.link if gift.giver else "неизвестного пользователя"
+
+                if gift.unique:  # Уникальный подарок
                     link = f"t.me/nft/{gift.slug}"
                     await MaksogramBot.send_message(
-                        self.id, f"🎁 <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> улучшил(а) "
-                                 f"<a href='{link}'>подарок</a>", parse_mode="html")
-                del user['gifts'][gift.id]
-            else:  # Подарок появился
-                giver = (f"@{gift.giver['username']}" if gift.giver['username'] else
-                         f"<a href='tg://user?id={gift.giver['user_id']}'>{gift.giver['name']}</a>") \
-                    if gift.giver else "не известно"
-                gift_str = "лимитированный подарок" if gift.limited else "подарок"
-                if gift.unique is False:  # Неуникальный подарок
+                        self.id, f"🎁 <b>{user_link}</b> получил(а) <a href='{link}'>{gift.type}</a> от {giver}", parse_mode="html")
+
+                else:  # Неуникальный подарок
                     await MaksogramBot.send_message(
-                        self.id, f"🎁 <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> получил(а) {gift_str}\n"
-                                 f"От кого: {giver}\nСтоимость: {gift.stars} 🌟", parse_mode="html")
-                else:  # Уникальный подарок
+                        self.id, f"🎁 <b>{user_link}</b> получил(а) {gift.type} от {giver}", parse_mode="html")
+
+            else:  # Подарок мог стать уникальным
+                if gift.unique and not user.gifts[gift.gift_id].unique:  # Подарок стал уникальным
                     link = f"t.me/nft/{gift.slug}"
                     await MaksogramBot.send_message(
-                        self.id, f"🎁 <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> получил(а) "
-                                 f"<a href='{link}'>подарок</a>\nОт кого: {giver}", parse_mode="html")
-        if count_hidden_gifts := len(user['gifts']):  # Исчезнувшие подарки (скрытые, переданные)
+                        self.id, f"🎁 <b>{user_link}</b> улучшил(а) <a href='{link}'>лимитированный подарок</a>", parse_mode="html")
+
+                user.gifts.pop(gift.gift_id)
+
+        if count_hidden_gifts := len(user.gifts):  # Исчезнувшие подарки (скрытые, проданные, переданные)
             gift_str = "подарок" if count_hidden_gifts == 1 else f"{count_hidden_gifts} подарков"
             await MaksogramBot.send_message(
-                self.id, f"🎁 <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> скрыл(а) {gift_str}",
-                parse_mode="html")
-        gifts_json = json_encode({gift.id: gift.__dict__ for gift in gifts.values()})
-        await db.execute(f"UPDATE changed_profiles SET gifts=$1 WHERE account_id={self.id} AND user_id={user['user_id']}", gifts_json)
+                self.id, f"🎁 <b>{user_link}</b> скрыл(а) (возможно, продал(а)) {gift_str}", parse_mode="html")
 
-    async def bio_center(self, user: dict[str, str]):
-        bio = await get_bio(self.id, user['user_id'])
-        if user['bio'] != bio:
-            await MaksogramBot.send_message(self.id, f"🖼️ <b><a href='tg://user?id={user['user_id']}'>{user['name']}</a></b> "
-                                                     f"«О себе»\n<blockquote>{user['bio']}</blockquote>\n👇👇👇👇👇👇👇\n"
-                                                     f"<blockquote>{bio}</blockquote>", parse_mode="html")
-            await db.execute(f"UPDATE changed_profiles SET bio=$1 WHERE account_id={self.id} AND user_id={user['user_id']}", bio)
+        new_gifts = json_encode({str(gift_id): gift.to_dict() for gift_id, gift in gifts.items()})
+        await db.execute(f"UPDATE changed_profiles SET gifts=$1 WHERE account_id={self.id} AND user_id={user.user_id}", new_gifts)
+
+    async def bio_center(self, user: FullUser):
+        bio = await get_bio(self.id, user.user_id)
+
+        if user.bio != bio:
+            user_link = f"<a href='tg://user?id={user.user_id}'>{user.name}</a>"
+
+            await MaksogramBot.send_message(
+                self.id, f"🖼️ <b>{user_link}</b> изменил(а) «О себе»\n"
+                         f"<blockquote>{user.bio}</blockquote>\n"
+                         "👇👇👇👇👇👇👇\n"
+                         f"<blockquote>{bio}</blockquote>",
+                parse_mode="html")
+
+            await db.execute(f"UPDATE changed_profiles SET bio=$1 WHERE account_id={self.id} AND user_id={user.user_id}", bio)
 
     @security()
     async def changed_profile_center(self):
         while True:  # Остановка через account_off (async_processes)
-            for user in await db.fetch_all(f"SELECT user_id, name, avatars, gifts, bio FROM changed_profiles WHERE account_id={self.id}"):
-                if user['avatars'] is not None:
+            for user in await get_saved_full_users(self.id):
+                if user.avatars is not None:
                     await self.avatars_center(user)
-                if user['gifts'] is not None:
+
+                if user.gifts is not None:
                     await self.gifts_center(user)
-                if user['bio'] is not None:
+
+                if user.bio is not None:
                     await self.bio_center(user)
+
             await asyncio.sleep(5*60)
 
     @security()
