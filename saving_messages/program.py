@@ -68,6 +68,7 @@ from telethon.tl.types import (
     UserStatusOffline,
     MessageMediaPhoto,
     MessageReplyHeader,
+    MessageMediaGeoLive,
     ReactionCustomEmoji,
     MessageMediaWebPage,
     MessageMediaDocument,
@@ -655,7 +656,8 @@ class Program:
                     self.id, f"В чате с {name} изменено <a href='{link_to_message}'>сообщение</a>", parse_mode="HTML",
                     reply_markup=MaksogramBot.IMarkup(inline_keyboard=[[
                         MaksogramBot.IButton(text="Не уведомлять об изменении", callback_data="notify_changes|new")]]))
-            await self.client.send_message(self.my_messages, message, comment_to=saved_message_id)
+            if not (message.media and isinstance(message.media, MessageMediaGeoLive)):
+                await self.client.send_message(self.my_messages, message, comment_to=saved_message_id)
         else:  # Изменение реакций
             is_premium = await self.is_premium()
             reactions, entities = await self.get_reactions(event, is_premium=is_premium)
