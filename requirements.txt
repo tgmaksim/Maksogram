@@ -1,0 +1,15 @@
+aiogram
+orjson
+asyncpg
+telethon
+cryptg
+pillow
+aiohttp
+aiosmtplib
+matplotlib
+numpy
+sympy
+qrcode
+httpx
+deepgram-sdk
+moviepy

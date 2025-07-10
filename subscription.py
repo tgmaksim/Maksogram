@@ -1,52 +1,50 @@
 import asyncio
 
+from mg.config import OWNER
+
 from datetime import timedelta
-from core import (
-    db,
-    time_now,
-    account_off,
-    MaksogramBot,
-)
+from mg.client import MaksogramClient
+from mg.client.functions import get_accounts
+from mg.core.functions import time_now, set_is_paid
 
-from aiogram.exceptions import TelegramForbiddenError
-from maksogram_bot.core import (
-    payment_menu,
-)
+from mg.bot.maksogram_bot import bot
+from mg.bot.functions import get_payment_data, payment_menu, set_time_subscription_notification
 
 
-async def main():
+async def subscriptions():
+    await asyncio.sleep(60)  # Ожидание полного запуска клиентов
+
     while True:
-        for account in await db.fetch_all("SELECT accounts.account_id, accounts.name, settings.is_started FROM accounts LEFT "
-                                          "JOIN settings ON accounts.account_id = settings.account_id"):
-            account_id = account['account_id']
-            payment = await db.fetch_one(f"SELECT \"user\", is_paid, next_payment FROM payment WHERE account_id={account_id}")
-            if not (payment['user'] == 'user' and payment['is_paid']): continue
-            if time_now() <= payment['next_payment'] <= (time_now() + timedelta(days=1)):  # За день до конца
-                first_notification = await db.fetch_one(f"SELECT first_notification FROM payment WHERE account_id={account_id}", one_data=True)
-                if (time_now() - first_notification).total_seconds() >= 23*60*60 + 50*60:  # Прошлое уведомление было не менее 23 часов 50 минут назад
-                    await db.execute(f"UPDATE payment SET first_notification=now() WHERE account_id={account_id}")
-                    await MaksogramBot.send_system_message(f"Подписка заканчивается ({account['name']})")
-                    await MaksogramBot.send_message(account_id, "Текущая подписка заканчивается! Произведите следующий "
-                                                                "платеж до конца завтрашнего дня")
-                    message = await payment_menu()
-                    await MaksogramBot.bot.send_photo(account_id, **message)
-            elif payment['next_payment'] <= (time_now() - timedelta(days=1)):  # После дня окончания
-                await db.execute(f"UPDATE payment SET is_paid=false WHERE account_id={account_id}")
-                await account_off(account_id)
-                if account['is_started']:
-                    try:
-                        await MaksogramBot.send_message(account_id, "Ваша подписка истекла. Продлите ее, чтобы пользоваться Maksogram")
-                    except TelegramForbiddenError:
-                        pass
-                await MaksogramBot.send_system_message(f"Платеж просрочен. Maksogram остановлен ({account['name']})")
-            elif (time_now() - timedelta(days=1)) <= payment['next_payment'] <= time_now():  # В день окончания
-                second_notification = await db.fetch_one(f"SELECT second_notification FROM payment WHERE account_id={account_id}", one_data=True)
-                if (time_now() - second_notification).total_seconds() >= 23*60*60 + 50*60:  # Прошлое уведомление было не менее 23 часов 50 минут назад
-                    await db.execute(f"UPDATE payment SET second_notification=now() WHERE account_id={account_id}")
-                    if account['is_started']:
-                        try:
-                            await MaksogramBot.send_message(account_id, "Ваша подписка истечет завтра. Продлите ее, чтобы пользоваться Maksogram")
-                        except TelegramForbiddenError:
-                            pass
-                    await MaksogramBot.send_system_message(f"Платеж просрочен ({account['name']})")
-        await asyncio.sleep(60*60)
+        for account_id, is_started in await get_accounts():
+            payment_info = await get_payment_data(account_id)
+            if payment_info.user == 'admin' or not payment_info.is_paid:
+                continue
+
+            if time_now() <= payment_info.next_payment <= (time_now() + timedelta(days=1)):  # За день до конца
+                if time_now() - payment_info.first_notification >= timedelta(days=1):  # Уведомление об окончании подписки еще не пришло
+
+                    await set_time_subscription_notification(account_id, "first")
+
+                    if is_started:
+                        await bot.send_message(account_id, "Подписка Maksogram заканчивается, чтобы продолжить пользоваться, выберите и оплатите подписку")
+                        await bot.send_photo(account_id, **await payment_menu())
+                    await bot.send_message(OWNER, f"Подписка заканчивается ({account_id})")
+
+            elif payment_info.next_payment <= (time_now() - timedelta(days=1)):  # После дня окончания
+                await set_is_paid(account_id, False)
+
+                if is_started:
+                    await MaksogramClient.off_account(account_id)
+                    await bot.send_message(account_id, "Подписка истекла, Maksogram остановлен!")
+                await bot.send_message(OWNER, f"Подписка истекла, Maksogram остановлен ({account_id})")
+
+            elif (time_now() - timedelta(days=1)) <= payment_info.next_payment <= time_now():  # В день окончания
+                if time_now() - payment_info.second_notification >= timedelta(days=1):  # Уведомление об окончании подписки еще не пришло
+
+                    await set_time_subscription_notification(account_id, "second")
+
+                    if is_started:
+                        await bot.send_message(account_id, "Подписка Maksogram истекает завтра, выберите и оплатите, чтобы продолжить пользоваться")
+                    await bot.send_message(OWNER, f"Платеж просрочен ({account_id})")
+
+        await asyncio.sleep(1*60)  # Проверка каждый час
