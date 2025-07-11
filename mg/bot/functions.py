@@ -216,7 +216,7 @@ async def generate_sensitive_link(account_id: int, event: str = "menu_link", pre
     sql = f"INSERT INTO sensitive_links (account_id, token, text) VALUES ($1, $2, $3)"
     await Database.execute(sql, account_id, token, text)
 
-    return f"{SITE}?обзор={preview}?t={token}"
+    return f"{SITE}?обзор={preview}&t={token}"
 
 
 def referral_link(account_id: int) -> str:
