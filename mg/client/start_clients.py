@@ -23,7 +23,7 @@ async def start_clients():
             try:
                 await MaksogramBot.send_message(
                     account_id, "Чтобы Maksogram уведомлял об удалении и изменении сообщений, нужно войти в аккаунт. Понимаем ваши опасения "
-                                f"по поводу безопасности: вы можете почитать {feedback_link} или написать {support_link}")
+                                f"по поводу безопасности: вы можете почитать {feedback_link} или написать {support_link}", link_preview=False)
             except UserIsBlockedError:
                 pass
 

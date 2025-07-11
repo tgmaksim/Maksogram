@@ -4,9 +4,10 @@ import sys
 
 VERSION_GROUP = "3"
 VERSION_ID = "3.0"
-VERSION = "3.0.0 (124)"
+VERSION = "3.0.0 (125)"
 
 release = sys.argv[1] == "release"
+testing = len(sys.argv) > 2 and sys.argv[2] == "testing"
 
 OWNER = int(os.environ['OWNER'])
 FEE = int(os.environ['FEE'])

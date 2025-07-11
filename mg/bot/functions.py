@@ -1,6 +1,6 @@
 import aiohttp
 
-from mg.config import OWNER, SITE, CRYPTO_API_KEY, WEB_APP
+from mg.config import testing, OWNER, SITE, CRYPTO_API_KEY, WEB_APP
 
 from html import escape
 from decimal import Decimal
@@ -71,6 +71,11 @@ async def new_message(message: Message, *, params: Optional[dict[str, str]] = No
     if message.entities and not message.entities[0].type == "bot_command":
         await message.forward(OWNER)  # В тексте есть форматирование (кроме команды)
 
+    if testing:
+        await message.answer("Ведутся технические работы...")
+        await bot.send_message(OWNER, "Ведется тестирование...")
+        return True
+
     if message.chat.id in Blocked.users:
         await bot.send_message(OWNER, "Пользователь заблокирован")
 
@@ -91,7 +96,7 @@ async def check_new_user(user_id: int) -> bool:
         sql = "INSERT INTO users (user_id, launch_time) VALUES ($1, now())"
         await Database.execute(sql, user_id)
 
-    return data
+    return not data
 
 
 async def new_callback_query(callback_query: CallbackQuery, *, params: Optional[dict[str, str]] = None) -> bool:
@@ -114,6 +119,11 @@ async def new_callback_query(callback_query: CallbackQuery, *, params: Optional[
             callback_query.data,
             *(f"{key}: {value}" for key, value in (params or {}).items()))
     await bot.send_message(OWNER, '\n'.join(filter(None, text)))
+
+    if testing:
+        await callback_query.answer("Ведутся технические работы...", True)
+        await bot.send_message(OWNER, "Ведется тестирование...")
+        return True
 
     if callback_query.from_user.id in Blocked.users:
         await bot.send_message(OWNER, "Пользователь заблокирован")
@@ -157,6 +167,10 @@ async def new_inline_query(inline_query: InlineQuery, *, params: Optional[dict[s
             inline_query.query,
             *(f"{key}: {value}" for key, value in (params or {}).items()))
     await bot.send_message(OWNER, '\n'.join(filter(None, text)))
+
+    if testing:
+        await bot.send_message(OWNER, "Ведется тестирование...")
+        return True
 
     if inline_query.from_user.id in Blocked.users:
         await bot.send_message(OWNER, "Пользователь заблокирован")

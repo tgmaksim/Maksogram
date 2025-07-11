@@ -176,9 +176,9 @@ class ChangedProfileSettings:
         return cls(
             user_id=json_data['user_id'],
             name=str(json_data['name']),
-            avatars=SavedAvatar.list_from_json(json_data['avatars']) if json_data['avatars'] else None,
-            gifts=Gift.list_from_json(json_data['gifts']) if json_data['gifts'] else None,
-            bio=str(json_data['bio']) if json_data['bio'] else None
+            avatars=SavedAvatar.list_from_json(json_data['avatars']) if json_data['avatars'] is not None else None,
+            gifts=Gift.list_from_json(json_data['gifts']) if json_data['gifts'] is not None else None,
+            bio=str(json_data['bio']) if json_data['bio'] is not None else None
         )
 
     @classmethod

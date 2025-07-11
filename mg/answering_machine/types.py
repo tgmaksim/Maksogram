@@ -58,19 +58,21 @@ class AutoAnswer:
 
     @property
     def chats_about(self) -> str:
+        text = []
         if self.blacklist_chats:
-            text = "Отвечаю всем кроме "
+            text.append("Отвечаю всем" + (' кроме ' if self.contacts is not None or self.chats else ''))
         else:
-            text = "Отвечаю только "
+            text.append("Отвечаю только " if self.contacts is not None or self.chats else "Никому не отвечаю")
 
         if self.contacts is True:
-            text += "контактов и " if self.blacklist_chats else "контактам и "
+            text.append("контактов" if self.blacklist_chats else "контактам")
         elif self.contacts is False:
-            text += "не контактов и " if self.blacklist_chats else "не контактам и "
+            text.append("не контактов" if self.blacklist_chats else "не контактам")
 
-        text += ("выбранных чатов" if self.blacklist_chats else "выбранным чатам") + (': ' if self.chats else '') + self.human_chats
+        if self.chats:
+            text.append(("выбранных чатов: " if self.blacklist_chats else "выбранным чатам: ") + self.human_chats)
 
-        return text
+        return text[0] + ' и '.join(text[1:])
 
     def _format_human_weekdays(self) -> str:
         if self.weekdays == [0, 1, 2, 3, 4, 5, 6]:

@@ -588,8 +588,10 @@ async def auto_answer_settings(account_id: int, answer_id: int) -> dict[str, Any
         contacts_buttons = [IButton(text=f"🟢 {'Не контактов' if answer.blacklist_chats else 'Не контактам'}",
                                     callback_data=cb('auto_answer_settings_switch', answer_id, 'contacts', None))]
     else:
-        contacts_buttons = [IButton(text="🔴 Контактам", callback_data=cb('auto_answer_settings_switch', answer_id, 'contacts', True)),
-                            IButton(text="🔴 Не контактам", callback_data=cb('auto_answer_settings_switch', answer_id, 'contacts', False))]
+        contacts_buttons = [IButton(text=f"🔴 {'Контактов' if answer.blacklist_chats else 'Контактам'}",
+                                    callback_data=cb('auto_answer_settings_switch', answer_id, 'contacts', True)),
+                            IButton(text=f"🔴 {'Не контактов' if answer.blacklist_chats else 'Не контактам'}",
+                                    callback_data=cb('auto_answer_settings_switch', answer_id, 'contacts', False))]
 
     chats_button = IButton(text=f"💬 {answer.short_human_chats}", callback_data=cb('auto_answer_chats', answer_id)) if answer.chats \
         else IButton(text="💬 Выбрать доп чаты", callback_data=cb('auto_answer_chats', answer_id))

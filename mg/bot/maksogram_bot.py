@@ -1,4 +1,4 @@
-from mg.config import OWNER, SITE, VERSION, VERSION_ID
+from mg.config import testing, OWNER, SITE, VERSION, VERSION_ID
 
 from typing import Any
 
@@ -241,5 +241,8 @@ async def start_bot():
 
     await bot.send_message(OWNER, f"<b>Бот запущен!🚀</b>")
     print("Бот запущен")
+
+    if testing:
+        await bot.send_message(OWNER, "Режим тестирования")
 
     await dp.start_polling(bot)

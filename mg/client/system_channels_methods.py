@@ -16,7 +16,7 @@ from . create_chats import (
     link_my_messages_to_message_changes,
 )
 
-from telethon.tl.types import ChannelFull, ChannelParticipantLeft
+from telethon.tl.types import ChannelFull, ChannelParticipantLeft, PeerChannel
 from telethon.errors.rpcerrorlist import ChannelPrivateError, UserNotParticipantError
 from telethon.tl.functions.channels import GetFullChannelRequest, GetParticipantRequest
 
@@ -57,7 +57,7 @@ class SystemChannelsMethods:
         """
 
         try:
-            participant = (await self.client(GetParticipantRequest(CHANNEL_ID, self.id))).participant
+            participant = (await self.client(GetParticipantRequest(int(f"-100{CHANNEL_ID}"), self.id))).participant
         except UserNotParticipantError:
             participant = ChannelParticipantLeft(self.id)
 
