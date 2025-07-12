@@ -22,6 +22,7 @@ from . functions import (
     edit_speed_answer,
     delete_speed_answer,
     check_unique_trigger,
+    set_speed_answer_settings,
     check_count_speed_answers,
     get_link_speed_answer_media,
 )
@@ -195,6 +196,7 @@ async def speed_answer_menu(account_id: int, answer_id: int) -> dict[str, Any]:
 
     markup = IMarkup(inline_keyboard=[[IButton(text="🚫 Удалить", callback_data=cb('del_speed_answer', answer_id)),
                                        IButton(text="✏️ Изменить", callback_data=cb('edit_speed_answer', answer_id))],
+                                      [IButton(text="⚙️ Настройки ответа", callback_data=cb('speed_answer_settings', answer_id))],
                                       [IButton(text="◀️  Назад", callback_data=cb('speed_answers'))]])
 
     if not answer.media:
@@ -218,6 +220,40 @@ async def _edit_speed_answer(callback_query: CallbackQuery, state: FSMContext):
     await state.set_state(UserState.speed_answer_text)
     await state.update_data(answer_id=answer_id, trigger=None, message_id=message_id)
     await callback_query.message.delete()
+
+
+@dp.callback_query(F.data.startswith(cb.command('speed_answer_settings')))
+@error_notify()
+async def _speed_answer_settings(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    answer_id = cb.deserialize(callback_query.data)[0]
+    await callback_query.message.edit_text(**await speed_answer_settings(callback_query.from_user.id, answer_id))
+
+
+async def speed_answer_settings(account_id: int, answer_id: int) -> dict[str, Any]:
+    answer = await get_speed_answer(account_id, answer_id)
+    if answer is None:
+        return await speed_answers_menu(account_id)
+
+    send_button = IButton(text="🔺 Отправлять новое" if answer.send else "✏️ Изменять триггер",
+                          callback_data=cb('speed_answer_settings_switch', answer_id, 'send', not answer.send))
+    markup = IMarkup(inline_keyboard=[[send_button],
+                                      [IButton(text="◀️  Назад", callback_data=cb('speed_answer_menu', answer_id))]])
+
+    return dict(
+        text="⚙️ <b>Настройки быстрого ответа</b>\n<i>Изменять триггер</i> - сообщение будет со статусом изменено, но будет отправлено быстро без лишних "
+             "новых сообщений\n<i>Отправлять новое</i> - сообщение будет отправляться отдельно, что будет дольше и не эстетично", reply_markup=markup)
+
+
+@dp.callback_query(F.data.startswith(cb.command('speed_answer_settings_switch')))
+@error_notify()
+async def _speed_answer_settings_switch(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    account_id = callback_query.from_user.id
+    answer_id, function, command = cb.deserialize(callback_query.data)
+
+    await set_speed_answer_settings(account_id,  answer_id, function, command)
+    await callback_query.message.edit_text(**await speed_answer_settings(account_id, answer_id))
 
 
 @dp.callback_query(F.data.startswith(cb.command('del_speed_answer')))

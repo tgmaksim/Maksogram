@@ -26,6 +26,7 @@ from telethon.tl.types import (
 
     MessageService,
     StarGiftUnique,
+    MessageReplyHeader,
     MessageActionStarGift,
     MessageActionStarGiftUnique,
 
@@ -81,7 +82,10 @@ class MessageMethods:
 
         await self.answering_machine(event)
 
-        if await self.modules(message):
+        if module := await self.modules(message):
+            if not self.is_owner:
+                await MaksogramBot.send_system_message(
+                    f"💬 <b>Maksogram в чате</b>\n<b>{self.name}</b> воспользовал(а)ся Maksogram в чате ({module})")
             return  # При срабатывании Maksogram в чате сохранение сообщения не происходит
 
         if message.out and event.is_private:  # Сообщение отправлено клиентом в личном чате
@@ -161,8 +165,15 @@ class MessageMethods:
         entities = deserialize_tl_entities(answer.entities)
         file = get_path_speed_answer_media(self.id, answer.id, answer.media.access_hash, answer.media.ext) if answer.media else None
 
-        await message.respond(answer.text, formatting_entities=entities, file=file)
-        await message.delete()
+        if answer.send:
+            if isinstance(message.reply_to, MessageReplyHeader) and (reply := await self.get_message_by_id(message.chat_id, message.reply_to_msg_id)):
+                await reply.reply(answer.text, formatting_entities=entities, file=file)
+            else:
+                await message.respond(answer.text, formatting_entities=entities, file=file)
+            await message.delete()
+        else:
+            await message.edit(answer.text, formatting_entities=entities, file=file)
+
         return True
 
     async def answering_machine(self: 'MaksogramClient', event: NewMessage.Event) -> bool:

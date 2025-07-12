@@ -15,12 +15,13 @@ class SpeedAnswerMedia:
 
 
 class SpeedAnswer:
-    def __init__(self, answer_id: int, trigger: str, text: str, entities: list[dict], media: Optional[SpeedAnswerMedia]):
+    def __init__(self, answer_id: int, trigger: str, text: str, entities: list[dict], media: Optional[SpeedAnswerMedia], send: bool):
         self.id = answer_id
         self.trigger = trigger
         self.text = text
         self.entities = entities
         self.media = media
+        self.send = send
 
     @classmethod
     def list_from_json(cls, json_data: list[dict]) -> list['SpeedAnswer']:
@@ -33,5 +34,6 @@ class SpeedAnswer:
             trigger=str(json_data['trigger']),
             text=str(json_data['text']),
             entities=json_data['entities'],
-            media=SpeedAnswerMedia.from_json(json_data['media']) if json_data['media'] else None
+            media=SpeedAnswerMedia.from_json(json_data['media']) if json_data['media'] else None,
+            send=json_data['send']
         )

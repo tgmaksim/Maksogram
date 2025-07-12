@@ -18,7 +18,7 @@ BASE_DIR_SPEED_ANSWERS = "speed_answers"  # www_path
 async def get_speed_answers(account_id: int) -> list[SpeedAnswer]:
     """Возвращает быстрые ответы клиента, отсортированные по неубыванию длины триггера"""
 
-    sql = f"SELECT answer_id, trigger, text, entities, media FROM speed_answers WHERE account_id={account_id}"
+    sql = f"SELECT answer_id, trigger, text, entities, media, send FROM speed_answers WHERE account_id={account_id}"
     data: list[dict] = await Database.fetch_all(sql)
 
     answers = SpeedAnswer.list_from_json(data)
@@ -104,7 +104,7 @@ async def get_speed_answer(account_id: int, answer_id: int) -> Optional[SpeedAns
     :return: None, если быстрый ответ не найден, иначе SpeedAnswer
     """
 
-    sql = f"SELECT answer_id, trigger, text, entities, media FROM speed_answers WHERE account_id={account_id} AND answer_id={answer_id}"
+    sql = f"SELECT answer_id, trigger, text, entities, media, send FROM speed_answers WHERE account_id={account_id} AND answer_id={answer_id}"
     data: Optional[dict] = await Database.fetch_row(sql)
 
     if data is None:
@@ -164,9 +164,16 @@ async def delete_speed_answer(account_id: int, answer_id: int):
 async def get_speed_answer_by_text(account_id: int, text: str) -> Optional[SpeedAnswer]:
     """Ищет быстрый ответ, триггер которого входит в текст (без учета регистра)"""
 
-    sql = f"SELECT answer_id, trigger, text, entities, media FROM speed_answers WHERE account_id={account_id} AND trigger=$1"
+    sql = f"SELECT answer_id, trigger, text, entities, media, send FROM speed_answers WHERE account_id={account_id} AND trigger=$1"
     data: Optional[dict] = await Database.fetch_row(sql, text)
     if not data:
         return None
 
     return SpeedAnswer.from_json(data)
+
+
+async def set_speed_answer_settings(account_id: int, answer_id: int, function: str, command: bool):
+    """Изменяет настройку быстрого ответа"""
+
+    sql = f"UPDATE speed_answers SET {function}=$1 WHERE account_id={account_id} AND answer_id={answer_id}"
+    await Database.execute(sql, command)
