@@ -6,22 +6,26 @@ if TYPE_CHECKING:
 import os
 import random
 
-from mg.config import OWNER
-
 from typing import Optional
 from . types import AutoAnswer
 from mg.core.types import morning
 from datetime import time, timedelta
 from mg.core.database import Database
 from asyncpg.exceptions import UniqueViolationError
-from mg.core.functions import get_time_zone, time_now, www_path
+from mg.core.functions import get_time_zone, time_now, www_path, get_subscription
 
 from mg.bot.types import bot
 
 
-MAX_COUNT_AUTO_ANSWERS = 10
-MAX_COUNT_AUTO_ANSWER_TRIGGERS = 5
-MAX_COUNT_AUTO_ANSWER_CHATS = 5
+MAX_COUNT_AUTO_ANSWERS = 1
+MAX_COUNT_AUTO_ANSWERS_FOR_PREMIUM = 10
+
+MAX_COUNT_AUTO_ANSWER_TRIGGERS = 1
+MAX_COUNT_AUTO_ANSWER_TRIGGERS_FOR_PREMIUM = 5
+
+MAX_COUNT_AUTO_ANSWER_CHATS = 1
+MAX_COUNT_AUTO_ANSWER_CHATS_FOR_PREMIUM = 5
+
 BASE_DIR_AUTO_ANSWERS = "auto_answers"
 end_morning = time(morning[1], 0)
 
@@ -49,12 +53,16 @@ async def get_auto_answers(account_id: int) -> list[AutoAnswer]:
 async def check_count_auto_answers(account_id: int) -> bool:
     """Считает количество автоответов у клиента и возвращает возможность добавить еще один"""
 
-    if account_id == OWNER:
+    subscription = await get_subscription(account_id)
+
+    if subscription == 'admin':
         return True
 
     sql = f"SELECT COUNT(*) FROM answering_machine WHERE account_id={account_id}"
     data: int = await Database.fetch_row_for_one(sql)
 
+    if subscription == 'premium':
+        return data < MAX_COUNT_AUTO_ANSWERS_FOR_PREMIUM
     return data < MAX_COUNT_AUTO_ANSWERS
 
 
@@ -295,12 +303,16 @@ async def delete_auto_answer_timetable(account_id: int, answer_id: int):
 async def check_count_auto_answer_triggers(account_id: int, answer_id: int) -> bool:
     """Считает количество триггеров в автоответе и возвращает возможность добавить еще один"""
 
-    if account_id == OWNER:
+    subscription = await get_subscription(account_id)
+
+    if subscription == 'admin':
         return True
 
     sql = f"SELECT COUNT(*) FROM jsonb_object_keys((SELECT triggers FROM answering_machine WHERE account_id={account_id} AND answer_id={answer_id}))"
     data: int = await Database.fetch_row_for_one(sql)
 
+    if subscription == 'premium':
+        return data < MAX_COUNT_AUTO_ANSWER_TRIGGERS_FOR_PREMIUM
     return data < MAX_COUNT_AUTO_ANSWER_TRIGGERS
 
 
@@ -341,9 +353,16 @@ async def set_auto_answer_settings(account_id: int, answer_id: int, function: st
 async def check_count_auto_answer_chats(account_id: int, answer_id: int) -> bool:
     """Считает количество чатов в исключениях автоответа и возвращает возможность добавить еще один"""
 
+    subscription = await get_subscription(account_id)
+
+    if subscription == 'admin':
+        return True
+
     sql = f"SELECT COUNT(*) FROM jsonb_object_keys((SELECT chats FROM answering_machine WHERE account_id={account_id} AND answer_id={answer_id}))"
     data: int = await Database.fetch_row_for_one(sql)
 
+    if subscription == 'premium':
+        return data < MAX_COUNT_AUTO_ANSWER_CHATS_FOR_PREMIUM
     return data < MAX_COUNT_AUTO_ANSWER_CHATS
 
 

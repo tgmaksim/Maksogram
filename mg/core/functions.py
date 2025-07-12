@@ -181,8 +181,8 @@ async def renew_subscription(account_id: int, days: int):
     """Продлевает подписку клиенту на заданный период"""
 
     # Если подписка истекла, то прибавляем к текущему времени, иначе к окончанию подписки
-    sql = "UPDATE payment SET next_payment=((CASE WHEN next_payment > CURRENT_TIMESTAMP THEN next_payment ELSE CURRENT_TIMESTAMP END) + "\
-          f"INTERVAL '{days} days'), is_paid=true WHERE account_id={account_id}"
+    sql = "UPDATE payment SET ending=((CASE WHEN ending IS NOT NULL AND ending > CURRENT_TIMESTAMP THEN ending ELSE CURRENT_TIMESTAMP END) + "\
+          f"INTERVAL '{days} days'), subscription='premium' WHERE account_id={account_id}"
     await Database.execute(sql)
 
 
@@ -195,20 +195,29 @@ async def get_settings(account_id: int) -> AccountSettings:
     return AccountSettings.from_json(data)
 
 
+async def get_subscription(account_id: int) -> Optional[str]:
+    """Возвращает вариант подключенной подписки"""
+
+    sql = f"SELECT subscription FROM payment WHERE account_id={account_id}"
+    data: Optional[str] = await Database.fetch_row_for_one(sql)
+
+    return data
+
+
 async def get_payment_data(account_id: int) -> PaymentData:
     """Возвращает данные подписки клиента из базы данных"""
 
-    sql = f"SELECT \"user\", fee, next_payment, is_paid, first_notification, second_notification FROM payment WHERE account_id={account_id}"
+    sql = f"SELECT subscription, fee, ending, first_notification, second_notification FROM payment WHERE account_id={account_id}"
     data: dict = await Database.fetch_row(sql)
 
     return PaymentData.from_json(data)
 
 
-async def set_is_paid(account_id: int, is_paid: bool):
-    """Меняет статус оплаты у клиента"""
+async def reset_subscription(account_id: int):
+    """Удаляет подписку у клиента"""
 
-    sql = f"UPDATE payment SET is_paid=$1 WHERE account_id={account_id}"
-    await Database.execute(sql, is_paid)
+    sql = f"UPDATE payment SET subscription=NULL, ending=NULL WHERE account_id={account_id}"
+    await Database.execute(sql)
 
 
 def serialize_aiogram_entities(entities: list[MessageEntity]) -> list[dict]:

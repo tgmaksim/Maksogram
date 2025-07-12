@@ -20,7 +20,7 @@ from aiogram.types import InlineKeyboardMarkup as IMarkup
 from aiogram.types import InlineKeyboardButton as IButton
 
 from typing import Any
-from mg.core.functions import error_notify, send_email_message, format_error, full_name
+from mg.core.functions import error_notify, send_email_message, format_error, full_name, get_subscription
 
 from . functions import (
     get_security_settings,
@@ -197,7 +197,10 @@ async def _new_security_agent_start(callback_query: CallbackQuery, state: FSMCon
     account_id = callback_query.from_user.id
 
     if not await check_count_agents(account_id):
-        await callback_query.answer("Количество доверенных лиц достигло максимума", True)
+        if await get_subscription(account_id) is None:
+            await callback_query.answer("Достигнут лимит доверенных лиц, подключите Maksogram Premium", True)
+        else:
+            await callback_query.answer("Достигнут лимит количества доверенных лиц", True)
         return
 
     await state.set_state(UserState.new_security_agent)
@@ -328,7 +331,7 @@ async def _security_switch(callback_query: CallbackQuery):
     account_id = callback_query.from_user.id
     function, command, prev = cb.deserialize(callback_query.data)
     if prev:
-        await callback_query.answer("Чтобы пользоваться Защитой аккаунта, необходимо включить Maksogram", True)
+        await callback_query.answer("Запустите Maksogram кнопкой в меню", True)
         return
 
     if function == "no_access" and command:

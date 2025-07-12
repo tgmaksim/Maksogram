@@ -1,14 +1,14 @@
-from mg.config import OWNER
-
 from datetime import datetime
 from typing import Optional, Union
 from mg.core.database import Database
+from mg.core.functions import get_subscription
 from asyncpg.exceptions import UniqueViolationError
 
 from . types import StatusUserSettings
 
 
-MAX_COUNT_STATUS_USERS = 3
+MAX_COUNT_STATUS_USERS = 1
+MAX_COUNT_STATUS_USERS_FOR_PREMIUM = 3
 
 
 async def get_users_settings(account_id: int) -> list[StatusUserSettings]:
@@ -25,12 +25,16 @@ async def get_users_settings(account_id: int) -> list[StatusUserSettings]:
 async def check_count_status_users(account_id: int) -> bool:
     """Считает количество добавленных пользователей в "Друг в сети" клиента и проверяет возможность добавить еще одного"""
 
-    if account_id == OWNER:
+    subscription = await get_subscription(account_id)
+
+    if subscription == 'admin':
         return True
 
     sql = f"SELECT COUNT(*) FROM status_users WHERE account_id={account_id}"
     data: int = await Database.fetch_row_for_one(sql)
 
+    if subscription == 'premium':
+        return data < MAX_COUNT_STATUS_USERS_FOR_PREMIUM
     return data < MAX_COUNT_STATUS_USERS
 
 
@@ -78,7 +82,7 @@ async def update_statistics(account_id: int, user_id: int, status: bool):
         sql = (f"DELETE FROM statistics_status_users WHERE account_id={account_id} AND user_id={user_id} AND offline_time IS NULL",
                f"INSERT INTO statistics_status_users (account_id, user_id, online_time, offline_time) VALUES ({account_id}, {user_id}, now(), NULL)")
     else:  # Завершаем пару данных
-        sql = (f"UPDATE statistics_status_users SET offline_time=now() WHERE account_id={account_id} AND user_id={user_id}",)
+        sql = (f"UPDATE statistics_status_users SET offline_time=now() WHERE account_id={account_id} AND user_id={user_id} AND offline_time IS NULL",)
 
     for s in sql:
         await Database.execute(s)

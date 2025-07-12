@@ -1,12 +1,10 @@
 import os
 
-from mg.config import OWNER
-
 from typing import Union, Optional
 from mg.core.database import Database
 from mg.client.types import maksogram_clients
 from asyncpg.exceptions import UniqueViolationError
-from mg.core.functions import resources_path, full_name
+from mg.core.functions import resources_path, full_name, get_subscription
 
 from telethon.tl.types.users import UserFull
 from telethon.tl.types.payments import SavedStarGifts
@@ -24,7 +22,8 @@ from . types import (
 )
 
 
-MAX_COUNT_USERS = 4
+MAX_COUNT_USERS = 1
+MAX_COUNT_USERS_FOR_PREMIUM = 4
 MAX_COUNT_AVATARS = 64
 MAX_COUNT_GIFTS = 64
 
@@ -51,12 +50,16 @@ async def check_count_changed_profiles(account_id: int) -> bool:
     :return: `True`, если количество пользователей позволяет добавить еще одного, иначе `False`
     """
 
-    if account_id == OWNER:
+    subscription = await get_subscription(account_id)
+
+    if subscription == 'admin':
         return True
 
     sql = f"SELECT COUNT(*) FROM changed_profiles WHERE account_id={account_id}"
     count: int = await Database.fetch_row_for_one(sql)
 
+    if subscription == 'premium':
+        return count < MAX_COUNT_USERS_FOR_PREMIUM
     return count < MAX_COUNT_USERS
 
 

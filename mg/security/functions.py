@@ -1,15 +1,15 @@
-from mg.config import OWNER
-
 from typing import Optional, Literal
 from mg.core.database import Database
 from asyncpg import UniqueViolationError
+from mg.core.functions import get_subscription
 
 from aiogram.types import MessageEntity
 
 from . types import SecuritySettings, SecurityAgent
 
 
-MAX_COUNT_AGENTS = 3
+MAX_COUNT_AGENTS = 1
+MAX_COUNT_AGENTS_FOR_PREMIUM = 3
 
 
 async def is_security_agent(agent_id: int) -> bool:
@@ -74,12 +74,16 @@ async def get_security_agents(account_id: int) -> list[SecurityAgent]:
 async def check_count_agents(account_id: int) -> bool:
     """Считает количество доверенных у клиента и возвращает возможность добавить еще одного"""
 
-    if account_id == OWNER:
+    subscription = await get_subscription(account_id)
+
+    if subscription == 'admin':
         return True
 
     sql = f"SELECT COUNT(*) FROM security_agents WHERE account_id={account_id}"
     data: int = await Database.fetch_row_for_one(sql)
 
+    if subscription == 'premium':
+        return data < MAX_COUNT_AGENTS_FOR_PREMIUM
     return data < MAX_COUNT_AGENTS
 
 

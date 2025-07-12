@@ -4,7 +4,7 @@ import sys
 
 VERSION_GROUP = "3"
 VERSION_ID = "3.0"
-VERSION = "3.0.0 (126)"
+VERSION = "3.0.1 (127)"
 
 release = sys.argv[1] == "release"
 testing = len(sys.argv) > 2 and sys.argv[2] == "testing"
@@ -23,8 +23,11 @@ TELEGRAM_DC_ID = int(os.environ['TELEGRAM_DC_ID'])
 TELEGRAM_DC_IP = os.environ['TELEGRAM_DC_IP']
 TELEGRAM_DC_PORT = int(os.environ['TELEGRAM_DC_PORT'])
 
+YOOMONEY_API_ID = int(os.environ['YOOMONEY_API_ID'])
+YOOMONEY_API_KEY = os.environ['YOOMONEY_API_KEY']
 CRYPTO_API_KEY = os.environ['CRYPTO_API_KEY']
 OPENWEATHERMAP_API_KEY = os.environ['OPENWEATHERMAP_API_KEY']
+
 NETANGELS_API_KEY = os.environ['NETANGELS_API_KEY']
 MAKSOGRAM_PROCESS_ID = int(os.environ['MAKSOGRAM_PROCESS_ID'])
 VIRTUALHOST_ID = int(os.environ['VIRTUALHOST_ID'])

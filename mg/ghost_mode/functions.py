@@ -1,7 +1,5 @@
 import re
 
-from pyexpat.errors import messages
-
 from mg.config import WWW_SITE
 
 from telethon.tl.patched import Message

@@ -13,7 +13,7 @@ from aiogram.types import ReplyKeyboardMarkup as KMarkup
 from aiogram.types import InlineKeyboardMarkup as IMarkup
 from aiogram.types import InlineKeyboardButton as IButton
 
-from mg.core.functions import error_notify, serialize_aiogram_entities, deserialize_aiogram_entities
+from mg.core.functions import error_notify, serialize_aiogram_entities, deserialize_aiogram_entities, get_subscription
 
 from . functions import (
     add_speed_answer,
@@ -68,13 +68,17 @@ async def speed_answers_menu(account_id: int, prev: bool = False) -> dict[str, A
 @error_notify('state')
 async def _new_speed_answer_start(callback_query: CallbackQuery, state: FSMContext):
     if await new_callback_query(callback_query): return
+    account_id = callback_query.from_user.id
     prev = cb.deserialize(callback_query.data).get(0) is True
     if prev:
-        await callback_query.answer("Быстрые ответы можно создавать только с включенным Maksogram", True)
+        await callback_query.answer("Запустите Maksogram кнопкой в меню", True)
         return
 
-    if not await check_count_speed_answers(callback_query.from_user.id):
-        await callback_query.answer("Достигнут лимит количества быстрых ответов!", True)
+    if not await check_count_speed_answers(account_id):
+        if await get_subscription(account_id) is None:
+            await callback_query.answer("Достигнут лимит быстрых ответов, подключите Maksogram Premium", True)
+        else:
+            await callback_query.answer("Достигнут лимит количества быстрых ответов!", True)
         return
 
     markup = KMarkup(keyboard=[[KButton(text="Отмена")]], resize_keyboard=True)

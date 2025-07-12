@@ -7,8 +7,8 @@ from aiogram import F
 from mg.menu.bot import menu
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, WebAppInfo
+from mg.bot.functions import new_callback_query, new_message, get_referral, generate_sensitive_link
 from mg.bot.types import dp, bot, CallbackData, UserState, feedback_link, support_link, sticker_loading
-from mg.bot.functions import new_callback_query, new_message, get_referral, generate_sensitive_link, payment_menu
 
 from aiogram.types import KeyboardButton as KButton
 from aiogram.types import ReplyKeyboardRemove as KRemove
@@ -33,7 +33,7 @@ from mg.client.types import maksogram_clients
 from mg.client.create_chats import create_chats
 from mg.client.types import CreateChatsError, UserIsNotAuthorized
 from mg.core.functions import time_now, error_notify, unzip_int_data, format_error, renew_subscription
-from mg.client.functions import new_telegram_client, client_connect, get_is_started, get_is_paid, get_phone_number
+from mg.client.functions import new_telegram_client, client_connect, get_is_started, get_phone_number
 
 
 cb = CallbackData()
@@ -47,13 +47,6 @@ async def _on(callback_query: CallbackQuery, state: FSMContext):
     is_started = await get_is_started(account_id)
 
     if is_started is False:
-        is_paid = await get_is_paid(account_id)
-        if not is_paid:
-            await callback_query.message.answer_photo(**await payment_menu())
-            await callback_query.message.edit_text("Ваша подписка истекла, продлите ее, чтобы пользоваться Maksogram")
-            await bot.send_message(OWNER, "Подписка истекла, Maksogram не запущен")
-            return
-
         try:
             await MaksogramClient.on_account(account_id)
         except UserIsNotAuthorized:
@@ -62,7 +55,7 @@ async def _on(callback_query: CallbackQuery, state: FSMContext):
                                        [KButton(text="Отмена")]], resize_keyboard=True)
             await callback_query.message.answer(
                 "Чтобы Maksogram уведомлял об удалении и изменении сообщений, нужно войти в аккаунт. Понимаем ваши опасения по поводу безопасности: "
-                f"вы можете почитать {feedback_link} или написать {support_link}", reply_markup=markup)
+                f"вы можете почитать {feedback_link} или написать {support_link}", reply_markup=markup, disable_web_page_preview=True)
             await callback_query.message.delete()
 
             phone_number = await get_phone_number(account_id)
@@ -248,7 +241,7 @@ async def account_initial(account_id: int, telegram_client: TelegramClient, user
         link = await generate_sensitive_link(account_id, "run_link")
         await bot.send_message(
             account_id, "Maksogram запущен 🚀\nВ канале <b>Мои сообщения</b> будут храниться все ваши сообщения, в комментариях будет информация об "
-                        f"изменении и удалении\n<b><a href='{link}'>Полный обзор функций</a></b>\nПробная подписка заканчивается через неделю",
+                        f"изменении и удалении\n<b><a href='{link}'>Полный обзор функций</a></b>\nMaksogram Premium на неделю",
             reply_markup=KRemove(), disable_web_page_preview=True)
         await bot.send_message(account_id, "<b>Меню функций и настройки</b>",
                                reply_markup=IMarkup(inline_keyboard=[[IButton(text="⚙️ Меню и настройки", callback_data=cb('menu'))]]))
@@ -359,7 +352,7 @@ async def start_maksogram_client(account_id: int, username: str, phone_number: i
         raise CreateChatsError(response.error_message, response.error)
 
     name = f"@{username}" if username else str(account_id)
-    next_payment = time_now() + timedelta(days=7)
+    end = time_now() + timedelta(days=7)  # неделя premium подписки
 
     await Database.execute(
         "INSERT INTO accounts (account_id, name, phone_number, my_messages, message_changes, registration_date, awake_time) "
@@ -368,8 +361,8 @@ async def start_maksogram_client(account_id: int, username: str, phone_number: i
         "INSERT INTO settings (account_id, is_started, added_chats, removed_chats, time_zone, city, gender, saving_messages, notify_changes) "
         "VALUES($1, true, '{}', '{}', 6, 'Омск', NULL, true, false)", account_id)
     await Database.execute(
-        "INSERT INTO payment (account_id, \"user\", fee, next_payment, is_paid, first_notification, second_notification) "
-        "VALUES($1, 'user', $2, $3, true, now(), now())", account_id, FEE, next_payment)
+        "INSERT INTO payment (account_id, subscription, fee, ending, first_notification, second_notification) "
+        "VALUES($1, 'premium', $2, $3, now(), now())", account_id, FEE, end)
     await Database.execute(
         "INSERT INTO modules (account_id) VALUES($1)", account_id)
     await Database.execute("INSERT INTO statistics (account_id, answering_machine, audio_transcription, weather) VALUES ($1, now(), now(), now())", account_id)

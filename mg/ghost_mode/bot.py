@@ -4,8 +4,8 @@ from aiogram import F
 
 from aiogram.fsm.context import FSMContext
 from mg.bot.types import dp, bot, CallbackData, UserState, sticker_loading
-from mg.bot.functions import new_callback_query, new_message, request_user
 from aiogram.types import CallbackQuery, Message, KeyboardButtonRequestUsers
+from mg.bot.functions import new_callback_query, new_message, request_user
 
 from aiogram.types import KeyboardButton as KButton
 from aiogram.types import ReplyKeyboardRemove as KRemove
@@ -15,7 +15,7 @@ from aiogram.types import InlineKeyboardButton as IButton
 
 from typing import Any
 from mg.core.types import MaksogramBot
-from mg.core.functions import error_notify
+from mg.core.functions import error_notify, get_subscription
 
 from . functions import COUNT_PINNED_STORIES, download_peer_stories, download_pinned_stories, parse_post_link, download_post
 
@@ -47,7 +47,11 @@ async def _ghost_stories_start(callback_query: CallbackQuery, state: FSMContext)
     if await new_callback_query(callback_query): return
     prev = cb.deserialize(callback_query.data).get(0) is True
     if prev:
-        await callback_query.answer("Посмотреть историю в режиме призрака можно только для пользователей Maksogram!", True)
+        await callback_query.answer("Запустите Maksogram кнопкой в меню", True)
+        return
+
+    if await get_subscription(callback_query.from_user.id) is None:
+        await callback_query.answer("Смотреть историю в режиме призрака можно только с подпиской Maksogram Premium", True)
         return
 
     await state.set_state(UserState.ghost_stories)
@@ -111,7 +115,7 @@ async def _ghost_copy_start(callback_query: CallbackQuery, state: FSMContext):
     if await new_callback_query(callback_query): return
     prev = cb.deserialize(callback_query.data).get(0) is True
     if prev:
-        await callback_query.answer("Посмотреть историю в режиме призрака можно только для пользователей Maksogram!", True)
+        await callback_query.answer("Запустите Maksogram кнопкой в меню", True)
         return
 
     await state.set_state(UserState.ghost_copy)

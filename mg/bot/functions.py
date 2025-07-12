@@ -1,22 +1,19 @@
 import aiohttp
 
-from mg.config import testing, OWNER, SITE, CRYPTO_API_KEY, WEB_APP
+from mg.config import testing, OWNER, SITE, CRYPTO_API_KEY
 
 from html import escape
 from decimal import Decimal
 from mg.core.database import Database
-from typing import Optional, Any, Union, Literal
-from mg.core.functions import admin_time, time_now, zip_int_data, resources_path, get_payment_data
+from typing import Optional, Union, Literal
+from mg.core.functions import admin_time, time_now, zip_int_data
 
 from mg.client.types import maksogram_clients
 from mg.client.functions import get_is_started
 from telethon.tl.types import User, Chat, Channel
 from telethon.utils import parse_username, parse_phone
-from aiogram.types import Message, CallbackQuery, LinkPreviewOptions, FSInputFile, WebAppInfo, InlineQuery
+from aiogram.types import Message, CallbackQuery, LinkPreviewOptions, InlineQuery
 from  .types import bot, Blocked, Subscription, CallbackData, PaymentCurrency, AmountPaymentCurrency, RequestUserResult, RequestChatResult
-
-from aiogram.types import InlineKeyboardMarkup as IMarkup
-from aiogram.types import InlineKeyboardButton as IButton
 
 
 cb = CallbackData()
@@ -410,50 +407,6 @@ async def convert_ruble(amount_rub: float, currencies: list[PaymentCurrency]) ->
                 result[currency.name] = AmountPaymentCurrency(round(amount * price), str(Decimal(str(amount))))  # Вычисляем цену в рублях и валюте
 
             return result
-
-
-async def payment_menu() -> dict[str, Any]:
-    """Меню оплаты подписки для клиента с расширенным логотипом Maksogram и несколькими подписками (на разные сроки)"""
-
-    subscriptions = await get_subscriptions()
-
-    i, buttons = 0, []
-    while i < len(subscriptions):
-        if i + 1 < len(subscriptions):
-            buttons.append([IButton(text=subscriptions[i].about, callback_data=cb('subscription', subscriptions[i].id)),
-                            IButton(text=subscriptions[i+1].about, callback_data=cb('subscription', subscriptions[i+1].id))])
-            i += 1
-        else:
-            buttons.append([IButton(text=subscriptions[i].about, callback_data=cb('subscription', subscriptions[i].id))])
-        i += 1
-
-    return dict(caption="Подписка Maksogram с полным набором всех доступных функций", reply_markup=IMarkup(inline_keyboard=buttons),
-                photo=FSInputFile(resources_path("logo.jpg")))
-
-
-async def subscription_menu(account_id: int, subscription_id: int) -> dict[str, Any]:
-    """Меню варианта подписки с ценами и ссылками на оплату"""
-
-    subscription = await get_subscription(subscription_id)
-    amount_rub = (await get_payment_data(account_id)).fee  # Цена базовой подписки в месяц в рублях для клиента
-    currencies = await get_currencies()
-
-    without_discount = amount_rub * (subscription.duration / 30)  # Цена без скидки для выбранной подписки за месяц
-    fee = await convert_ruble(without_discount * (1 - subscription.discount / 100), currencies)  # Цена выбранной подписки в рублях и криптовалютах
-    discount = f"-{subscription.discount}%" if subscription.discount else "без скидки"
-    discount_about = f" (вместо {int(without_discount)} руб)" if subscription.discount else ""  # Информация о цене без скидки
-
-    # Текст с ценами подписки в криптовалютах и их эквивалентами в рублях
-    text = (f"{currency.name}: {fee[currency.name].crypto} {currency.name.lower()} (≈ {fee[currency.name].rub} руб)" for currency in currencies)
-
-    buttons = [IButton(text=currency.name, web_app=WebAppInfo(url=f"{WEB_APP}/payment/{currency.name.lower()}")) for currency in currencies]
-    markup = IMarkup(inline_keyboard=[buttons,
-                                      [IButton(text="Перевод на карту", web_app=WebAppInfo(url=f"{WEB_APP}/payment/rub"))],
-                                      [IButton(text="Я отправил(а)  ✅", callback_data=cb('send_payment', subscription_id))],
-                                      [IButton(text="◀️  Назад", callback_data=cb('payment'))]])
-
-    return dict(
-        caption=f"Maksogram на {subscription.about.lower()} {discount}\nСбер: {fee['RUB']} руб{discount_about}\n{'\n'.join(text)}", reply_markup=markup)
 
 
 async def set_time_subscription_notification(account_id: int, type_notification: Literal["first", "second"]):

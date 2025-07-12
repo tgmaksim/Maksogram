@@ -163,7 +163,7 @@ async def _module_switch(callback_query: CallbackQuery):
     module, command, prev = cb.deserialize(callback_query.data)
 
     if prev:
-        await callback_query.answer("Maksogram в чате работает только для зарегистрированных пользователей", True)
+        await callback_query.answer("Запустите Maksogram кнопкой в меню", True)
         return
 
     await set_status_module(account_id, module, command)

@@ -246,15 +246,6 @@ async def get_is_started(account_id: int) -> Optional[bool]:
     return data
 
 
-async def get_is_paid(account_id: int) -> bool:
-    """Возвращает статус оплаты подписки у клиента"""
-
-    sql = f"SELECT is_paid FROM payment WHERE account_id={account_id}"
-    data: bool = await Database.fetch_row_for_one(sql)
-
-    return data
-
-
 async def get_accounts() -> list[tuple[int, bool]]:
     """
     Возвращает список клиентов с их идентификатором и статусом (выключен, включен)

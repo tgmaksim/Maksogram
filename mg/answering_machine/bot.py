@@ -17,10 +17,10 @@ from aiogram.types import InlineKeyboardButton as IButton
 from typing import Any
 from datetime import time
 from mg.core.types import morning
-from mg.core.functions import error_notify, serialize_aiogram_entities, get_time_zone, full_name
+from mg.core.functions import error_notify, serialize_aiogram_entities, get_time_zone, full_name, get_subscription
 
 from . types import AutoAnswer, week
-from .functions import (
+from . functions import (
     add_auto_answer,
     get_auto_answer,
     get_auto_answers,
@@ -80,13 +80,17 @@ async def answering_machine_menu(account_id: int, prev: bool = False) -> dict[st
 @error_notify('state')
 async def _new_auto_answer_start(callback_query: CallbackQuery, state: FSMContext):
     if await new_callback_query(callback_query): return
+    account_id = callback_query.from_user.id
     prev = cb.deserialize(callback_query.data).get(0) is True
     if prev:
-        await callback_query.answer("Автоответчик работает только с включенным Maksogram", True)
+        await callback_query.answer("Запустите Maksogram кнопкой в меню", True)
         return
 
-    if not await check_count_auto_answers(callback_query.from_user.id):
-        await callback_query.answer("Достигнут лимит количество автоответов!", True)
+    if not await check_count_auto_answers(account_id):
+        if await get_subscription(account_id) is None:
+            await callback_query.answer("Достигнут лимит автоответов, подключите Maksogram Premium!", True)
+        else:
+            await callback_query.answer("Достигнут лимит количество автоответов!", True)
         return
 
     markup = KMarkup(keyboard=[[KButton(text="Отмена")]], resize_keyboard=True)
@@ -485,10 +489,14 @@ async def auto_answer_triggers(account_id: int, answer_id: int) -> dict[str, Any
 @error_notify('state')
 async def _new_auto_answer_trigger_start(callback_query: CallbackQuery, state: FSMContext):
     if await new_callback_query(callback_query): return
+    account_id = callback_query.from_user.id
     answer_id = cb.deserialize(callback_query.data)[0]
 
-    if not await check_count_auto_answer_triggers(callback_query.from_user.id, answer_id):
-        await callback_query.answer("Достигнут лимит количества триггеров", True)
+    if not await check_count_auto_answer_triggers(account_id, answer_id):
+        if await get_subscription(account_id) is None:
+            await callback_query.answer("Достигнут лимит триггеров, подключите Maksogram Premium!", True)
+        else:
+            await callback_query.answer("Достигнут лимит количества триггеров!", True)
         return
 
     markup = KMarkup(keyboard=[[KButton(text="Отмена")]], resize_keyboard=True)
@@ -663,10 +671,14 @@ async def auto_answer_chats(account_id: int, answer_id: int) -> dict[str, Any]:
 @error_notify('state')
 async def _new_auto_answer_chat_start(callback_query: CallbackQuery, state: FSMContext):
     if await new_callback_query(callback_query): return
+    account_id = callback_query.from_user.id
     answer_id = cb.deserialize(callback_query.data)[0]
 
-    if not await check_count_auto_answer_chats(callback_query.from_user.id, answer_id):
-        await callback_query.answer("Достигнут лимит количества доп чатов", True)
+    if not await check_count_auto_answer_chats(account_id, answer_id):
+        if await get_subscription(account_id) is None:
+            await callback_query.answer("Достигнут лимит доп чатов, подключите Maksogram Premium!", True)
+        else:
+            await callback_query.answer("Достигнут лимит количества доп чатов!", True)
         return
 
     request = KeyboardButtonRequestUsers(request_id=1, user_is_bot=False, max_quantity=1)

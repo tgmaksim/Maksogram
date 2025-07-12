@@ -70,28 +70,28 @@ class AccountSettings:
 
 
 class PaymentData:
-    def __init__(self, user: str, fee: int, next_payment: datetime, is_paid: bool, first_notification: datetime, second_notification: datetime):
-        self.user = user
+    def __init__(self, subscription: Optional[str], fee: int, ending: Optional[datetime], first_notification: datetime, second_notification: datetime):
+        self.subscription = subscription
         self.fee = fee
-        self.next_payment = next_payment
-        self.is_paid = is_paid
+        self.ending = ending
         self.first_notification = first_notification
         self.second_notification = second_notification
 
     @classmethod
     def from_json(cls, json_data: dict) -> 'PaymentData':
         return cls(
-            user=json_data['user'],
+            subscription=json_data['subscription'],
             fee=json_data['fee'],
-            next_payment=json_data['next_payment'],
-            is_paid=json_data['is_paid'],
+            ending=json_data['ending'],
             first_notification=json_data['first_notification'],
             second_notification=json_data['second_notification']
         )
 
     @property
-    def str_next_payment(self) -> str:
-        return self.next_payment.strftime('%Y-%m-%d %H:%M')
+    def str_ending(self) -> Optional[str]:
+        if not self.ending:
+            return
+        return self.ending.strftime('%Y-%m-%d')
 
 
 class MaksogramBot:

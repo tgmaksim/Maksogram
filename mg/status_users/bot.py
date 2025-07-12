@@ -14,7 +14,7 @@ from aiogram.types import InlineKeyboardMarkup as IMarkup
 from aiogram.types import InlineKeyboardButton as IButton
 
 from typing import Any
-from mg.core.functions import error_notify, full_name, time_now
+from mg.core.functions import error_notify, full_name, time_now, get_subscription
 
 from . statistics import online_statistics
 from . functions import (
@@ -63,13 +63,17 @@ async def status_users_menu(account_id: int, prev: bool = False) -> dict[str, An
 @error_notify('state')
 async def _new_status_user_start(callback_query: CallbackQuery, state: FSMContext):
     if await new_callback_query(callback_query): return
+    account_id = callback_query.from_user.id
     prev = cb.deserialize(callback_query.data).get(0) is True
     if prev:
-        await callback_query.answer("Следить за статусом друга можно только с включенным Maksogram!", True)
+        await callback_query.answer("Запустите Maksogram кнопкой в меню", True)
         return
 
     if not await check_count_status_users(callback_query.from_user.id):
-        await callback_query.answer("Количество отслеживаемых пользователей достигло максимума!", True)
+        if await get_subscription(account_id) is None:
+            await callback_query.answer("Достигнут лимит пользователей, подключите Maksogram Premium", True)
+        else:
+            await callback_query.answer("Достигнут лимит количества пользователей", True)
         return
 
     await state.set_state(UserState.new_status_user)

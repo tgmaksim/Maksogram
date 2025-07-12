@@ -1,28 +1,30 @@
-from mg.config import testing, OWNER, SITE, VERSION, VERSION_ID
+from mg.config import testing, OWNER, SITE, VERSION, VERSION_ID, WEB_APP
 
 from typing import Any
 
 from aiogram import F
 from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery, FSInputFile
+from aiogram.types import Message, CallbackQuery, FSInputFile, WebAppInfo
 from . types import dp, bot, Blocked, CallbackData, support_link, feedback
 from . functions import (
     new_message,
-    payment_menu,
     referral_link,
+    convert_ruble,
+    get_currencies,
     preview_options,
     get_subscription,
     get_blocked_users,
-    subscription_menu,
+    get_subscriptions,
     new_callback_query,
 )
 
-from aiogram.types import ReplyKeyboardRemove as KRemove
+# from aiogram.types import ReplyKeyboardRemove as KRemove
 from aiogram.types import InlineKeyboardMarkup as IMarkup
 from aiogram.types import InlineKeyboardButton as IButton
 
 from mg.core.types import MaksogramBot
-from mg.core.functions import error_notify, resources_path, get_account_status, renew_subscription
+from mg.core.yoomoney import create_payment
+from mg.core.functions import error_notify, resources_path, get_account_status, renew_subscription, get_payment_data
 
 
 # Инициализация обработчиков сообщений и нажатий кнопок
@@ -175,12 +177,40 @@ async def _help(message: Message):
                          f"По любым вопросам обращайтесь к {support_link}\n\n{rules}", disable_web_page_preview=True)
 
 
-@dp.callback_query(F.data.startswith(cb.command('subscription')))
+@dp.callback_query(F.data.startswith('premium'))
 @error_notify()
-async def _subscription(callback_query: CallbackQuery):
+async def _premium(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
-    subscription_id = cb.deserialize(callback_query.data)[0]
-    await callback_query.message.edit_caption(**await subscription_menu(callback_query.from_user.id, subscription_id))
+    account_id = callback_query.from_user.id
+    params = cb.deserialize(callback_query.data)
+    prev = params.get(0) is True
+    if prev:
+        await callback_query.answer("Запустите Maksogram кнопкой в меню", True)
+        return
+
+    edit = params.get(0) == 'edit'
+    if edit:
+        (message := await premium_menu(account_id)).pop('photo')
+        await callback_query.message.edit_caption(**message)
+    else:
+        await callback_query.message.answer_photo(**await premium_menu(account_id))
+        await callback_query.message.delete()
+
+
+async def premium_menu(account_id: int) -> dict[str, Any]:
+    payment = await get_payment_data(account_id)
+    markup = IMarkup(inline_keyboard=[[IButton(text="◀️  Назад", callback_data=cb('menu', 'new'))]])
+
+    if payment.subscription == 'admin':
+        payment_info = "Maksogram Premium навсегда 😎\nСтоимость: бесплатно"
+    elif payment.subscription == 'premium':
+        payment_info = f"Maksogram Premium до {payment.str_ending}\nСтоимость: {payment.fee} рублей"
+    else:
+        payment_info = "Подписка дает расширенные лимиты во всех функциях, сохранение любого количества сообщений и высокую скорость работы Maksogram"
+        markup = IMarkup(inline_keyboard=[[IButton(text="🌟 Maksogram Premium", callback_data=cb('payment'))],
+                                          [IButton(text="◀️  Назад", callback_data=cb('menu', 'new'))]])
+
+    return dict(caption=f"🌟 <b>Maksogram Premium</b>\n{payment_info}", reply_markup=markup, photo=FSInputFile(resources_path("logo.jpg")))
 
 
 @dp.callback_query(F.data.startswith(cb.command('payment')))  # Кнопка назад в меню варианта подписки
@@ -191,35 +221,73 @@ async def _payment(callback_query: CallbackQuery):
     await callback_query.message.edit_caption(**message)
 
 
-@dp.callback_query(F.data.startswith(cb.command('send_payment')))
+async def payment_menu() -> dict[str, Any]:
+    subscriptions = await get_subscriptions()
+
+    i, buttons = 0, []
+    while i < len(subscriptions):
+        if i + 1 < len(subscriptions):
+            buttons.append([IButton(text=subscriptions[i].about, callback_data=cb('subscription', subscriptions[i].id)),
+                            IButton(text=subscriptions[i+1].about, callback_data=cb('subscription', subscriptions[i+1].id))])
+            i += 1
+        else:
+            buttons.append([IButton(text=subscriptions[i].about, callback_data=cb('subscription', subscriptions[i].id))])
+        i += 1
+    buttons.append([IButton(text="◀️  Назад", callback_data=cb('premium', 'edit'))])
+
+    return dict(caption="Подписка Maksogram Premium с полным набором всех функций", reply_markup=IMarkup(inline_keyboard=buttons),
+                photo=FSInputFile(resources_path("logo.jpg")))
+
+
+@dp.callback_query(F.data.startswith(cb.command('subscription')))
 @error_notify()
-async def _send_payment(callback_query: CallbackQuery):
+async def _subscription(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query): return
+    subscription_id = cb.deserialize(callback_query.data)[0]
+    await callback_query.message.edit_caption(**await subscription_menu(callback_query.from_user.id, subscription_id))
+
+
+async def subscription_menu(account_id: int, subscription_id: int) -> dict[str, Any]:
+    subscription = await get_subscription(subscription_id)
+    amount_rub = (await get_payment_data(account_id)).fee  # Цена базовой подписки в месяц в рублях для клиента
+    currencies = await get_currencies()
+
+    without_discount = amount_rub * (subscription.duration / 30)  # Цена без скидки для выбранной подписки за месяц
+    fee = await convert_ruble(without_discount * (1 - subscription.discount / 100), currencies)  # Цена выбранной подписки в рублях и криптовалютах
+    discount = f"-{subscription.discount}%"
+    discount_about = f" (вместо {int(without_discount)} руб)" if subscription.discount else ""  # Информация о цене без скидки
+
+    # Текст с ценами подписки в криптовалютах и их эквивалентами в рублях
+    text = [f"{currency.name}: {fee[currency.name].crypto} {currency.name.lower()} (≈ {fee[currency.name].rub} руб)" for currency in currencies]
+
+    buttons = [IButton(text=currency.name, web_app=WebAppInfo(url=f"{WEB_APP}/payment/{currency.name.lower()}?amount={fee[currency.name].crypto}"))
+               for currency in currencies]
+    markup = IMarkup(inline_keyboard=
+                     [buttons,
+                      [IButton(text="💳 RUB через ЮКасса", callback_data=cb('payment_yoomoney', subscription_id, fee['RUB']))],
+                      [IButton(text="◀️  Назад", callback_data=cb('payment'))]])
+
+    return dict(caption=f"🌟 <b>MG Premium на {subscription.about.lower()} {discount}</b>\n\n"
+                        f"RUB: {fee['RUB']} руб{discount_about}\n{'\n'.join(text)}", reply_markup=markup)
+
+
+@dp.callback_query(F.data.startswith(cb.command('payment_yoomoney')))
+@error_notify()
+async def _payment_yoomoney(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     account_id = callback_query.from_user.id
-    subscription_id = cb.deserialize(callback_query.data)[0]
+    subscription_id, amount = cb.deserialize(callback_query.data)
+    await callback_query.message.edit_caption(**await payment_yoomoney(account_id, subscription_id, amount))
 
+
+async def payment_yoomoney(account_id: int, subscription_id: int, amount: int) -> dict[str, Any]:
     subscription = await get_subscription(subscription_id)
 
-    # Какому клиенту продлить подписку, какая подписка куплена, сообщение с меню подписки
-    markup = IMarkup(inline_keyboard=[[
-        IButton(text="Подтвердить! ✅", callback_data=cb('confirm_payment', account_id, subscription_id, callback_query.message.message_id))]])
+    link = await create_payment(account_id, amount, subscription.about, subscription_id)
+    markup = IMarkup(inline_keyboard=[[IButton(text="Оплатить через ЮКасса", url=link)],
+                                      [IButton(text="◀️  Назад", callback_data=cb('subscription', subscription_id))]])
 
-    await bot.send_message(OWNER, f"Пользователь {account_id} отправил оплату, проверь это! Если так, то подтверди, "
-                                  f"чтобы я продлил подписку на {subscription.about.lower()}", reply_markup=markup)
-    await callback_query.answer("Оплата проверяется. Ожидайте!", True)
-
-
-@dp.callback_query(F.data.startswith(cb.command('confirm_payment')))
-@error_notify()
-async def _confirm_sending_payment(callback_query: CallbackQuery):
-    if await new_callback_query(callback_query): return
-    account_id, subscription_id, message_id = cb.deserialize(callback_query.data)
-    subscription = await get_subscription(subscription_id)
-    await renew_subscription(account_id, subscription.duration)
-
-    await bot.edit_message_reply_markup(chat_id=account_id, message_id=message_id)
-    await bot.send_message(account_id, f"Ваша оплата подтверждена! Подписка Maksogram продлена на {subscription.about.lower()}", reply_to_message_id=message_id)
-    await callback_query.message.edit_text(callback_query.message.text + '\n\nУспешно!')
+    return dict(caption="🌟 <b>Maksogram Premium</b>\nОплатите Maksogram Premium любым удобным банком или СБП через ЮКасса", reply_markup=markup)
 
 
 @dp.message()
@@ -233,6 +301,8 @@ async def _other_messages(message: Message):
 @error_notify()
 async def _other_callback_queries(callback_query: CallbackQuery):
     if await new_callback_query(callback_query, params={"Обработка": "Не распознано"}): return
+    if callback_query.data.startswith(cb('fire')):
+        await callback_query.answer("В разработке", True)
     await callback_query.answer("Не распознано!")
 
 
@@ -244,5 +314,6 @@ async def start_bot():
 
     if testing:
         await bot.send_message(OWNER, "Режим тестирования")
+        print("Режим тестирования")
 
     await dp.start_polling(bot)

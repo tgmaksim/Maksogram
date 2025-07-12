@@ -1,14 +1,14 @@
-from mg.config import OWNER
-
 from typing import Literal
 from datetime import datetime
 from mg.core.database import Database
+from mg.core.functions import get_subscription
 from asyncpg.exceptions import UniqueViolationError
 
 from mg.client import MaksogramClient
 
 
-MAX_ADDED_CHATS = 3
+MAX_ADDED_CHATS = 0
+MAX_ADDED_CHATS_FOR_PREMIUM = 5
 
 
 async def update_referral(account_id: int, friend_id: int):
@@ -107,12 +107,16 @@ async def set_notify_changes(account_id: int, notify_changes: bool):
 async def check_count_added_chats(account_id: int) -> bool:
     """Проверяет количество добавленных чатов у клиента возвращает возможность добавить еще один"""
 
-    if account_id == OWNER:
-        return True  # Неограниченное количество для админа
+    subscription = await get_subscription(account_id)
+
+    if subscription == 'admin':
+        return True
 
     sql = f"SELECT COUNT(*) FROM jsonb_object_keys((SELECT added_chats FROM settings WHERE account_id={account_id}))"
     data: int = await Database.fetch_row_for_one(sql)
 
+    if subscription == 'premium':
+        return data < MAX_ADDED_CHATS_FOR_PREMIUM
     return data < MAX_ADDED_CHATS
 
 

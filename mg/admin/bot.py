@@ -8,7 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramForbiddenError
 from mg.bot.types import dp, bot, UserState, CallbackData
 from aiogram.types import Message, CallbackQuery, WebAppInfo
-from mg.bot.functions import developer_command, new_callback_query, new_message, payment_menu
+from mg.bot.functions import developer_command, new_callback_query, new_message
 
 from aiogram.types import KeyboardButton as KButton
 from aiogram.types import ReplyKeyboardMarkup as KMarkup
@@ -191,13 +191,6 @@ async def _mailing(callback_query: CallbackQuery, state: FSMContext):
 
     await callback_query.message.edit_text(f"Рассылка завершена!\nКлиентов: {result[0]}\nАктивных клиентов: {result[1]}\n"
                                            f"Доставлено сообщений: {result[2]}\nВозникло ошибок: {result[3]}")
-
-
-@dp.message(Command('payment'))
-@error_notify()
-async def _payment(message: Message):
-    if await developer_command(message): return
-    await message.answer_photo(**await payment_menu())
 
 
 def admin_initial():

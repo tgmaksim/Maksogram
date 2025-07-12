@@ -21,7 +21,7 @@ from mg.bot.functions import (
 )
 
 from mg.core.database import Database
-from mg.core.functions import error_notify, full_name
+from mg.core.functions import error_notify, full_name, get_subscription
 
 from . functions import (
     get_bio,
@@ -105,12 +105,17 @@ async def changed_profile_menu(account_id: int, user_id: int) -> dict[str, Any]:
 @error_notify('state')
 async def _new_changed_profile_start(callback_query: CallbackQuery, state: FSMContext):
     if await new_callback_query(callback_query): return
+    account_id = callback_query.from_user.id
     prev = cb.deserialize(callback_query.data).get(0) is True
     if prev:
-        await callback_query.answer("Следить за профилем друга доступно только для пользователей Maksogram", True)
+        await callback_query.answer("Запустите Maksogram кнопкой в меню", True)
         return
 
-    if not await check_count_changed_profiles(callback_query.from_user.id):
+    if not await check_count_changed_profiles(account_id):
+        if await get_subscription(account_id) is None:
+            await callback_query.answer("Достигнут лимит пользователей, подключите Maksogram Premium!", True)
+        else:
+            await callback_query.answer("Достигнут лимит количество пользователей!", True)
         await callback_query.answer("У вас максимальное количество отслеживаемых пользователей", True)
         return
 
