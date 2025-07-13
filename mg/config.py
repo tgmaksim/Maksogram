@@ -4,7 +4,7 @@ import sys
 
 VERSION_GROUP = "3"
 VERSION_ID = "3.0"
-VERSION = "3.0.1 (129)"
+VERSION = "3.0.1 (130)"
 
 release = sys.argv[1] == "release"
 testing = len(sys.argv) > 2 and sys.argv[2] == "testing"

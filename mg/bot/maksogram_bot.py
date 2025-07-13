@@ -24,7 +24,7 @@ from aiogram.types import InlineKeyboardButton as IButton
 
 from mg.core.types import MaksogramBot
 from mg.core.yoomoney import create_payment
-from mg.core.functions import error_notify, resources_path, get_account_status, renew_subscription, get_payment_data
+from mg.core.functions import error_notify, resources_path, get_account_status, get_payment_data
 
 
 # Инициализация обработчиков сообщений и нажатий кнопок
@@ -50,6 +50,8 @@ from mg.answering_machine.bot import answering_machine_initial
 answering_machine_initial()
 from mg.bot.inline_mode import inline_mode_initial
 inline_mode_initial()
+from mg.fire.bot import fire_initial
+fire_initial()
 
 
 cb = CallbackData()
@@ -210,7 +212,7 @@ async def premium_menu(account_id: int) -> dict[str, Any]:
         markup = IMarkup(inline_keyboard=[[IButton(text="🌟 Maksogram Premium", callback_data=cb('payment'))],
                                           [IButton(text="◀️  Назад", callback_data=cb('menu', 'new'))]])
 
-    return dict(caption=f"🌟 <b>Maksogram Premium</b>\n{payment_info}", reply_markup=markup, photo=FSInputFile(resources_path("logo.jpg")))
+    return dict(caption=f"🌟 <b>Maksogram Premium</b>\n{payment_info}", reply_markup=markup, photo=FSInputFile(resources_path("premium.jpg")))
 
 
 @dp.callback_query(F.data.startswith(cb.command('payment')))  # Кнопка назад в меню варианта подписки
@@ -236,7 +238,7 @@ async def payment_menu() -> dict[str, Any]:
     buttons.append([IButton(text="◀️  Назад", callback_data=cb('premium', 'edit'))])
 
     return dict(caption="Подписка Maksogram Premium с полным набором всех функций", reply_markup=IMarkup(inline_keyboard=buttons),
-                photo=FSInputFile(resources_path("logo.jpg")))
+                photo=FSInputFile(resources_path("premium.jpg")))
 
 
 @dp.callback_query(F.data.startswith(cb.command('subscription')))
@@ -301,8 +303,6 @@ async def _other_messages(message: Message):
 @error_notify()
 async def _other_callback_queries(callback_query: CallbackQuery):
     if await new_callback_query(callback_query, params={"Обработка": "Не распознано"}): return
-    if callback_query.data.startswith(cb('fire')):
-        await callback_query.answer("В разработке", True)
     await callback_query.answer("Не распознано!")
 
 
