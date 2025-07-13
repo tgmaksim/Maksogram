@@ -193,7 +193,7 @@ class ModulesMethods:
                 text = f"🤖 @MaksogramBot в чате\n\nПогода в городе {response.city}\n{response.weather}"
                 formatting_entities = [MessageEntityCustomEmoji(0, 2, CustomEmoji.maksogram),
                                        MessageEntityBold(25, len(f"Погода в городе {response.city}")),
-                                       MessageEntityBlockquote(25 + len(f"Погода в городе {response.city}\n"), len(response.weather), collapsed=True)]
+                                       MessageEntityBlockquote(25 + len(f"Погода в городе {response.city}\n"), len_text(response.weather), collapsed=True)]
             else:
                 text = "🤖 @MaksogramBot в чате\nВозникла ошибка при запросе"
                 formatting_entities = [MessageEntityCustomEmoji(0, 2, CustomEmoji.maksogram)]
