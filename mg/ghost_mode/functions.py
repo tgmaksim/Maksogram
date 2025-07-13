@@ -9,17 +9,50 @@ from telethon.tl.functions.stories import GetPeerStoriesRequest, GetPinnedStorie
 from telethon.tl.types import StoryItem, MessageMediaPhoto, MessageMediaDocument, PeerChannel, Channel
 
 from typing import Union, Optional
+from mg.core.database import Database
 from . types import CopyPostResult, CopyPostItem
-from mg.core.functions import time_now, www_path, resources_path
-
+from mg.core.functions import time_now, www_path, resources_path, get_subscription
 
 BASE_PATH_STORIES = "stories"
 COUNT_PINNED_STORIES = 10
+
+MAX_COUNT_USAGE_GHOST_STORIES_PER_DAY = 0
+MAX_COUNT_USAGE_GHOST_STORIES_PER_DAY_FOR_PREMIUM = 5
+
+MAX_COUNT_USAGE_GHOST_COPY_PER_DAY = 1
+MAX_COUNT_USAGE_GHOST_COPY_PER_DAY_FOR_PREMIUM = 5
 
 BASE_PATH_POSTS = "posts"
 PRIVATE_CHANNEL_POST_RE = re.compile(r'(?:https?://)?(?:www\.)?(?:telegram\.(?:me|dog)|t\.me)/c/(?P<channel_id>\d+)/(?P<post_id>\d+)(?:\?single)?')
 PUBLIC_CHANNEL_POST_RE = (
     re.compile(r'(?:https?://)?(?:www\.)?(?:telegram\.(?:me|dog)|t\.me)/(?P<channel_username>[a-zA-Z](?:(?!__)\w){1,30}[a-zA-Z\d])/(?P<post_id>\d+)(?:\?single)?'))
+
+
+async def check_count_usage_ghost_mode(account_id: int, function: str) -> bool:
+    """Считает количество использований функции режима призрака за сегодня и возвращает возможность вызвать еще раз"""
+
+    subscription = await get_subscription(account_id)
+    if subscription == 'admin':
+        return True
+
+    sql = f"SELECT ghost_{function} FROM limits WHERE account_id={account_id}"
+    data: int = await Database.fetch_row_for_one(sql)
+
+    if function == 'stories':
+        if subscription == 'premium':
+            return data < MAX_COUNT_USAGE_GHOST_STORIES_PER_DAY_FOR_PREMIUM
+        return data < MAX_COUNT_USAGE_GHOST_STORIES_PER_DAY
+    else:
+        if subscription == 'premium':
+            return data < MAX_COUNT_USAGE_GHOST_COPY_PER_DAY_FOR_PREMIUM
+        return data < MAX_COUNT_USAGE_GHOST_COPY_PER_DAY
+
+
+async def update_limit(account_id: int, function: str):
+    """Обновляет количество использования функции"""
+
+    sql = f"UPDATE limits SET ghost_{function}=ghost_{function} + 1 WHERE account_id={account_id}"
+    await Database.execute(sql)
 
 
 async def download_stories(account_id: int, user_id: int, stories: list[StoryItem]) -> list[str]:

@@ -11,7 +11,7 @@ from mg.core.types import MaksogramBot
 from mg.bot.types import CallbackData, support
 from mg.admin.functions import reload_maksogram
 from mg.client.functions import check_edited_message
-from mg.core.functions import resources_path, deserialize_tl_entities, send_email_message, format_error, time_now
+from mg.core.functions import resources_path, deserialize_tl_entities, send_email_message, format_error, time_now, get_subscription
 
 from telethon.errors.rpcerrorlist import (
     FileReferenceExpiredError,
@@ -96,6 +96,18 @@ class MessageMethods:
 
         if await self.save_self_destructing_message(message):
             return  # Самоуничтожающиеся сообщения обрабатываются только отдельно
+
+        if not await self.check_count_saved_messages():  # Достигнут лимит количества сохраненных сообщений в день
+            if await self.get_limit('saving_messages') is False:  # Уведомление о достижении лимита еще не отправлено
+                if await get_subscription(self.id) is None:
+                    await MaksogramBot.send_message(self.id, "💬 <b>Сохранение сообщений</b>\nДостигнут лимит сохраненных сообщений в день, "
+                                                             "подключите Maksogram Premium!")
+                else:
+                    await MaksogramBot.send_message(self.id, "💬 <b>Сохранение сообщений</b>\nДостигнут лимит количества сохраненных сообщений в день!")
+                await MaksogramBot.send_system_message(f"Достигнут лимит количества сохраненных сообщений в день для {self.id}")
+
+                await self.update_limit('saving_messages')
+            return  # После достижения лимита сохраненных сообщений в день, сохранения сообщения не происходит
 
         try:
             saved_message: Message = await message.forward_to(self.my_messages)

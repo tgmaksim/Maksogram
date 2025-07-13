@@ -407,3 +407,13 @@ class MaksogramBaseClient:
         """Ссылка на сообщение в системном канале"""
 
         return f"t.me/c/{self.my_messages_channel_id}/{saved_message_id}"
+
+    @property
+    def table_name(self: 'MaksogramClient') -> str:
+        """Имя таблицы в базе данных с сохраненными сообщениями"""
+
+        return self.format_table_name(self.id)
+
+    @classmethod
+    def format_table_name(cls: Type['MaksogramClient'], account_id: int) -> str:
+        return f"zz{account_id}"

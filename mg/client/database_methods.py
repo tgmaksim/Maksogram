@@ -4,9 +4,9 @@ if TYPE_CHECKING:
     from . maksogram_client import MaksogramClient
 
 from datetime import datetime
+from typing import Union, Optional
 from mg.core.database import Database
-from mg.core.functions import time_now
-from typing import Union, Optional, Type
+from mg.core.functions import time_now, get_subscription
 
 from telethon.tl.patched import Message
 
@@ -17,13 +17,25 @@ from . functions import (
     set_is_started,
 )
 
+MAX_COUNT_SAVED_MESSAGES_PER_DAY = 500
+MAX_COUNT_SAVED_MESSAGES_PER_DAY_FOR_PREMIUM = 5000
+
+MAX_COUNT_USAGE_AUDIO_TRANSCRIPTION = 1
+MAX_COUNT_USAGE_AUDIO_TRANSCRIPTION_FRO_PREMIUM = 10
+
+MAX_COUNT_USAGE_ROUND_VIDEO = 1
+MAX_COUNT_USAGE_ROUND_VIDEO_FRO_PREMIUM = 5
+
+MAX_COUNT_USAGE_REMINDER = 1
+MAX_COUNT_USAGE_REMINDER_FRO_PREMIUM = 10
+
 
 class DatabaseMethods:
     async def create_table(self: 'MaksogramClient'):
         """Создает таблицу в базе данных для хранения сохраненных сообщений"""
 
         sql = f"CREATE TABLE IF NOT EXISTS {self.table_name} (chat_id BIGINT NOT NULL, message_id INTEGER NOT NULL, " \
-              "saved_message_id INTEGER NOT NULL, hash CHARACTER VARYING(128) NOT NULL, media BIGINT)"
+              "saved_message_id INTEGER NOT NULL, hash CHARACTER VARYING(128) NOT NULL, media BIGINT, time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"
         await Database.execute(sql)
 
     async def update_initial_data(self: 'MaksogramClient'):
@@ -183,12 +195,65 @@ class DatabaseMethods:
         sql = f"UPDATE status_users SET awake=now() WHERE user_id={self.id} AND awake IS NOT NULL"
         await Database.execute(sql)
 
-    @property
-    def table_name(self: 'MaksogramClient') -> str:
-        """Имя таблицы в базе данных с сохраненными сообщениями"""
+    async def check_count_saved_messages(self: 'MaksogramClient') -> bool:
+        """Считает количество сохраненных сообщений за день с учетом часового пояса клиента и возвращает возможность сохранить еще одно"""
 
-        return self.format_table_name(self.id)
+        subscription = await get_subscription(self.id)
+        if subscription == 'admin':
+            return True
 
-    @classmethod
-    def format_table_name(cls: Type['MaksogramClient'], account_id: int) -> str:
-        return f"zz{account_id}"
+        # Считает количество сообщений, у которых дата отправки больше прошедшей полночи с учетом часового пояса клиента
+        sql = (f"SELECT COUNT(*) FROM {self.table_name} WHERE (now() + INTERVAL '1 hour' * (SELECT time_zone FROM settings WHERE account_id={self.id}))"
+               f"::date::timestamp - INTERVAL '1 hour' * (SELECT time_zone FROM settings WHERE account_id={self.id}) <= time")
+        count: int = await Database.fetch_row_for_one(sql)
+
+        if subscription == 'premium':
+            return count < MAX_COUNT_SAVED_MESSAGES_PER_DAY_FOR_PREMIUM
+        return count < MAX_COUNT_SAVED_MESSAGES_PER_DAY
+
+    async def update_limit(self: 'MaksogramClient', limit: str):
+        """Обновляет лимит"""
+
+        value = 'true' if limit == 'saving_messages' else f'{limit} + 1'
+        sql = f"UPDATE limits SET {limit}={value} WHERE account_id={self.id}"
+        await Database.execute(sql)
+
+    async def get_limit(self: 'MaksogramClient', limit: str) -> Union[bool, int]:
+        """Возвращает текущее значение использования функции"""
+
+        # Обновляет reset_time, если время пришло
+        sql = ("UPDATE limits SET saving_messages=false, audio_transcription=0, round_video=0, reminder=0, ghost_stories=0, ghost_copy=0, "
+               f"reset_time=(now() + INTERVAL '1 hour' * (SELECT time_zone FROM settings WHERE account_id={self.id}))::date::timestamp - "
+               f"INTERVAL '1 hour' * (SELECT time_zone FROM settings WHERE account_id={self.id}) + INTERVAL '1 day' "
+               f"WHERE reset_time <= now() AND account_id={self.id}")
+        await Database.execute(sql)
+
+        sql = f"SELECT {limit} FROM limits WHERE account_id={self.id}"
+        data: Union[bool, int] = await Database.fetch_row_for_one(sql)
+
+        return data
+
+    async def check_count_usage_module(self: 'MaksogramClient', module: str) -> bool:
+        """Считает количество использований функции и возвращает возможность один раз ее вызвать"""
+
+        subscription = await get_subscription(self.id)
+        if subscription == 'admin':
+            return True
+
+        limit = await self.get_limit(module)
+        if subscription == 'premium':
+            if module == 'audio_transcription':
+                return limit < MAX_COUNT_USAGE_AUDIO_TRANSCRIPTION_FRO_PREMIUM
+            if module == 'round_video':
+                return limit < MAX_COUNT_USAGE_ROUND_VIDEO_FRO_PREMIUM
+            if module == 'reminder':
+                return limit < MAX_COUNT_USAGE_REMINDER_FRO_PREMIUM
+        else:
+            if module == 'audio_transcription':
+                return limit < MAX_COUNT_USAGE_AUDIO_TRANSCRIPTION
+            if module == 'round_video':
+                return limit < MAX_COUNT_USAGE_ROUND_VIDEO
+            if module == 'reminder':
+                return limit < MAX_COUNT_USAGE_REMINDER
+
+        raise ValueError(f"module {module} не найден")

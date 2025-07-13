@@ -17,7 +17,15 @@ from typing import Any
 from mg.core.types import MaksogramBot
 from mg.core.functions import error_notify, get_subscription
 
-from . functions import COUNT_PINNED_STORIES, download_peer_stories, download_pinned_stories, parse_post_link, download_post
+from . functions import (
+    update_limit,
+    download_post,
+    parse_post_link,
+    COUNT_PINNED_STORIES,
+    download_peer_stories,
+    download_pinned_stories,
+    check_count_usage_ghost_mode,
+)
 
 
 cb = CallbackData()
@@ -104,6 +112,7 @@ async def _ghost_stories(message: Message, state: FSMContext):
             markup = IMarkup(inline_keyboard=[[IButton(text="◀️  Назад", callback_data=cb('ghost_mode'))]])
             await message.answer(text, reply_markup=markup, disable_web_page_preview=True)
 
+            await update_limit(account_id, 'stories')
             await wait_message.delete()
 
     await bot.delete_messages(chat_id=message.chat.id, message_ids=[message_id, message.message_id])
@@ -113,9 +122,17 @@ async def _ghost_stories(message: Message, state: FSMContext):
 @error_notify('state')
 async def _ghost_copy_start(callback_query: CallbackQuery, state: FSMContext):
     if await new_callback_query(callback_query): return
+    account_id = callback_query.from_user.id
     prev = cb.deserialize(callback_query.data).get(0) is True
     if prev:
         await callback_query.answer("Запустите Maksogram кнопкой в меню", True)
+        return
+
+    if not await check_count_usage_ghost_mode(account_id, 'copy'):
+        if await get_subscription(account_id) is None:
+            await callback_query.answer("Достигнут лимит использования функции в день, подключите Maksogram Premium!", True)
+        else:
+            await callback_query.answer("Достигнут лимит количества использования функции в день!", True)
         return
 
     await state.set_state(UserState.ghost_copy)
@@ -161,6 +178,7 @@ async def _ghost_copy(message: Message, state: FSMContext):
 
                 await message.answer(**await ghost_mode_menu())
 
+            await update_limit(account_id, 'copy')
             await wait_message.delete()
 
         else:

@@ -179,7 +179,7 @@ async def _help(message: Message):
                          f"По любым вопросам обращайтесь к {support_link}\n\n{rules}", disable_web_page_preview=True)
 
 
-@dp.callback_query(F.data.startswith('premium'))
+@dp.callback_query(F.data.startswith(cb.command('premium')))
 @error_notify()
 async def _premium(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return

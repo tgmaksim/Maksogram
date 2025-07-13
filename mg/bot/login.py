@@ -363,10 +363,10 @@ async def start_maksogram_client(account_id: int, username: str, phone_number: i
     await Database.execute(
         "INSERT INTO payment (account_id, subscription, fee, ending, first_notification, second_notification) "
         "VALUES($1, 'premium', $2, $3, now(), now())", account_id, FEE, end)
-    await Database.execute(
-        "INSERT INTO modules (account_id) VALUES($1)", account_id)
+    await Database.execute("INSERT INTO modules (account_id) VALUES($1)", account_id)
     await Database.execute("INSERT INTO statistics (account_id, answering_machine, audio_transcription, weather) VALUES ($1, now(), now(), now())", account_id)
     await Database.execute("INSERT INTO security (account_id, security_hack, security_no_access, email) VALUES ($1, false, false, NULL)", account_id)
+    await Database.execute("INSERT INTO limits (account_id, reset_time) VALUES ($1, now())", account_id)
 
     maksogram_client = MaksogramClient(account_id, telegram_client)
     maksogram_clients[account_id] = maksogram_client

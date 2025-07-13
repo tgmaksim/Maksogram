@@ -9,7 +9,7 @@ import asyncio
 from typing import Optional, Literal
 from datetime import datetime, timedelta
 from mg.core.types import MaksogramBot, CustomEmoji
-from mg.core.functions import www_path, format_error, time_now
+from mg.core.functions import www_path, format_error, time_now, get_subscription
 
 from telethon.tl.patched import Message
 
@@ -149,6 +149,16 @@ class ModulesMethods:
 
     async def audio_transcription_module(self: 'MaksogramClient', message: Message, reply_message: Optional[Message], bot_media: Document) -> Optional[Literal[NameModule.audio_transcription]]:
         if await enabled_module(self.id, NameModule.audio_transcription.name):
+            if not await self.check_count_usage_module(NameModule.audio_transcription.name):
+                if await get_subscription(self.id) is None:
+                    await MaksogramBot.send_message(self.id, "🗣 <b>Расшифровка голосового</b>\nДостигнут лимит использования функции в день, "
+                                                             "подключите Maksogram Premium!")
+                else:
+                    await MaksogramBot.send_message(self.id, "🗣 <b>Расшифровка голосового</b>\nДостигнут лимит количества использования функции в день")
+                await MaksogramBot.send_system_message(f"Достигнут лимит лимит использования функции в день у {self.id}")
+
+                return NameModule.audio_transcription
+
             if self.is_premium:
                 text = "🤖 @MaksogramBot в чате\n🗣 Расшифровка голосового ✍️"
                 formatting_entities = [MessageEntityCustomEmoji(0, 2, CustomEmoji.maksogram),
@@ -171,6 +181,8 @@ class ModulesMethods:
                 text = f"🤖 @MaksogramBot в чате\n{response.text}"
                 formatting_entities = [MessageEntityCustomEmoji(0, 2, CustomEmoji.maksogram),
                                        MessageEntityBlockquote(24, len(response.text), collapsed=True)]
+
+                await self.update_limit(NameModule.audio_transcription.name)  # Обновляем количество использований, только если успешно
             else:
                 text = f"🤖 @MaksogramBot в чате\nПроизошла ошибка при расшифровке..."
                 formatting_entities = [MessageEntityCustomEmoji(0, 2, CustomEmoji.maksogram)]
@@ -209,6 +221,16 @@ class ModulesMethods:
 
     async def round_video_module(self: 'MaksogramClient', message: Message, reply_message: Message, bot_media: bool) -> Optional[Literal[NameModule.round_video]]:
         if await enabled_module(self.id, NameModule.round_video.name):
+            if not await self.check_count_usage_module(NameModule.round_video.name):
+                if await get_subscription(self.id) is None:
+                    await MaksogramBot.send_message(self.id, "🔄 <b>Видео в кружок</b>\nДостигнут лимит использования функции в день, "
+                                                    "подключите Maksogram Premium!")
+                else:
+                    await MaksogramBot.send_message(self.id, "🔄 <b>Видео в кружок</b>\nДостигнут лимит количества использования функции в день")
+                await MaksogramBot.send_system_message(f"Достигнут лимит лимит использования функции в день у {self.id}")
+
+                return NameModule.round_video
+
             text = "🤖 @MaksogramBot в чате\nКонвертация видео в кружок ⏰"
             formatting_entities = [MessageEntityCustomEmoji(0, 2, CustomEmoji.maksogram),
                                    MessageEntityCustomEmoji(51, 1, CustomEmoji.round_loading)]
@@ -234,6 +256,8 @@ class ModulesMethods:
                     await message.delete()
                     os.remove(response.path)
 
+                    await self.update_limit(NameModule.round_video.name)  # Обновляем количество использований, только если успешно
+
                 else:
                     await MaksogramBot.send_system_message(format_error(response.error))
                     await message.edit("🤖 @MaksogramBot в чате\nПроизошла ошибка... ⚠️",
@@ -248,6 +272,16 @@ class ModulesMethods:
 
     async def reminder_module(self: 'MaksogramClient', message: Message, remind_time: datetime) -> Optional[Literal[NameModule.reminder]]:
         if await enabled_module(self.id, NameModule.reminder.name):
+            if not await self.check_count_usage_module(NameModule.reminder.name):
+                if await get_subscription(self.id) is None:
+                    await MaksogramBot.send_message(self.id, "⏰ <b>Напоминалка в чате</b>\nДостигнут лимит использования функции в день, "
+                                                             "подключите Maksogram Premium!")
+                else:
+                    await MaksogramBot.send_message(self.id, "⏰ <b>Напоминалка в чате</b>\nДостигнут лимит количества использования функции в день")
+                await MaksogramBot.send_system_message(f"Достигнут лимит лимит использования функции в день у {self.id}")
+
+                return NameModule.reminder
+
             time_zone = await self.get_time_zone()
             time = remind_time - timedelta(hours=time_zone)
             chat_name = await self.chat_name(message.chat_id, my_name="Избранное")
@@ -283,6 +317,7 @@ class ModulesMethods:
                                formatting_entities=[MessageEntityCustomEmoji(0, 2, CustomEmoji.maksogram),
                                                     MessageEntityCustomEmoji(48 + len(human_date), 1, CustomEmoji.clock)])
 
+            await self.update_limit(NameModule.reminder.name)
             return NameModule.reminder
 
         else:
