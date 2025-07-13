@@ -262,34 +262,15 @@ async def subscription_menu(account_id: int, subscription_id: int) -> dict[str, 
     # Текст с ценами подписки в криптовалютах и их эквивалентами в рублях
     text = [f"{currency.name}: {fee[currency.name].crypto} {currency.name.lower()} (≈ {fee[currency.name].rub} руб)" for currency in currencies]
 
+    link = await create_payment(account_id, fee['RUB'], subscription.about, subscription_id)
     buttons = [IButton(text=currency.name, web_app=WebAppInfo(url=f"{WEB_APP}/payment/{currency.name.lower()}?amount={fee[currency.name].crypto}"))
                for currency in currencies]
-    markup = IMarkup(inline_keyboard=
-                     [buttons,
-                      [IButton(text="💳 RUB через ЮКасса", callback_data=cb('payment_yoomoney', subscription_id, fee['RUB']))],
-                      [IButton(text="◀️  Назад", callback_data=cb('payment'))]])
+    markup = IMarkup(inline_keyboard=[buttons,
+                                      [IButton(text=f"💳 Оплатить {fee['RUB']} руб", url=link)],
+                                      [IButton(text="◀️  Назад", callback_data=cb('payment'))]])
 
     return dict(caption=f"🌟 <b>MG Premium на {subscription.about.lower()} {discount}</b>\n\n"
                         f"RUB: {fee['RUB']} руб{discount_about}\n{'\n'.join(text)}", reply_markup=markup)
-
-
-@dp.callback_query(F.data.startswith(cb.command('payment_yoomoney')))
-@error_notify()
-async def _payment_yoomoney(callback_query: CallbackQuery):
-    if await new_callback_query(callback_query): return
-    account_id = callback_query.from_user.id
-    subscription_id, amount = cb.deserialize(callback_query.data)
-    await callback_query.message.edit_caption(**await payment_yoomoney(account_id, subscription_id, amount))
-
-
-async def payment_yoomoney(account_id: int, subscription_id: int, amount: int) -> dict[str, Any]:
-    subscription = await get_subscription(subscription_id)
-
-    link = await create_payment(account_id, amount, subscription.about, subscription_id)
-    markup = IMarkup(inline_keyboard=[[IButton(text="Оплатить через ЮКасса", url=link)],
-                                      [IButton(text="◀️  Назад", callback_data=cb('subscription', subscription_id))]])
-
-    return dict(caption="🌟 <b>Maksogram Premium</b>\nОплатите Maksogram Premium любым удобным банком или СБП через ЮКасса", reply_markup=markup)
 
 
 @dp.message()
