@@ -235,7 +235,7 @@ async def account_initial(account_id: int, telegram_client: TelegramClient, user
     else:
         referral = await get_referral(account_id)
         if referral:  # Нового пользователя кто-то пригласил
-            await renew_subscription(account_id, 30)  # Продлеваем подписку на 30 дней
+            await renew_subscription(referral, 30)  # Продлеваем подписку на 30 дней
             await bot.send_message(referral, "По реферальной ссылке зарегистрировался новый пользователь, подписка продлилась на 30 дней. Поздравляем!")
 
         link = await generate_sensitive_link(account_id, "run_link")
