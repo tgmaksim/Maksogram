@@ -1,12 +1,10 @@
-from mg.config import YOOMONEY_API_ID, YOOMONEY_API_KEY
+from mg.config import YOOMONEY_API_ID, YOOMONEY_API_KEY, WEB_APP
 
 from yookassa import Configuration, Payment
 
 from datetime import datetime
 from typing import Any, Optional
 from mg.core.database import Database
-from mg.core.types import MaksogramBot
-from mg.core.functions import zip_int_data
 from asyncpg.exceptions import UniqueViolationError
 
 
@@ -37,7 +35,7 @@ async def create_payment(account_id: int, amount: int, about: str, subscription_
         'description': f"Maksogram Premium для {account_id} на {about.lower()}",
         'confirmation': {
             'type': 'redirect',
-            'return_url': f"https://t.me/{MaksogramBot.username}?start=p{zip_int_data(subscription_id)}"
+            'return_url': f"{WEB_APP}/payment/yoomoney"
         },
         'metadata': {
             'account_id': account_id,

@@ -1,11 +1,8 @@
-import aiohttp
-
-from mg.config import testing, OWNER, SITE, CRYPTO_API_KEY
+from mg.config import testing, OWNER, SITE
 
 from html import escape
-from decimal import Decimal
 from mg.core.database import Database
-from typing import Optional, Union, Literal
+from typing import Optional, Literal
 from mg.core.functions import admin_time, time_now, zip_int_data
 
 from mg.client.types import maksogram_clients
@@ -13,7 +10,7 @@ from mg.client.functions import get_is_started
 from telethon.tl.types import User, Chat, Channel
 from telethon.utils import parse_username, parse_phone
 from aiogram.types import Message, CallbackQuery, LinkPreviewOptions, InlineQuery
-from . types import Sleep, bot, Blocked, Subscription, CallbackData, PaymentCurrency, AmountPaymentCurrency, RequestUserResult, RequestChatResult
+from . types import Sleep, bot, Blocked, Subscription, CallbackData, RequestUserResult, RequestChatResult
 
 
 cb = CallbackData()
@@ -31,7 +28,9 @@ async def new_message(message: Message, *, params: Optional[dict[str, str]] = No
     """
 
     if message.chat.id == OWNER:
-        return False  # Сообщения от админа не обрабатываются и никогда не игнорируются
+        if Sleep.reload or Sleep.loading:
+            await message.answer("Бот перезагружается..." if Sleep.reload else "Бот загружается...")
+        return Sleep.reload or Sleep.loading
 
     if message.text:
         content = escape(message.text)
@@ -56,9 +55,9 @@ async def new_message(message: Message, *, params: Optional[dict[str, str]] = No
         album = "album " if message.media_group_id else ""
         content = f"{album}'{message.content_type}'".lower().removeprefix('contenttype.')
 
-    text = (f"User: {message.chat.id}",
+    text = (f"User: <a href='tg://openmessage?user_id={message.chat.id}'>{message.chat.id}</a>",
             f"Msg: {message.message_id}",
-            f"Username: {message.from_user.username}" if message.from_user.username else None,
+            f"Username: @{message.from_user.username}" if message.from_user.username else None,
             f"Имя: {escape(message.from_user.first_name)}",
             f"Фамилия: {escape(message.from_user.last_name)}" if message.from_user.last_name else None,
             content,
@@ -102,7 +101,7 @@ async def check_new_user(user_id: int) -> bool:
     return not data
 
 
-async def new_callback_query(callback_query: CallbackQuery, *, params: Optional[dict[str, str]] = None) -> bool:
+async def new_callback_query(callback_query: CallbackQuery, *, params: Optional[dict[str, str]] = None, important: bool = False) -> bool:
     """
     Обрабатывает нажатие на кнопку от пользователя и возвращает необходимость прервать диалог
 
@@ -112,18 +111,20 @@ async def new_callback_query(callback_query: CallbackQuery, *, params: Optional[
     """
 
     if callback_query.from_user.id == OWNER:
-        return False  # Нажатия кнопок от админа не обрабатываются и никогда не игнорируются
+        if Sleep.reload or Sleep.loading:
+            await callback_query.answer("Бот перезагружается..." if Sleep.reload else "Бот загружается...", True)
+        return Sleep.reload or Sleep.loading
 
-    text = (f"User: {callback_query.from_user.id}",
+    text = (f"User: <a href='tg://openmessage?user_id={callback_query.from_user.id}'>{callback_query.from_user.id}</a>",
             f"Msg: {callback_query.message.message_id}",
-            f"Username: {callback_query.from_user.username}" if callback_query.from_user.username else None,
+            f"Username: @{callback_query.from_user.username}" if callback_query.from_user.username else None,
             f"Имя: {callback_query.from_user.first_name}",
             f"Фамилия: {callback_query.from_user.last_name}" if callback_query.from_user.last_name else None,
             callback_query.data,
             *(f"{key}: {value}" for key, value in (params or {}).items()))
     await bot.send_message(OWNER, '\n'.join(filter(None, text)))
 
-    if callback := callbacks.get(callback_query.from_user.id):
+    if not important and (callback := callbacks.get(callback_query.from_user.id)):
         if callback[0] == callback_query.message.message_id and callback[1] == callback_query.data:  # Прошлое нажатие той же кнопки
             return True
     callbacks[callback_query.from_user.id] = (callback_query.message.message_id, callback_query.data)  # Обновляем данные
@@ -170,11 +171,11 @@ async def new_inline_query(inline_query: InlineQuery, *, params: Optional[dict[s
     """
 
     if inline_query.from_user.id == OWNER:
-        return False  # Inline-запросы от админа не обрабатываются и никогда не игнорируются
+        return Sleep.reload or Sleep.loading
 
-    text = (f"User: {inline_query.from_user.id}",
+    text = (f"User: <a href='tg://openmessage?user_id={inline_query.from_user.id}'>{inline_query.from_user.id}</a>",
             f"Query: {inline_query.id}",
-            f"Username: {inline_query.from_user.username}" if inline_query.from_user.username else None,
+            f"Username: @{inline_query.from_user.username}" if inline_query.from_user.username else None,
             f"Имя: {inline_query.from_user.first_name}",
             f"Фамилия: {inline_query.from_user.last_name}" if inline_query.from_user.last_name else None,
             inline_query.query,
@@ -388,45 +389,6 @@ async def get_subscription(subscription_id: int) -> Subscription:
     data: dict = await Database.fetch_row(sql)
 
     return Subscription.from_json(data)
-
-
-async def get_currencies() -> list[PaymentCurrency]:
-    """Возвращает список доступных для оплаты валют"""
-
-    sql = "SELECT name, coefficient, accuracy, min FROM currencies"
-    data: list[dict] = await Database.fetch_all(sql)
-
-    return PaymentCurrency.list_from_json(data)
-
-
-async def convert_ruble(amount_rub: float, currencies: list[PaymentCurrency]) -> dict[str, Union[int, AmountPaymentCurrency]]:
-    """
-    Конвертирует цену в рублях в криптовалюты
-
-    :param amount_rub: цена в рублях
-    :param currencies: список валют для оплаты
-    :return: словарь: {"RUB": int, название криптовалюты: данные о цене в рублях и валюте}
-    """
-
-    url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
-    headers = {"X-CMC_PRO_API_KEY": CRYPTO_API_KEY}
-    params = {"symbol": ",".join(map(lambda c: c.name, currencies)), "convert": "RUB"}
-
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers, params=params) as response:
-            data = await response.json()
-            result: dict = {"RUB": int(amount_rub)}
-
-            for currency in currencies:
-                price = data['data'][currency.name]['quote']['RUB']['price']  # Курс криптовалюты к рублю
-                amount = round(amount_rub / price * currency.coefficient, currency.accuracy)  # Вычисляем сумму с учетом коэффициента скидки валюты
-
-                if currency.min:  # Если есть минимальный порог у криптовалюты
-                    amount = max(amount, round(currency.min, currency.accuracy))
-
-                result[currency.name] = AmountPaymentCurrency(round(amount * price), str(Decimal(str(amount))))  # Вычисляем цену в рублях и валюте
-
-            return result
 
 
 async def set_time_subscription_notification(account_id: int, type_notification: Literal["first", "second"]):

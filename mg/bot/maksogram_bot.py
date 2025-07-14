@@ -1,4 +1,4 @@
-from mg.config import testing, OWNER, SITE, VERSION, VERSION_ID, WEB_APP
+from mg.config import testing, OWNER, SITE, VERSION, VERSION_ID
 
 from typing import Any
 
@@ -9,8 +9,6 @@ from . types import dp, bot, Blocked, CallbackData, support_link, feedback
 from . functions import (
     new_message,
     referral_link,
-    convert_ruble,
-    get_currencies,
     preview_options,
     get_subscription,
     get_blocked_users,
@@ -23,8 +21,8 @@ from aiogram.types import InlineKeyboardMarkup as IMarkup
 from aiogram.types import InlineKeyboardButton as IButton
 
 from mg.core.types import MaksogramBot
-from mg.core.yoomoney import create_payment
-from mg.core.functions import error_notify, resources_path, get_account_status, get_payment_data
+from mg.core.yoomoney import create_payment, check_payment, delete_payment
+from mg.core.functions import error_notify, resources_path, get_account_status, get_payment_data, renew_subscription
 
 
 # Инициализация обработчиков сообщений и нажатий кнопок
@@ -48,10 +46,11 @@ from mg.modules.bot import modules_initial
 modules_initial()
 from mg.answering_machine.bot import answering_machine_initial
 answering_machine_initial()
-from mg.bot.inline_mode import inline_mode_initial
-inline_mode_initial()
 from mg.fire.bot import fire_initial
 fire_initial()
+
+from mg.bot.inline_mode import inline_mode_initial
+inline_mode_initial()
 
 
 cb = CallbackData()
@@ -251,26 +250,55 @@ async def _subscription(callback_query: CallbackQuery):
 
 async def subscription_menu(account_id: int, subscription_id: int) -> dict[str, Any]:
     subscription = await get_subscription(subscription_id)
-    amount_rub = (await get_payment_data(account_id)).fee  # Цена базовой подписки в месяц в рублях для клиента
-    currencies = await get_currencies()
+    fee = (await get_payment_data(account_id)).fee  # Цена базовой подписки в месяц в рублях для клиента
 
-    without_discount = amount_rub * (subscription.duration / 30)  # Цена без скидки для выбранной подписки за месяц
-    fee = await convert_ruble(without_discount * (1 - subscription.discount / 100), currencies)  # Цена выбранной подписки в рублях и криптовалютах
+    without_discount = int(fee * (subscription.duration / 30))
+    amount = int(without_discount * (1 - subscription.discount / 100))  # Цена со скидкой
     discount = f"-{subscription.discount}%"
-    discount_about = f" (вместо {int(without_discount)} руб)" if subscription.discount else ""  # Информация о цене без скидки
+    discount_about = f" (вместо {without_discount} руб)" if subscription.discount else " (без скидки)"  # Информация о скидке
 
-    # Текст с ценами подписки в криптовалютах и их эквивалентами в рублях
-    text = [f"{currency.name}: {fee[currency.name].crypto} {currency.name.lower()} (≈ {fee[currency.name].rub} руб)" for currency in currencies]
+    link = await create_payment(account_id, amount, subscription.about, subscription_id)
 
-    link = await create_payment(account_id, fee['RUB'], subscription.about, subscription_id)
-    buttons = [IButton(text=currency.name, web_app=WebAppInfo(url=f"{WEB_APP}/payment/{currency.name.lower()}?amount={fee[currency.name].crypto}"))
-               for currency in currencies]
-    markup = IMarkup(inline_keyboard=[buttons,
-                                      [IButton(text=f"💳 Оплатить {fee['RUB']} руб", url=link)],
+    markup = IMarkup(inline_keyboard=[[IButton(text=f"💳 Оплатить {amount} руб", web_app=WebAppInfo(url=link))],
+                                      [IButton(text="✅ Проверить оплату", callback_data=cb('check_payment', subscription_id))],
                                       [IButton(text="◀️  Назад", callback_data=cb('payment'))]])
 
     return dict(caption=f"🌟 <b>MG Premium на {subscription.about.lower()} {discount}</b>\n\n"
-                        f"RUB: {fee['RUB']} руб{discount_about}\n{'\n'.join(text)}", reply_markup=markup)
+                        f"Цена: {amount} руб{discount_about}", reply_markup=markup)
+
+
+@dp.callback_query(F.data.startswith(cb.command('check_payment')))
+@error_notify()
+async def _check_payment(callback_query: CallbackQuery):
+    if await new_callback_query(callback_query, important=True): return
+    account_id = callback_query.from_user.id
+    subscription_id = cb.deserialize(callback_query.data)[0]
+    subscription = await get_subscription(subscription_id)
+
+    if (status := await check_payment(account_id)) == 'succeeded':
+        await delete_payment(account_id)
+        await renew_subscription(account_id, subscription.duration)
+
+        await callback_query.message.edit_caption(
+            caption=f"🌟 <b>Maksogram Premium</b>\nСпасибо за проведенную оплату: Maksogram Premium продлен на {subscription.about.lower()}",
+            reply_markup=IMarkup(inline_keyboard=[[IButton(text="◀️  Назад", callback_data=cb('premium', 'edit'))]]))
+        await bot.send_message(OWNER, f"Пользовать отправил оплату. Подписка продлена на {subscription.about.lower()}")
+
+    elif status == 'canceled':
+        await delete_payment(account_id)
+
+        await callback_query.message.edit_caption(
+            caption="🌟 <b>Maksogram Premium</b>\nТранзакция была прервана или ее время истекло",
+            reply_markup=IMarkup(inline_keyboard=[[IButton(text="◀️  Назад", callback_data=cb('premium', 'edit'))]]))
+        await bot.send_message(OWNER, f"Пользователь {account_id} попытался подтвердить платеж, но его статус {status}")
+
+    elif status == 'pending':
+        await callback_query.answer("Завершите оплату, чтобы получить Maksogram Premium", True)
+        await bot.send_message(OWNER, "Платеж находится в состоянии ожидания оплаты от пользователя")
+
+    else:
+        await callback_query.answer("Транзакция проверяется...", True)
+        await bot.send_message(OWNER, f"Неизвестный статус оплаты: {status}")
 
 
 @dp.message()

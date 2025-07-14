@@ -54,7 +54,7 @@ async def _review(inline_query: InlineQuery):
     if is_started is not None:
         button = InlineQueryResultsButton(text="Открыть меню", start_parameter="menu")
     else:
-        button = InlineQueryResultsButton(text="Зарегаться в Maksogram", start_parameter="inline_mode")
+        button = InlineQueryResultsButton(text="Запустить Maksogram", start_parameter="menu inline_mode")
 
     results = []
 

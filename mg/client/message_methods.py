@@ -94,9 +94,6 @@ class MessageMethods:
         if not await self.enabled_saving_messages():
             return  # "Сохранение сообщений" выключено в настройках
 
-        if await self.save_self_destructing_message(message):
-            return  # Самоуничтожающиеся сообщения обрабатываются только отдельно
-
         if not await self.check_count_saved_messages():  # Достигнут лимит количества сохраненных сообщений в день
             if await self.get_limit('saving_messages') is False:  # Уведомление о достижении лимита еще не отправлено
                 if await get_subscription(self.id) is None:
@@ -108,6 +105,9 @@ class MessageMethods:
 
                 await self.update_limit('saving_messages')
             return  # После достижения лимита сохраненных сообщений в день, сохранения сообщения не происходит
+
+        if await self.save_self_destructing_message(message):
+            return  # Самоуничтожающиеся сообщения обрабатываются только отдельно
 
         try:
             saved_message: Message = await message.forward_to(self.my_messages)

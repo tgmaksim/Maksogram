@@ -20,7 +20,7 @@ from mg.core.functions import error_notify, full_name, time_now, get_subscriptio
 cb = CallbackData()
 
 
-@dp.callback_query(F.data.startswith(cb.command('fire')))
+@dp.callback_query(F.data.startswith(cb.command('fires')))
 @error_notify()
 async def _fire(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return

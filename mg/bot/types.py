@@ -76,6 +76,9 @@ class UserState(StatesGroup):
     auto_answer_trigger = State('auto_answer_trigger')
     auto_answer_chat = State('auto_answer_chat')
 
+    fire = State('fire')
+    edit_fire_name = State('edit_fire_name')
+
 
 class CallbackDataParams(tuple):
     def get(self, index: int):
@@ -162,33 +165,6 @@ class Subscription:
             discount=json_data['discount'],
             about=json_data['about']
         )
-
-
-class PaymentCurrency:
-    def __init__(self, name: str, coefficient: float, accuracy: int, _min: float):
-        self.name = name
-        self.coefficient = coefficient
-        self.accuracy = accuracy
-        self.min = _min
-
-    @classmethod
-    def list_from_json(cls, json_data: list[dict]) -> list['PaymentCurrency']:
-        return [cls.from_json(data) for data in json_data]
-
-    @classmethod
-    def from_json(cls, json_data: dict) -> 'PaymentCurrency':
-        return cls(
-            name=json_data['name'],
-            coefficient=json_data['coefficient'],
-            accuracy=json_data['accuracy'],
-            _min=json_data['min']
-        )
-
-
-class AmountPaymentCurrency:
-    def __init__(self, rub: int, crypto: str):
-        self.rub = rub
-        self.crypto = crypto
 
 
 @dataclass

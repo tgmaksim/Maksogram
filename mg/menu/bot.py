@@ -6,7 +6,7 @@ from html import escape
 from aiogram import F
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import Command, CommandStart
-from mg.bot.types import dp, bot, CallbackData, UserState, support_link
+from mg.bot.types import dp, bot, CallbackData, UserState
 from aiogram.types import Message, CallbackQuery, WebAppInfo, KeyboardButtonRequestChat, KeyboardButtonRequestUsers
 from . functions import (
     add_chat,
@@ -29,7 +29,6 @@ from mg.bot.functions import (
     request_user,
     request_chat,
     preview_options,
-    get_subscription,
     new_callback_query,
     generate_sensitive_link,
 )
@@ -48,8 +47,7 @@ from aiogram.types import InlineKeyboardButton as IButton
 
 from mg.modules.weather import check_city
 from mg.client.types import maksogram_clients
-from mg.core.yoomoney import check_payment, delete_payment
-from mg.core.functions import unzip_int_data, error_notify, get_account_status, get_settings, full_name, renew_subscription
+from mg.core.functions import unzip_int_data, error_notify, get_account_status, get_settings, full_name
 
 
 cb = CallbackData()
@@ -88,34 +86,6 @@ async def _start(message: Message, state: FSMContext):
             await bot.send_message(friend_id, "По вашей реферальной ссылке зашел новый пользователь. "
                                               "Когда он запустит Maksogram, придет подарок в виде месяца подписки")
             await bot.send_message(OWNER, f"Регистрация по реферальной ссылке #r{friend_id}")
-    elif len(params) == 1 and params[0].startswith('p'):
-        subscription_id = unzip_int_data(params[0].removeprefix('p'))
-        subscription = await get_subscription(subscription_id)
-
-        if (status := await check_payment(account_id)) == 'succeeded':
-            await delete_payment(account_id)
-            await renew_subscription(account_id, subscription.duration)
-
-            await hello_message.edit_text(f"🌟 <b>Maksogram Premium</b>\n"
-                                          f"Спасибо за проведенную оплату: Maksogram Premium продлен на {subscription.about.lower()}")
-            await bot.send_message(OWNER, f"Пользовать отправил оплату. Подписка продлена на {subscription.about.lower()}")
-
-        elif status == 'canceled':
-            await delete_payment(account_id)
-
-            await hello_message.edit_text("🌟 <b>Maksogram Premium</b>\nТранзакция была прервана или ее время истекло\n")
-            await bot.send_message(OWNER, f"Пользователь {account_id} попытался подтвердить платеж, но его статус {status}")
-
-        elif status == 'pending':
-            await hello_message.edit_text("🌟 <b>Maksogram Premium</b>\nЗавершите оплату, чтобы получить Maksogram Premium")
-            await bot.send_message(OWNER, "Платеж находится в состоянии ожидания оплаты от пользователя")
-
-        elif status is None:
-            await hello_message.edit_text(f"Данные о платеже отсутствуют, напишите {support_link}")
-            await bot.send_message(OWNER, "Данные о платеже не найдены...")
-
-        else:
-            await bot.send_message(OWNER, f"Неизвестный статус платежа: {status}")
 
     elif 'menu' in params:
         await hello_message.edit_text(**await menu(account_id))
@@ -163,7 +133,7 @@ async def menu(account_id: int) -> dict[str, Any]:
                                            IButton(text="👀 Призрак", callback_data=cb('ghost_mode', prev))],
                                           [IButton(text="🪧 Быстрые ответы", callback_data=cb('speed_answers', prev)),
                                            IButton(text="🛡 Защита аккаунта", callback_data=cb('security', prev))],
-                                          [IButton(text="🔥 Огонек", callback_data=cb('fire', prev)),
+                                          [IButton(text="🔥 Огонек", callback_data=cb('fires', prev)),
                                            IButton(text="💬 Maksogram в чате", callback_data=cb('modules', prev))],
                                           [IButton(text="🌟 Maksogram Premium", callback_data=cb('premium', prev))]])
 

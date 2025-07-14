@@ -69,7 +69,7 @@ async def _new_status_user_start(callback_query: CallbackQuery, state: FSMContex
         await callback_query.answer("Запустите Maksogram кнопкой в меню", True)
         return
 
-    if not await check_count_status_users(callback_query.from_user.id):
+    if not await check_count_status_users(account_id):
         if await get_subscription(account_id) is None:
             await callback_query.answer("Достигнут лимит пользователей, подключите Maksogram Premium", True)
         else:
@@ -107,6 +107,7 @@ async def _new_status_user(message: Message, state: FSMContext):
             new_message_id = (await message.answer(response.warning, reply_markup=markup)).message_id
             await state.update_data(message_id=new_message_id)
         else:
+            await state.clear()
             name = "Мой аккаунт" if response.user.id == account_id else full_name(response.user)
 
             maksogram_clients[account_id].add_status_user(response.user.id)
