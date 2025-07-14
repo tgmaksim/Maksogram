@@ -14,7 +14,7 @@ async def reload():
         if time_now().timestamp() - old >= 24 * 60 * 60:
             os.remove(www_path(f"{BASE_PATH_STORIES}/{file}"))
 
-    await reload_maksogram()
+    await reload_maksogram(logging=False)
 
 if __name__ == '__main__':
     asyncio.run(reload())

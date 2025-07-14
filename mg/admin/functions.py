@@ -26,10 +26,11 @@ async def reload_server():
             await sessions.post(f"{NETANGELS_API_URL}/virtualhosts/{VIRTUALHOST_ID}/restart", headers={'Authorization': f'Bearer {token}'})
 
 
-async def reload_maksogram():
+async def reload_maksogram(logging=True):
     """Перезагружает Maksogram"""
 
-    print("Перезапуск Maksogram")
+    if logging:
+        print("Перезапуск Maksogram")
 
     async with ClientSession() as session:
         async with session.post(GATEWAY_TOKEN_URL, data={'api_key': NETANGELS_API_KEY}) as response:
