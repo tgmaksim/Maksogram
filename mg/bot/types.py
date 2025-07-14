@@ -31,6 +31,11 @@ class Blocked:
     users = []  # Заблокированные админом пользователи
 
 
+class Sleep:
+    loading = True
+    reload = False
+
+
 class UserState(StatesGroup):
     class Admin(StatesGroup):
         mailing = State('mailing')

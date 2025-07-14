@@ -13,10 +13,11 @@ from mg.client.functions import get_is_started
 from telethon.tl.types import User, Chat, Channel
 from telethon.utils import parse_username, parse_phone
 from aiogram.types import Message, CallbackQuery, LinkPreviewOptions, InlineQuery
-from  .types import bot, Blocked, Subscription, CallbackData, PaymentCurrency, AmountPaymentCurrency, RequestUserResult, RequestChatResult
+from . types import Sleep, bot, Blocked, Subscription, CallbackData, PaymentCurrency, AmountPaymentCurrency, RequestUserResult, RequestChatResult
 
 
 cb = CallbackData()
+callbacks: dict[int, tuple[int, str]] = {}  # Последнее нажатие кнопки пользователем в сообщении
 
 
 async def new_message(message: Message, *, params: Optional[dict[str, str]] = None, accept_album: bool = False) -> bool:
@@ -76,6 +77,11 @@ async def new_message(message: Message, *, params: Optional[dict[str, str]] = No
     if message.chat.id in Blocked.users:
         await bot.send_message(OWNER, "Пользователь заблокирован")
 
+    if Sleep.reload or Sleep.loading:
+        await message.answer("Подождите минуту, бот перезагружается!" if Sleep.reload else "Подождите несколько секунд, бот загружается!")
+        await bot.send_message(OWNER, "Бот перезагружается..." if Sleep.reload else "Бот загружается...")
+        return True
+
     if not accept_album and message.media_group_id:
         await message.answer("Альбом с несколькими медиа не поддерживается!")
         return True  # Если альбом необходимо проигнорировать
@@ -116,6 +122,16 @@ async def new_callback_query(callback_query: CallbackQuery, *, params: Optional[
             callback_query.data,
             *(f"{key}: {value}" for key, value in (params or {}).items()))
     await bot.send_message(OWNER, '\n'.join(filter(None, text)))
+
+    if callback := callbacks.get(callback_query.from_user.id):
+        if callback[0] == callback_query.message.message_id and callback[1] == callback_query.data:  # Прошлое нажатие той же кнопки
+            return True
+    callbacks[callback_query.from_user.id] = (callback_query.message.message_id, callback_query.data)  # Обновляем данные
+
+    if Sleep.reload or Sleep.loading:
+        await callback_query.answer("Подождите минуту, бот перезагружается!" if Sleep.reload else "Подождите несколько секунд, бот загружается!", True)
+        await bot.send_message(OWNER, "Бот перезагружается..." if Sleep.reload else "Бот загружается...")
+        return True
 
     if testing:
         await callback_query.answer("Ведутся технические работы...", True)
@@ -164,6 +180,10 @@ async def new_inline_query(inline_query: InlineQuery, *, params: Optional[dict[s
             inline_query.query,
             *(f"{key}: {value}" for key, value in (params or {}).items()))
     await bot.send_message(OWNER, '\n'.join(filter(None, text)))
+
+    if Sleep.reload or Sleep.loading:
+        await bot.send_message(OWNER, "Бот перезагружается..." if Sleep.reload else "Бот загружается...")
+        return True
 
     if testing:
         await bot.send_message(OWNER, "Ведется тестирование...")

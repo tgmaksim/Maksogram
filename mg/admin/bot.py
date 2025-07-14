@@ -6,8 +6,8 @@ from aiogram import F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramForbiddenError
-from mg.bot.types import dp, bot, UserState, CallbackData
 from aiogram.types import Message, CallbackQuery, WebAppInfo
+from mg.bot.types import dp, bot, UserState, CallbackData, Sleep
 from mg.bot.functions import developer_command, new_callback_query, new_message
 
 from aiogram.types import KeyboardButton as KButton
@@ -39,6 +39,7 @@ async def _reload(message: Message):
     if await developer_command(message): return
     await message.answer("<b>Перезапуск Maksogram</b>")
 
+    Sleep.reload = True
     await reload_maksogram()
 
 
@@ -48,6 +49,7 @@ async def _stop(message: Message):
     if await developer_command(message): return
     await message.answer("<b>Остановка Maksogram</b>")
 
+    Sleep.reload = True
     await stop_maksogram()
 
 

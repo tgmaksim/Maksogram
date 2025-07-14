@@ -1,7 +1,7 @@
 from mg.client import MaksogramClient
 from mg.core.types import MaksogramBot
 from mg.core.functions import format_error
-from mg.bot.types import feedback_link, support_link
+from mg.bot.types import feedback_link, support_link, Sleep
 from telethon.errors.rpcerrorlist import UserIsBlockedError
 from mg.client.functions import get_accounts, new_telegram_client
 from mg.client.types import maksogram_clients, UserIsNotAuthorized
@@ -29,4 +29,6 @@ async def start_clients():
 
             await MaksogramBot.send_system_message(f"Удалена сессия у {account_id}")
         except Exception as e:
-            await MaksogramBot.send_system_message(f"Ошибка при запуске {account_id}" + format_error(e))
+            await MaksogramBot.send_system_message(f"Ошибка при запуске {account_id}\n{format_error(e)}")
+
+    Sleep.loading = False  # Готовность бота отвечать пользователям

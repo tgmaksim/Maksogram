@@ -444,11 +444,14 @@ async def get_enabled_auto_answer(maksogram_client: 'MaksogramClient', text: str
             ordinary_auto_answers.append(answer)
             continue
 
+        start_time = answer.start_time.replace((answer.start_time.hour + answer.time_zone) % 24)
+
         if answer.end_time is None:
+            if start_time > now.time():
+                continue  # Автоответ еще не работает
             if awake is True:
                 continue  # Автоответ "до пробуждения" уже не работает
         else:
-            start_time = answer.start_time.replace((answer.start_time.hour + answer.time_zone) % 24)
             end_time = answer.end_time.replace((answer.end_time.hour + answer.time_zone) % 24)
 
             if start_time < end_time:

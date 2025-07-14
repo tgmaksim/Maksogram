@@ -353,6 +353,8 @@ async def _edit_auto_answer_timetable(message: Message, state: FSMContext):
         except AssertionError:
             warning = "Начало и окончание расписания не должно совпадать"
         else:
+            await state.clear()
+
             hours_start_time = (hours_start_time - time_zone) % 24
             hours_end_time = (hours_end_time - time_zone) % 24 if isinstance(hours_end_time, int) else None
 
@@ -416,6 +418,7 @@ async def _edit_auto_answer_weekdays(message: Message, state: FSMContext):
     elif not message.text or not re.fullmatch(WEEKDAYS_RE, text):
         warning = "Отправьте <b>дни недели</b> работы автоответа через запятую\nНапример: пн, вт, ср, чт, пт"
     else:
+        await state.clear()
         weekdays = list(set([week.index(weekday) for weekday in text.split(',')]))  # Список целых чисел дней недели в порядке возрастания
 
         await edit_auto_answer_weekdays(account_id, answer_id, weekdays)
@@ -532,6 +535,7 @@ async def _auto_answer_trigger(message: Message, state: FSMContext):
     elif intersection_triggers(answer.triggers.values(), [trigger]):
         warning = "Такой триггер (или похожий) уже есть"
     else:
+        await state.clear()
         await add_auto_answer_trigger(account_id, answer_id, trigger)
 
         if answer.status:
@@ -713,6 +717,7 @@ async def _auto_answer_chat(message: Message, state: FSMContext):
             new_message_id = (await message.answer(response.warning, reply_markup=markup)).message_id
             await state.update_data(message_id=new_message_id)
         else:
+            await state.clear()
             name = full_name(response.user)
 
             await add_auto_answer_chat(account_id, answer_id, response.user.id, name)
