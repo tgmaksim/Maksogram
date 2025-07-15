@@ -1,4 +1,5 @@
 from typing import Optional
+from datetime import datetime
 
 
 FIRES_BASE_DIR = "fires"
@@ -13,7 +14,7 @@ class FireLevel:
 
 
 class Fire:
-    def __init__(self, account_id: int, user_id: int, name: str, account_status: bool, user_status: bool, days: int, score: int, reset: bool, inline_message_id: Optional[int]):
+    def __init__(self, account_id: int, user_id: int, name: str, account_status: bool, user_status: bool, days: int, score: int, reset: bool, inline_message_id: Optional[int], updating_time: datetime):
         self.account_id = account_id
         self.user_id = user_id
         self.name = name
@@ -23,6 +24,7 @@ class Fire:
         self.score = score
         self.reset = reset
         self.inline_message_id = inline_message_id
+        self.updating_time = updating_time
 
     @property
     def active(self) -> bool:
@@ -56,7 +58,8 @@ class Fire:
             days=json_data['days'],
             score=json_data['score'],
             reset=json_data['reset'],
-            inline_message_id=json_data['inline_message_id']
+            inline_message_id=json_data['inline_message_id'],
+            updating_time=json_data['updating_time']
         )
 
     @classmethod

@@ -68,7 +68,7 @@ async def _critical_stop(message: Message):
 async def _sender(message: Message):
     user_id = int(message.reply_to_message.text.split('\n', 1)[0].removeprefix("User: "))
 
-    if message.text.lower() == "бан":
+    if message.text.lower() in ("блок", "бан", "блокировать", "забанить"):
         await block_user(user_id)
         await message.answer("Пользователь заблокирован!")
         return

@@ -181,6 +181,8 @@ class BackgroundMethods:
                 continue
 
             for fire in await get_fires(self.id):
+                if time_now() - fire.updating_time < timedelta(hours=1):
+                    continue  # Создание огонька или его сброс был недавно
                 if fire.reset:
                     await clear_fire(fire.account_id, fire.user_id)
                     fire.account_status = False; fire.user_status = False; fire.reset = False; fire.days = 0; fire.score = 0

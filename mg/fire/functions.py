@@ -25,7 +25,8 @@ MESSAGE_FIRE_FORMAT = lambda account_id, user_id, name, days, score, active: \
 async def get_fires(account_id: int) -> list[Fire]:
     """Возвращает список огоньков клиента, отсортированный по длине имени"""
 
-    sql = f"SELECT account_id, user_id, name, account_status, user_status, days, score, reset, inline_message_id FROM fires WHERE account_id={account_id}"
+    sql = (f"SELECT account_id, user_id, name, account_status, user_status, days, score, reset, inline_message_id, updating_time "
+           f"FROM fires WHERE account_id={account_id}")
     data: list[dict] = await Database.fetch_all(sql)
 
     fires = Fire.list_from_json(data)
@@ -51,7 +52,7 @@ async def check_count_fires(account_id: int) -> bool:
 async def add_fire(account_id: int, user_id: int, name: str, inline_message_id: str) -> bool:
     """Создает огонек с пользователем и возвращает результат выполнения"""
 
-    sql = f"INSERT INTO fires (account_id, user_id, name, inline_message_id) VALUES($1, $2, $3, $4)"
+    sql = f"INSERT INTO fires (account_id, user_id, name, inline_message_id, updating_time) VALUES($1, $2, $3, $4, now())"
     try:
         await Database.execute(sql, account_id, user_id, name, inline_message_id)
     except UniqueViolationError:
@@ -67,7 +68,7 @@ async def get_fire(account_id: int = None, user_id: int = None, inline_message_i
     else:
         where = f"account_id={account_id} AND user_id={user_id}"
 
-    sql = f"SELECT account_id, user_id, name, account_status, user_status, days, score, reset, inline_message_id FROM fires WHERE {where}"
+    sql = f"SELECT account_id, user_id, name, account_status, user_status, days, score, reset, inline_message_id, updating_time FROM fires WHERE {where}"
     data: Optional[dict] = await Database.fetch_row(sql)
     if not data:
         return None
@@ -117,7 +118,7 @@ async def update_fire_status(account_id: int, user_id: int, status: str):
     """Обновляет account_status или user_status огонька с другом"""
 
     if status == 'reset':
-        sql = f"UPDATE fires SET account_status=false, user_status=false WHERE account_id={account_id} AND user_id={user_id}"
+        sql = f"UPDATE fires SET account_status=false, user_status=false, updating_time=now() WHERE account_id={account_id} AND user_id={user_id}"
         await Database.execute(sql)
         return
 
@@ -138,14 +139,15 @@ async def reset_fire(account_id: int, user_id: int):
 async def clear_fire(account_id: int, user_id: int):
     """Обнуляет все достижения огонька"""
 
-    sql = f"UPDATE fires SET reset=false, days=0, score=0, account_status=false, user_status=false WHERE account_id={account_id} AND user_id={user_id}"
+    sql = (f"UPDATE fires SET reset=false, days=0, score=0, account_status=false, user_status=false, updating_time=now() "
+           f"WHERE account_id={account_id} AND user_id={user_id}")
     await Database.execute(sql)
 
 
 async def recover_fire(account_id: int, user_id: int):
     """Восстанавливает огонек с другом"""
 
-    sql = f"UPDATE fires SET reset=false WHERE account_id={account_id} AND user_id={user_id}"
+    sql = f"UPDATE fires SET reset=false, updating_time=now() WHERE account_id={account_id} AND user_id={user_id}"
     await Database.execute(sql)
 
 
