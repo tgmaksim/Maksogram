@@ -3,6 +3,7 @@ from mg.config import testing, OWNER, SITE
 from html import escape
 from mg.core.database import Database
 from typing import Optional, Literal
+from datetime import datetime, timedelta
 from mg.core.functions import admin_time, time_now, zip_int_data
 
 from mg.client.types import maksogram_clients
@@ -14,7 +15,7 @@ from . types import Sleep, bot, Blocked, Subscription, CallbackData, RequestUser
 
 
 cb = CallbackData()
-callbacks: dict[int, tuple[int, str]] = {}  # Последнее нажатие кнопки пользователем в сообщении
+callbacks: dict[int, tuple[int, str, datetime]] = {}  # Последнее нажатие кнопки пользователем в сообщении
 
 
 async def new_message(message: Message, *, params: Optional[dict[str, str]] = None, accept_album: bool = False) -> bool:
@@ -101,7 +102,7 @@ async def check_new_user(user_id: int) -> bool:
     return not data
 
 
-async def new_callback_query(callback_query: CallbackQuery, *, params: Optional[dict[str, str]] = None, important: bool = False) -> bool:
+async def new_callback_query(callback_query: CallbackQuery, *, params: Optional[dict[str, str]] = None) -> bool:
     """
     Обрабатывает нажатие на кнопку от пользователя и возвращает необходимость прервать диалог
 
@@ -124,10 +125,10 @@ async def new_callback_query(callback_query: CallbackQuery, *, params: Optional[
             *(f"{key}: {value}" for key, value in (params or {}).items()))
     await bot.send_message(OWNER, '\n'.join(filter(None, text)))
 
-    if not important and (callback := callbacks.get(callback_query.from_user.id)):
-        if callback[0] == callback_query.message.message_id and callback[1] == callback_query.data:  # Прошлое нажатие той же кнопки
+    if callback := callbacks.get(callback_query.from_user.id):
+        if callback[0] == callback_query.message.message_id and callback[1] == callback_query.data and time_now() - callback[2] < timedelta(seconds=1):
             return True
-    callbacks[callback_query.from_user.id] = (callback_query.message.message_id, callback_query.data)  # Обновляем данные
+    callbacks[callback_query.from_user.id] = (callback_query.message.message_id, callback_query.data, time_now())  # Обновляем данные
 
     if Sleep.reload or Sleep.loading:
         await callback_query.answer("Подождите минуту, бот перезагружается!" if Sleep.reload else "Подождите несколько секунд, бот загружается!", True)

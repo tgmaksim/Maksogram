@@ -65,7 +65,7 @@ def format_error(error: Exception):
 
 
 def error_notify(*fun_parameters: str):
-    """Декоратор для уведомления об ошибки админа"""
+    """Декоратор для уведомления об ошибке админа"""
 
     def decorator(func: Callable[..., Awaitable]):
         @wraps(func)
@@ -74,7 +74,9 @@ def error_notify(*fun_parameters: str):
             try:
                 await func(_obj, **parameters)
             except Exception as error:
-                await MaksogramBot.send_system_message(format_error(error), parse_mode=None)
+                text = format_error(error)
+                for i in range(0, len(text), 4096):
+                    await MaksogramBot.send_system_message(text[i:min(i + 4096, len(text))], parse_mode=None)
 
         return wrapper
 

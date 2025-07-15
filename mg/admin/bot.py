@@ -95,8 +95,7 @@ async def _admin(message: Message):
                          "/stop - остановить Maksogram\n"
                          "/critical_stop - экстренная остановка\n"
                          "/mailing - рассылка\n"
-                         "/login - Web App ввода кода\n"
-                         "/payment - меню оплаты подписки", reply_markup=markup)
+                         "/login - Web App ввода кода", reply_markup=markup)
 
 
 @dp.callback_query(F.data.startswith(cb.command('admin_statistics')))

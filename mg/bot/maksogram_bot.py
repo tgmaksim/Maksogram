@@ -270,7 +270,7 @@ async def subscription_menu(account_id: int, subscription_id: int) -> dict[str, 
 @dp.callback_query(F.data.startswith(cb.command('check_payment')))
 @error_notify()
 async def _check_payment(callback_query: CallbackQuery):
-    if await new_callback_query(callback_query, important=True): return
+    if await new_callback_query(callback_query): return
     account_id = callback_query.from_user.id
     subscription_id = cb.deserialize(callback_query.data)[0]
     subscription = await get_subscription(subscription_id)
