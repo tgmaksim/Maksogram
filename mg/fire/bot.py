@@ -67,7 +67,7 @@ async def fires_menu(account_id: int, prev: bool = False) -> dict[str, Any]:
 async def _new_fire_start(inline_query: InlineQuery):
     if await new_inline_query(inline_query): return
     await inline_query.answer([InlineQueryResultArticle(
-        id="new_fire", title="🔥 Создать огонек с другом", thumbnail_url=f"{WWW_SITE}/{fire_levels[1].photo}", thumbnail_width=640, thumbnail_height=640,
+        id=cb('new_fire'), title="🔥 Создать огонек с другом", thumbnail_url=f"{WWW_SITE}/{fire_levels[1].photo}",
         description = "Создавайте огоньки в чате с друзьями и растите их вместе. Увеличивайте счет и достигайте новых уровней",
         input_message_content=InputTextMessageContent(
             message_text="🔥 Загрузка данных..."
@@ -76,7 +76,7 @@ async def _new_fire_start(inline_query: InlineQuery):
     )], cache_time=0, is_personal=True)
 
 
-@dp.chosen_inline_result()
+@dp.chosen_inline_result(F.result_id.startswith(cb.command('new_fire')))
 @error_notify()
 async def _new_fire(inline_result: ChosenInlineResult):
     if await new_inline_result(inline_result): return

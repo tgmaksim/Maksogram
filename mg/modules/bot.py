@@ -16,7 +16,7 @@ from aiogram.types import InlineKeyboardMarkup as IMarkup
 from aiogram.types import InlineKeyboardButton as IButton
 
 from typing import Any
-from mg.core.functions import error_notify
+from mg.core.functions import error_notify, get_subscription
 
 from mg.modules.currencies import currencies
 from . functions import enabled_module, set_status_module, get_main_currency, set_main_currency, set_my_currencies
@@ -121,7 +121,7 @@ async def _module(callback_query: CallbackQuery):
 
 
 async def module_menu(account_id: int, module: str, prev: bool = False) -> dict[str, Any]:
-    module = module.removeprefix('morning_')
+    module = module.removeprefix('morning_').removeprefix('auto_')
     buttons = []
 
     if await enabled_module(account_id, module):
@@ -148,6 +148,12 @@ async def module_menu(account_id: int, module: str, prev: bool = False) -> dict[
             buttons.append([IButton(text=f"🔴 {modules[module]['name']} по утрам",
                                     callback_data=cb('module_switch', f"morning_{module}", True, prev))])
 
+    if module == 'audio_transcription':
+        status = await enabled_module(account_id, f"auto_{module}")
+        indicator = "🟢" if status else "🔴"
+        buttons.append([IButton(text=f"{indicator} Автоматическая расшифровка",
+                                callback_data=cb('module_switch', f"auto_{module}", not status, prev))])
+
     link_preview_options = preview_options(f"{modules[module]['preview']}.mp4", show_above_text=True)
     markup = IMarkup(inline_keyboard=[*buttons,
                                       [IButton(text="◀️  Назад", callback_data=cb('modules', prev))]])
@@ -164,6 +170,10 @@ async def _module_switch(callback_query: CallbackQuery):
 
     if prev:
         await callback_query.answer("Запустите Maksogram кнопкой в меню", True)
+        return
+
+    if module == 'auto_audio_transcription' and await get_subscription(account_id) is None:
+        await callback_query.answer("Автоматическая расшифровка доступна только с Maksogram Premium!", True)
         return
 
     await set_status_module(account_id, module, command)

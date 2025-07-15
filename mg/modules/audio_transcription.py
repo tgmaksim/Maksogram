@@ -22,9 +22,9 @@ class ResultTranscription:
 
 api_options = ClientOptionsFromEnv()
 options: PrerecordedOptions = PrerecordedOptions(
-    model="nova-3",
+    model="nova-2",
     smart_format=True,
-    language="multi",
+    language="ru-RU",
 )
 
 

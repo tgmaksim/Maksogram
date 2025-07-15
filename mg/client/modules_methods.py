@@ -59,6 +59,13 @@ class ModulesMethods:
         :return: `None`, если команда не распознана или модуль выключен, иначе название модуля
         """
 
+        if (message.voice or message.video_note) and message.file.duration >= 30:
+            if await enabled_module(self.id, 'auto_audio_transcription'):
+                message = await message.forward_to(MaksogramBot.id)
+                await self.audio_transcription_module(message, None, message.voice or message.video_note)
+                await MaksogramBot.send_message(self.id, "Автоматическая расшифровка голосового завершена")
+                return
+
         text = (message.message or '').lower()
         bot = message.chat_id == MaksogramBot.id
         bot_audio, bot_voice, bot_video, bot_video_note, reply_audio, reply_voice, reply_video, reply_video_note = (None,) * 8

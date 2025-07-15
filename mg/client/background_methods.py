@@ -177,6 +177,7 @@ class BackgroundMethods:
     async def fire_center(self: 'MaksogramClient'):
         while True:  # Остановка через account_off (async_processes)
             if time_now(await self.get_time_zone()).hour != 0:
+                await asyncio.sleep(55 * 60)  # Ждем 55 минут
                 continue
 
             for fire in await get_fires(self.id):
