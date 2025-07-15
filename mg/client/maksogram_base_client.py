@@ -262,6 +262,7 @@ class MaksogramBaseClient:
             self.async_tasks.append(asyncio.get_running_loop().create_task(self.changed_profile_center()))
             self.async_tasks.append(asyncio.get_running_loop().create_task(self.admin_logger()))
             self.async_tasks.append(asyncio.get_running_loop().create_task(self.reminder_center()))
+            self.async_tasks.append(asyncio.get_running_loop().create_task(self.fire_center()))
 
             await MaksogramBot.send_system_message(f"Maksogram {VERSION} для {self.name} запущен")
             self.logger.info("MaksogramClient запущен")

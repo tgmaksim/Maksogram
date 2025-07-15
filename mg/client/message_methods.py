@@ -5,6 +5,7 @@ if TYPE_CHECKING:
 
 
 import os
+import asyncio
 
 from datetime import timedelta
 from mg.core.types import MaksogramBot
@@ -18,9 +19,11 @@ from telethon.errors.rpcerrorlist import (
     ChatForwardsRestrictedError,
 )
 from telethon.tl.patched import Message
+from aiogram.exceptions import TelegramBadRequest
 from telethon.tl.types import KeyboardButtonRow as BRow
 from telethon.tl.types import ReplyInlineMarkup as IMarkup
 from telethon.tl.types import KeyboardButtonCallback as IButton
+from telethon.tl.functions.messages import GetStickerSetRequest
 from telethon.tl.types import (
     UpdateNewAuthorization,
 
@@ -33,6 +36,7 @@ from telethon.tl.types import (
     MessageMediaPhoto,
     MessageMediaDocument,
     MessageMediaUnsupported,
+    InputStickerSetShortName,
 )
 from telethon.events import (
     NewMessage,
@@ -50,6 +54,7 @@ from mg.security.functions import enabled_security_hack, get_security_settings, 
 from mg.speed_answers.functions import get_speed_answer_by_text, get_path_speed_answer_media
 from mg.status_users.functions import update_last_message, get_user_settings, update_status_user, update_reading_statistics
 from mg.answering_machine.functions import get_enabled_auto_answer, get_path_auto_answer_media, update_auto_answer_triggering
+from mg.fire.functions import add_fire, get_fire, edit_fire_message, set_fire_inline_message_id, update_fire_status, update_score_fire
 
 
 cb = CallbackData()
@@ -61,6 +66,9 @@ MAX_SIZE_FILE = 20 * 2**20  # 20 МБ
 class MessageMethods:
     async def new_message(self: 'MaksogramClient', event: NewMessage.Event):
         message: Message = event.message
+
+        if message.via_bot:
+            return  # Не сохраняются сообщения через ботов
 
         if self.is_owner and message.message == "reload" and message.chat_id == self.id:
             await self.client.send_message(self.id, "Сервер перезапускается")
@@ -90,6 +98,11 @@ class MessageMethods:
 
         if message.out and event.is_private:  # Сообщение отправлено клиентом в личном чате
             await update_last_message(self.id, message.chat_id)  # Для будущего подсчета статистики времени прочтения
+
+        await self.fire(event)
+
+        if not message.out and message.sticker and message.sticker.id == 5271914077705212510 and message.effect == 5104841245755180586:
+            return  # Сообщение об обновлении огонька не сохраняется
 
         if not await self.enabled_saving_messages():
             return  # "Сохранение сообщений" выключено в настройках
@@ -222,6 +235,45 @@ class MessageMethods:
         await message.respond(answer.text, formatting_entities=entities, file=file)
         return True
 
+    async def fire(self: 'MaksogramClient', event: NewMessage.Event):
+        message: Message = event.message
+
+        if not event.is_private or not (fire := await get_fire(self.id, message.chat_id)):
+            return
+
+        if (message.video_note or message.voice) and message.file.duration >= 30:
+            await update_score_fire(fire.account_id, fire.user_id)
+            fire.score += 1
+
+            try:
+                await edit_fire_message(fire)  # Обновляем сообщение огонька в чате
+            except TelegramBadRequest:
+                await MaksogramBot.send_message(self.id, "Сообщение огонька в чате с другом удалено. Чтобы восстановить его, "
+                                                         "создайте его заново. При этом все данные с серией и счетом не будут потеряны")
+
+        if not fire.account_status and message.out:
+            await update_fire_status(self.id, message.chat_id, 'account')
+        elif not fire.user_status and not message.out:
+            await update_fire_status(self.id, message.chat_id, 'user')
+        else:
+            return
+
+        fire = await get_fire(fire.account_id, fire.user_id)
+        if not fire.active or fire.reset:
+            return
+
+        try:
+            await edit_fire_message(fire)  # Обновляем сообщение огонька в чате
+        except TelegramBadRequest:
+            await MaksogramBot.send_message(self.id, "Сообщение огонька в чате с другом удалено. Чтобы восстановить его, "
+                                                     "создайте его заново. При этом все данные с серией и счетом не будут потеряны")
+
+        for document in (await self.client(GetStickerSetRequest(InputStickerSetShortName("Flame"), hash=0))).documents:
+            if document.id == 5271914077705212510:  # Стикер радостного огонька с эффектом 🔥
+                sticker = await message.respond(file=MessageMediaDocument(document=document), message_effect_id=5104841245755180586)
+                await asyncio.sleep(3)
+                await sticker.delete()
+
     async def new_message_service(self: 'MaksogramClient', event: NewMessage.Event):
         message: MessageService = event.message
 
@@ -297,6 +349,21 @@ class MessageMethods:
 
     async def message_edited(self: 'MaksogramClient', event: MessageEdited.Event):
         message: Message = event.message
+
+        if message.via_bot_id == MaksogramBot.id and message.out and message.message.startswith("🔥 Создание огонька..."):
+            inline_message_id: str = message.get_entities_text()[0][1]
+
+            if fire := await get_fire(message.chat_id, self.id):
+                fire.inline_message_id = inline_message_id
+                await edit_fire_message(fire, text="Огоньком в этом чате управляем ваш собеседник...")
+                return
+
+            if not await add_fire(self.id, message.chat_id, "Огонек", inline_message_id):
+                await set_fire_inline_message_id(self.id, message.chat_id, inline_message_id)
+
+            await edit_fire_message(await get_fire(self.id, message.chat_id))
+            await (await message.pin(notify=False)).delete()
+            return
 
         saved_message = await self.get_saved_message(message.chat_id, message.id)
         if saved_message is None:

@@ -76,7 +76,6 @@ class UserState(StatesGroup):
     auto_answer_trigger = State('auto_answer_trigger')
     auto_answer_chat = State('auto_answer_chat')
 
-    fire = State('fire')
     edit_fire_name = State('edit_fire_name')
 
 

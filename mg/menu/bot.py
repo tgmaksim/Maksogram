@@ -45,6 +45,7 @@ from aiogram.types import ReplyKeyboardRemove as KRemove
 from aiogram.types import InlineKeyboardMarkup as IMarkup
 from aiogram.types import InlineKeyboardButton as IButton
 
+from mg.fire.bot import fire_menu
 from mg.modules.weather import check_city
 from mg.client.types import maksogram_clients
 from mg.core.functions import unzip_int_data, error_notify, get_account_status, get_settings, full_name
@@ -86,6 +87,13 @@ async def _start(message: Message, state: FSMContext):
             await bot.send_message(friend_id, "По вашей реферальной ссылке зашел новый пользователь. "
                                               "Когда он запустит Maksogram, придет подарок в виде месяца подписки")
             await bot.send_message(OWNER, f"Регистрация по реферальной ссылке #r{friend_id}")
+
+    elif len(params) == 1 and params[0].startswith('f'):
+        acc_id, user_id = map(unzip_int_data, params[0].removeprefix('f').split('-'))
+        if account_id not in (acc_id, user_id):
+            await hello_message.edit_text("🔥 Огонек с другом не найден...")
+        else:
+            await hello_message.edit_text(**await fire_menu(acc_id, user_id, from_link=True))
 
     elif 'menu' in params:
         await hello_message.edit_text(**await menu(account_id))

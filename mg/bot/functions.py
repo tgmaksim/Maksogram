@@ -2,20 +2,20 @@ from mg.config import testing, OWNER, SITE
 
 from html import escape
 from mg.core.database import Database
-from typing import Optional, Literal
 from datetime import datetime, timedelta
+from typing import Optional, Literal, Union
 from mg.core.functions import admin_time, time_now, zip_int_data
 
 from mg.client.types import maksogram_clients
 from mg.client.functions import get_is_started
 from telethon.tl.types import User, Chat, Channel
 from telethon.utils import parse_username, parse_phone
-from aiogram.types import Message, CallbackQuery, LinkPreviewOptions, InlineQuery
+from aiogram.types import Message, CallbackQuery, LinkPreviewOptions, InlineQuery, ChosenInlineResult
 from . types import Sleep, bot, Blocked, Subscription, CallbackData, RequestUserResult, RequestChatResult
 
 
 cb = CallbackData()
-callbacks: dict[int, tuple[int, str, datetime]] = {}  # Последнее нажатие кнопки пользователем в сообщении
+callbacks: dict[int, tuple[Union[int, str], str, datetime]] = {}  # Последнее нажатие кнопки пользователем в сообщении
 
 
 async def new_message(message: Message, *, params: Optional[dict[str, str]] = None, accept_album: bool = False) -> bool:
@@ -116,8 +116,10 @@ async def new_callback_query(callback_query: CallbackQuery, *, params: Optional[
             await callback_query.answer("Бот перезагружается..." if Sleep.reload else "Бот загружается...", True)
         return Sleep.reload or Sleep.loading
 
+    message_id = callback_query.inline_message_id or callback_query.message.message_id
+
     text = (f"User: <a href='tg://openmessage?user_id={callback_query.from_user.id}'>{callback_query.from_user.id}</a>",
-            f"Msg: {callback_query.message.message_id}",
+            f"Msg: {message_id}",
             f"Username: @{callback_query.from_user.username}" if callback_query.from_user.username else None,
             f"Имя: {callback_query.from_user.first_name}",
             f"Фамилия: {callback_query.from_user.last_name}" if callback_query.from_user.last_name else None,
@@ -126,9 +128,9 @@ async def new_callback_query(callback_query: CallbackQuery, *, params: Optional[
     await bot.send_message(OWNER, '\n'.join(filter(None, text)))
 
     if callback := callbacks.get(callback_query.from_user.id):
-        if callback[0] == callback_query.message.message_id and callback[1] == callback_query.data and time_now() - callback[2] < timedelta(seconds=1):
+        if callback[0] == message_id and callback[1] == callback_query.data and time_now() - callback[2] < timedelta(seconds=1):
             return True
-    callbacks[callback_query.from_user.id] = (callback_query.message.message_id, callback_query.data, time_now())  # Обновляем данные
+    callbacks[callback_query.from_user.id] = (message_id, callback_query.data, time_now())  # Обновляем данные
 
     if Sleep.reload or Sleep.loading:
         await callback_query.answer("Подождите минуту, бот перезагружается!" if Sleep.reload else "Подождите несколько секунд, бот загружается!", True)
@@ -195,6 +197,41 @@ async def new_inline_query(inline_query: InlineQuery, *, params: Optional[dict[s
         await bot.send_message(OWNER, "Пользователь заблокирован")
 
     return inline_query.from_user.id in Blocked.users
+
+
+async def new_inline_result(inline_result: ChosenInlineResult, *, params: Optional[dict[str, str]] = None) -> bool:
+    """
+    Обрабатывает результаты inline-запросов от пользователя и возвращает необходимость прервать диалог
+
+    :param inline_result: данные о результате запроса
+    :param params: дополнительные параметры для уведомления админа
+    :return: True, если необходимо прервать диалог с пользователей (не нужно отвечать), иначе False
+    """
+
+    if inline_result.from_user.id == OWNER:
+        return Sleep.reload or Sleep.loading
+
+    text = (f"User: <a href='tg://openmessage?user_id={inline_result.from_user.id}'>{inline_result.from_user.id}</a>",
+            f"Result: {inline_result.result_id}",
+            f"Username: @{inline_result.from_user.username}" if inline_result.from_user.username else None,
+            f"Имя: {inline_result.from_user.first_name}",
+            f"Фамилия: {inline_result.from_user.last_name}" if inline_result.from_user.last_name else None,
+            inline_result.inline_message_id,
+            *(f"{key}: {value}" for key, value in (params or {}).items()))
+    await bot.send_message(OWNER, '\n'.join(filter(None, text)))
+
+    if Sleep.reload or Sleep.loading:
+        await bot.send_message(OWNER, "Бот перезагружается..." if Sleep.reload else "Бот загружается...")
+        return True
+
+    if testing:
+        await bot.send_message(OWNER, "Ведется тестирование...")
+        return True
+
+    if inline_result.from_user.id in Blocked.users:
+        await bot.send_message(OWNER, "Пользователь заблокирован")
+
+    return inline_result.from_user.id in Blocked.users
 
 
 def preview_options(path: str = '', *, site: str = SITE, show_above_text: bool = False):

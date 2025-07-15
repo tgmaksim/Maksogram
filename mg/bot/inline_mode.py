@@ -2,8 +2,8 @@ from mg.config import SITE
 
 from mg.bot.types import dp
 from aiogram.filters import Command
-from mg.bot.functions import new_inline_query, new_message, preview_options
-from aiogram.types import InlineQuery, InlineQueryResultsButton, InlineQueryResultArticle, InputTextMessageContent, Message
+from mg.bot.functions import new_inline_query, new_message, preview_options, new_inline_result
+from aiogram.types import InlineQuery, InlineQueryResultsButton, InlineQueryResultArticle, InputTextMessageContent, Message, ChosenInlineResult
 
 from aiogram.types import InlineKeyboardMarkup as IMarkup
 from aiogram.types import InlineKeyboardButton as IButton
@@ -68,6 +68,12 @@ async def _review(inline_query: InlineQuery):
             )))
 
     await inline_query.answer(results=results, button=button, cache_time=0, is_personal=True)
+
+
+@dp.chosen_inline_result()
+@error_notify()
+async def _result_review(inline_result: ChosenInlineResult):
+    if await new_inline_result(inline_result): return
 
 
 @dp.message(Command('inline_mode'))

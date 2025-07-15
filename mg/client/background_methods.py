@@ -18,6 +18,7 @@ from mg.core.functions import (
     resources_path
 )
 
+from aiogram.exceptions import TelegramBadRequest
 from telethon.tl.types import MessageEntityCustomEmoji
 from telethon.tl.functions.channels import GetAdminLogRequest
 
@@ -34,6 +35,7 @@ from mg.changed_profile.functions import (
 
 from mg.modules.functions import get_reminds, delete_remind
 from . functions import get_min_admin_log_id, set_min_admin_log_id
+from mg.fire.functions import get_fires, update_fire_status, edit_fire_message, reset_fire, clear_fire
 
 
 class BackgroundMethods:
@@ -170,6 +172,31 @@ class BackgroundMethods:
                 await MaksogramBot.send_system_message(f"<b>Недавние действия</b>\n{events}")
 
             await asyncio.sleep(60*60)
+
+    @error_notify()
+    async def fire_center(self: 'MaksogramClient'):
+        while True:  # Остановка через account_off (async_processes)
+            if time_now(await self.get_time_zone()).hour != 0:
+                continue
+
+            for fire in await get_fires(self.id):
+                if fire.reset:
+                    await clear_fire(fire.account_id, fire.user_id)
+                    fire.account_status = False; fire.user_status = False; fire.reset = False; fire.days = 0; fire.score = 0
+                elif fire.active:
+                    await update_fire_status(fire.account_id, fire.user_id, 'reset')
+                    fire.account_status = False; fire.user_status = False
+                else:  # Огонек продлить не успели
+                    await reset_fire(fire.account_id, fire.user_id)
+                    fire.account_status = False; fire.user_status = False; fire.reset = True
+
+                try:
+                    await edit_fire_message(fire)  # Обновляем сообщение огонька в чате
+                except TelegramBadRequest:
+                    await MaksogramBot.send_message(self.id, "Сообщение огонька в чате с другом удалено. Чтобы восстановить его, "
+                                                             "создайте его заново. При этом все данные с серией и счетом не будут потеряны")
+
+            await asyncio.sleep(55 * 60)  # Ждем 55 минут
 
 
 async def wait_minute():
