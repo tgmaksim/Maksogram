@@ -112,7 +112,7 @@ class ModulesMethods:
 
         # Напоминалка: команда с ответом на текст напоминания
         elif reply_message and (remind_time := await reminder(self.id, text)):
-            return await self.reminder_module(message, remind_time)
+            return await self.reminder_module(message, reply_message, remind_time)
 
         # Рандомайзер: команда для выбора числа, да/нет или элемента из списка
         elif choice := randomizer(text):
@@ -277,7 +277,7 @@ class ModulesMethods:
             await MaksogramBot.send_message(
                 self.id, "🔄 <b>Видео в кружок</b>\nЧтобы конвертировать видео в кружок, нужно включить функцию в /menu_chat")
 
-    async def reminder_module(self: 'MaksogramClient', message: Message, remind_time: datetime) -> Optional[Literal[NameModule.reminder]]:
+    async def reminder_module(self: 'MaksogramClient', message: Message, reply_message: Message, remind_time: datetime) -> Optional[Literal[NameModule.reminder]]:
         if await enabled_module(self.id, NameModule.reminder.name):
             if not await self.check_count_usage_module(NameModule.reminder.name):
                 if await get_subscription(self.id) is None:
@@ -293,7 +293,7 @@ class ModulesMethods:
             time = remind_time - timedelta(hours=time_zone)
             chat_name = await self.chat_name(message.chat_id, my_name="Избранное")
 
-            response = await add_remind(self.id, message, time, chat_name)
+            response = await add_remind(self.id, reply_message, time, chat_name)
             if not response:  # Напоминание с такими параметрами уже существует
                 await message.edit("🤖 @MaksogramBot в чате\nНапоминание уже существует ⚠️",
                                    formatting_entities=[MessageEntityCustomEmoji(0, 2, CustomEmoji.maksogram),
