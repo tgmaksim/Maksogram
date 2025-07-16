@@ -221,6 +221,35 @@ async def reset_subscription(account_id: int):
     sql = f"UPDATE payment SET subscription=NULL, ending=NULL WHERE account_id={account_id}"
     await Database.execute(sql)
 
+    sql = f"UPDATE modules SET auto_audio_transcription=false WHERE account_id={account_id}"
+    await Database.execute(sql)
+
+    # Удаляет все автоответы клиента кроме самого старого
+    sql = (f"DELETE FROM answering_machine WHERE answer_id!="
+           f"(SELECT MIN(answer_id) FROM answering_machine WHERE account_id={account_id}) AND account_id={account_id}")
+    await Database.execute(sql)
+
+    # Удаляет все быстрые ответы клиента кроме самого старого
+    sql = f"DELETE FROM changed_profiles WHERE user_id!=(SELECT MIN(user_id) FROM changed_profiles WHERE account_id={account_id}) AND account_id={account_id}"
+    await Database.execute(sql)
+
+    # Удаляет всех пользователей в Профиле друга кроме одного с минимальным user_id
+    sql = f"DELETE FROM speed_answers WHERE answer_id!=(SELECT MIN(answer_id) FROM speed_answers WHERE account_id={account_id}) AND account_id={account_id}"
+    await Database.execute(sql)
+
+    # Удаляет всех пользователей в "Друг в сети" кроме одного с минимальным user_id
+    sql = f"DELETE FROM status_users WHERE user_id!=(SELECT MIN(user_id) FROM status_users WHERE account_id={account_id}) AND account_id={account_id}"
+    await Database.execute(sql)
+
+    # Удаляет все добавленные рабочие чаты
+    sql = f"UPDATE settings SET added_chats='{{}}' WHERE account_id={account_id}"
+    await Database.execute(sql)
+
+    # Удаляет все огоньки клиента кроме самого продолжительного по серии
+    sql = (f"DELETE FROM fires WHERE user_id!=(SELECT user_id FROM fires WHERE days="
+           f"(SELECT MAX(days) FROM fires WHERE account_id={account_id}) AND account_id={account_id} LIMIT 1) AND account_id={account_id}")
+    await Database.execute(sql)
+
 
 def serialize_aiogram_entities(entities: list[MessageEntity]) -> list[dict]:
     """Сериализует список MessageEntity (aiogram) в JSON-формат"""
