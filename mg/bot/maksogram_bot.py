@@ -64,6 +64,13 @@ async def _version(message: Message):
                          link_preview_options=preview_options(VERSION_ID))
 
 
+@dp.message(Command('friends'))
+@error_notify()
+async def _friends(message: Message):
+    if await new_message(message): return
+    await message.answer(**friends())
+
+
 @dp.callback_query(F.data.startswith(cb.command('friends')))
 @error_notify()
 async def _friends_button(callback_query: CallbackQuery):
@@ -87,16 +94,17 @@ async def _friends_link(callback_query: CallbackQuery):
 
 def friends_link(account_id: int) -> dict[str, Any]:
     start_url = f"tg://resolve?domain={MaksogramBot.username}&start={referral_link(account_id)}"
-    markup = IMarkup(inline_keyboard=[[IButton(text="Попробовать бесплатно", url=start_url)]])
+    markup = IMarkup(inline_keyboard=[[IButton(text="🚀 Запустить бота", url=start_url)]])
     return dict(
         photo=FSInputFile(resources_path("logo.jpg")), disable_web_page_preview=True, reply_markup=markup,
-        caption=f"Привет! Я хочу тебе посоветовать отличного <a href='{start_url}'>бота</a>\n"
-                "• Можно <b>смотреть удаленные</b> и измененные сообщения\n"
-                "• Всегда узнавать о новой аватарке, подарке и описании друга\n"
-                "• Сможешь расшифровывать ГС и кружки без Telegram Premium\n"
-                "• Включать автоответчик, когда очень занят или спишь\n"
-                "• Быстро узнаешь, когда друг в сети, проснулся или прочитал сообщение\n"
-                f"Также в нем есть множество других <b><a href='{SITE}'>полезных функций</a></b>")
+        caption=f"Лучший <b><a href='{start_url}'>бот</a></b> в Telegram, чтобы...\n\n"
+                "• Видеть <b>удаленные</b> сообщения\n"
+                "• Создать огонек🔥 в чате с другом\n"
+                "• Следить за статусом и профилем друга (аватарки, описание, подарки)\n"
+                "• Анонимно смотреть истории\n"
+                "• Защитить аккаунт от взлома\n"
+                "• Включать автоответчик на ночь или когда не можешь ответить\n\n"
+                f"А также другие <b><a href='{SITE}'>полезные функции</a></b>")
 
 
 @dp.message(Command('feedback'))
