@@ -43,12 +43,16 @@ class LastEvent:
     """Клиент обрабатывает большой поток Update'ов через промежутки времени"""
 
     seconds: int = 1
+    big_seconds: int = 2
 
     def __init__(self):
         self._datetime = datetime(2009, 12, 9)
 
     def add(self):
         self._datetime = max(time_now(), self._datetime) + timedelta(seconds=self.seconds)
+
+    def big_add(self):
+        self._datetime = max(time_now(), self._datetime) + timedelta(seconds=self.big_seconds)
 
     @property
     def datetime(self) -> datetime:
@@ -190,10 +194,17 @@ class MaksogramBaseClient:
         """Ожидает обработки Update перед ним + `LastEvent.seconds`, чтобы не было перегрузки"""
 
         difference = (time_now() - self.last_event.datetime).total_seconds()  # Разница между текущим временем и последним событием
-        if difference < LastEvent.seconds:  # Если прошло менее необходимого
-            self.last_event.add()  # Добавляем время, чтобы следующее событие ожидало
 
+        if difference < 0:  # Очень быстрый поток событий
+            self.last_event.big_add()
+            await asyncio.sleep(LastEvent.big_seconds - difference)
+
+        elif difference < LastEvent.seconds:
+            self.last_event.add()
             await asyncio.sleep(LastEvent.seconds - difference)
+
+        else:
+            self.last_event.add()
 
     async def check_chat_processing(self: 'MaksogramClient', event: NewMessage.Event) -> bool:
         """Проверяет необходимость обработки Event'а с новым сообщением"""
