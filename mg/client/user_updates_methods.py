@@ -71,9 +71,10 @@ class UserUpdatesMethods:
 
     async def self_update(self: 'MaksogramClient', event: UserUpdate.Event):
         status = isinstance(event.status, UserStatusOnline)
+        real_status = isinstance((await self.client.get_me()).status, UserStatusOnline)
 
-        if self.status == status:
-            return  # Статус не изменился
+        if status != real_status or self.status == status:
+            return  # Статус не соответствует действительности или не изменился
         self.set_status(status)
 
         awake_time = status and await self.check_awake()
