@@ -17,6 +17,7 @@ from mg.bot.types import (
 from mg.bot.functions import (
     new_message,
     request_user,
+    preview_options,
     new_callback_query,
 )
 
@@ -68,7 +69,8 @@ async def changed_profiles_menu(account_id: int, prev: bool = False) -> dict[str
 
     return dict(
         text="🖼️ <b>Профиль друга</b>\nДобавьте пользователя и первым узнавайте о новой аватарке, новом подарке или измененном «О себе» в "
-             "профиле собеседника", reply_markup=IMarkup(inline_keyboard=buttons))
+             "профиле собеседника", reply_markup=IMarkup(inline_keyboard=buttons),
+        link_preview_options=preview_options('профиль-друга.mp4', show_above_text=True))
 
 
 @dp.callback_query(F.data.startswith(cb.command('changed_profile_menu')))

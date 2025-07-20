@@ -59,7 +59,7 @@ async def fires_menu(account_id: int, prev: bool = False) -> dict[str, Any]:
     buttons.append([IButton(text="◀️  Назад", callback_data=cb('menu'))])
 
     return dict(text="🔥 <b>Огонек с другом</b>\nСоздайте огонек в чате, чтобы расти его вместе. Увеличивайте счет и достигайте новых уровней",
-                reply_markup=IMarkup(inline_keyboard=buttons))
+                reply_markup=IMarkup(inline_keyboard=buttons), link_preview_options=preview_options('огонек.mp4', show_above_text=True))
 
 
 @dp.inline_query(F.query == 'огонек')

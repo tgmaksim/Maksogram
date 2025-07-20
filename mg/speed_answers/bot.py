@@ -62,7 +62,8 @@ async def speed_answers_menu(account_id: int, prev: bool = False) -> dict[str, A
 
     return dict(
         text="🪧 <b>Быстрые ответы</b>\nСоздайте быстрый ответ, чтобы отправлять большое сообщение с помощью короткой команды\n"
-             "После отправки сокращения в любой чат, оно превратится в нужное сообщение", reply_markup=IMarkup(inline_keyboard=buttons))
+             "После отправки сокращения в любой чат, оно превратится в нужное сообщение", reply_markup=IMarkup(inline_keyboard=buttons),
+        link_preview_options=preview_options('быстрые-ответы.mp4', show_above_text=True))
 
 
 @dp.callback_query(F.data.startswith(cb.command('new_speed_answer')))

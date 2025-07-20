@@ -4,6 +4,7 @@ if TYPE_CHECKING:
     from . maksogram_client import MaksogramClient
 
 import os
+import re
 import asyncio
 
 from typing import Optional, Literal
@@ -40,7 +41,6 @@ from mg.modules.functions import enabled_module, add_remind
 from . functions import (
     len_text,
     is_one_line,
-    has_command,
     download_voice,
     download_video,
     update_statistics_by_module,
@@ -88,26 +88,28 @@ class ModulesMethods:
             reply_video = reply_message.video
             reply_video_note = reply_message.video_note
 
+        entities = message.get_entities_text()
+
         # Калькулятор: одна строка без форматирования со знаком равенства в конце
         if is_one_line(text) and text.endswith('=') and message.entities is None:
             return await self.calculator_module(message)
 
         # Генератор QR: команда со ссылкой для генерации
-        elif has_command(text, ["создай", "создать", "сгенерируй", "сгенерировать", "qr"]) and \
-                len(message.entities or []) == 1 and isinstance(message.entities[0], MessageEntityUrl):
+        elif len(entities) == 1 and isinstance(entities[0][0], MessageEntityUrl) and \
+                re.fullmatch(rf'(создай|создать|сгенерируй|сгенерировать|qr)\s*{entities[0][1]}', text):
             return await self.qr_code_module(message)
 
         # Расшифровка голосовых: кружок или голосовое в чате с ботом или команда с ответом на кружок или голосовое
-        elif (bot_audio or bot_voice or bot_video_note) or ((reply_audio or reply_voice or reply_video_note) and
-                                               has_command(text, ["в текст", "расшифруй", "расшифровать"])):
+        elif (bot_audio or bot_voice or bot_video_note) or \
+                ((reply_audio or reply_voice or reply_video_note) and re.fullmatch(f'(в\s*текст|расшифруй|расшифровать)', text)):
             return await self.audio_transcription_module(message, reply_message, bot_audio or bot_voice or bot_video_note)
 
-        # Погода: команда "Какая погода"
-        elif has_command(text, ["какая", "погода"], has_all=True):
+        # Погода: команда "Какая погода" или "Какая погода?"
+        elif re.fullmatch(r'какая\s*погода\??', text):
             return await self.weather_module(message)
 
         # Видео в кружок: видео в чате с ботом или команда с ответом на видео
-        elif bot_video or (reply_video and has_command(text, ["в", "кружок"])):
+        elif bot_video or (reply_video and re.fullmatch('в\s*кружок', text)):
             return await self.round_video_module(message, reply_message, bot_video)
 
         # Напоминалка: команда с ответом на текст напоминания

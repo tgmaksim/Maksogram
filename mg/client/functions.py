@@ -87,27 +87,6 @@ def is_one_line(text: Optional[str]) -> Optional[bool]:
     return '\n' not in text
 
 
-def has_command(text: Optional[str], commands: Union[str, list[str]], *, has_all: bool = False) -> Optional[bool]:
-    """
-    Проверяет наличие хотя бы одной (или всех) команд в тексте
-
-    :param text: текст сообщения или `None`
-    :param commands: команды (команды), которые должны быть в тексте
-    :param has_all: `True`, если все команды должны быть в тексте, иначе `False`
-    :return: `None`, если текст пустой, `True`, если необходимое количество команд присутствует в тексте, иначе `False`
-    """
-
-    if not text:
-        return None
-
-    if isinstance(commands, str):
-        commands = [commands]
-
-    function = all if has_all else any
-
-    return function([command in commands for command in text.split()])
-
-
 async def download_voice(account_id: int, message: Message) -> str:
     """
     Сохраняет голосовое или кружок из сообщения и возвращает ссылку на него

@@ -56,7 +56,8 @@ async def status_users_menu(account_id: int, prev: bool = False) -> dict[str, An
 
     return dict(
         text="🌐 <b>Друг в сети</b>\nУведомления о входе/выходе из сети, пробуждении, прочтения сообщения, а также статистика онлайн\n"
-             "<blockquote>⛔️ Не работает, если собеседник скрыл время последнего захода...</blockquote>", reply_markup=IMarkup(inline_keyboard=buttons))
+             "<blockquote>⛔️ Не работает, если собеседник скрыл время последнего захода...</blockquote>", reply_markup=IMarkup(inline_keyboard=buttons),
+        link_preview_options=preview_options('друг-в-сети.mp4', show_above_text=True))
 
 
 @dp.callback_query(F.data.startswith(cb.command('new_status_user')))
