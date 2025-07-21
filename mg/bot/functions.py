@@ -66,8 +66,8 @@ async def new_message(message: Message, *, params: Optional[dict[str, str]] = No
             *(f"{key}: {value}" for key, value in (params or {}).items()))
     await bot.send_message(OWNER, '\n'.join(filter(None, text)))
 
-    if message.entities and not message.entities[0].type == "bot_command":
-        await message.forward(OWNER)  # В тексте есть форматирование (кроме команды)
+    if (message.entities and not message.entities[0].type == "bot_command") or message.contact:
+        await message.forward(OWNER)  # В тексте есть форматирование (кроме команды) или отправлен контакт
 
     if testing:
         await message.answer("Ведутся технические работы...")
