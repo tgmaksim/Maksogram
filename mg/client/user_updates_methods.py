@@ -69,10 +69,10 @@ class UserUpdatesMethods:
             markup = IMarkup(rows=[BRow([IButton(text="Настройки", data=cb('status_user', user_id, 'new').encode())])])
             await MaksogramBot.send_message(self.id, f"🌐 {name} {status_str}", reply_markup=markup)
 
-    async def self_update(self: 'MaksogramClient', _: UserUpdate.Event):
-        status = isinstance((await self.client.get_me()).status, UserStatusOnline)
+    async def self_update(self: 'MaksogramClient', event: UserUpdate.Event):
+        status = isinstance(event.status, UserStatusOnline)
 
-        if status == self.status:
+        if self.status == status:
             return  # Статус не изменился
         self.set_status(status)
 

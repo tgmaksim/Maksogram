@@ -59,7 +59,7 @@ class ModulesMethods:
         :return: `None`, если команда не распознана или модуль выключен, иначе название модуля
         """
 
-        if (message.voice or message.video_note) and message.file.duration >= 30:
+        if not message.out and (message.voice or message.video_note) and message.file.duration >= 30:
             if await enabled_module(self.id, 'auto_audio_transcription'):
                 message = await message.forward_to(MaksogramBot.id)
                 await self.audio_transcription_module(message, None, message.voice or message.video_note)
