@@ -4,8 +4,8 @@ from typing import Any
 
 from aiogram import F
 from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery, FSInputFile, WebAppInfo
 from . types import dp, bot, Blocked, CallbackData, support_link, feedback
+from aiogram.types import Message, CallbackQuery, FSInputFile, WebAppInfo, BotCommand, BotCommandScopeChat
 from . functions import (
     new_message,
     referral_link,
@@ -323,8 +323,37 @@ async def _other_callback_queries(callback_query: CallbackQuery):
     await callback_query.answer("Не распознано!")
 
 
+async def initialization_bot_profile():
+    admin_commands = [
+        # Главные команды
+        BotCommand(command='menu', description="меню функций"),
+        BotCommand(command='settings', description="настройки"),
+
+        # Отдельные команды админа
+        BotCommand(command='admin', description="панель админа"),
+        BotCommand(command='reload', description="перезапуск"),
+        BotCommand(command='stop', description="остановка"),
+        BotCommand(command='critical_stop', description="экстренная остановка"),
+        BotCommand(command='mailing', description="рассылка сообщений"),
+        BotCommand(command='login', description="ввод кода аутентификации"),
+
+        # Остальные команды
+        BotCommand(command='help', description="помощь"),
+        BotCommand(command='feedback', description="отзывы и предложения"),
+        BotCommand(command='friends', description="реферальная программа"),
+        BotCommand(command='inline_mode', description="inline-режим"),
+        BotCommand(command='version', description="обзор обновления"),
+        BotCommand(command='start', description="приветствие")
+    ]
+
+    if await bot.get_my_commands(scope=BotCommandScopeChat(chat_id=OWNER)) != admin_commands:
+        await bot.set_my_commands(admin_commands, scope=BotCommandScopeChat(chat_id=OWNER))
+
+
 async def start_bot():
     Blocked.users = await get_blocked_users()
+
+    await initialization_bot_profile()
 
     await bot.send_message(OWNER, f"<b>Бот запущен!🚀</b>")
     print("Бот запущен")
