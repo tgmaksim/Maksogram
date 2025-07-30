@@ -306,7 +306,7 @@ async def _edit_auto_answer_timetable_start(callback_query: CallbackQuery, state
     if await new_callback_query(callback_query): return
     answer_id = cb.deserialize(callback_query.data)[0]
 
-    markup = KMarkup(keyboard=[[KButton(text="Отмена")]], resize_keyboard=True)
+    markup = KMarkup(keyboard=[[KButton(text="Отмена")]], input_field_placeholder="22:00 - 06:00", resize_keyboard=True)
     message_id = (await callback_query.message.answer(
         "Отправьте <b>время</b>, в течение которого будет работать автоответ\nНапример: 22:00 - 6:00\n"
         "<blockquote expandable>В качестве окончания можно выбрать <b>до пробуждения</b>. В таком случае автоответ будет работать "
@@ -375,7 +375,7 @@ async def _edit_auto_answer_timetable(message: Message, state: FSMContext):
             await message.answer(**await auto_answer_time(account_id, answer_id))
 
     if warning:
-        markup = KMarkup(keyboard=[[KButton(text="Отмена")]], resize_keyboard=True)
+        markup = KMarkup(keyboard=[[KButton(text="Отмена")]], input_field_placeholder="22:00 - 06:00", resize_keyboard=True)
         new_message_id = (await message.answer(warning, reply_markup=markup)).message_id
         await state.update_data(message_id=new_message_id)
 
@@ -388,7 +388,7 @@ async def _edit_auto_answer_weekdays_start(callback_query: CallbackQuery, state:
     if await new_callback_query(callback_query): return
     answer_id = cb.deserialize(callback_query.data)[0]
 
-    markup = KMarkup(keyboard=[[KButton(text="Отмена")]], resize_keyboard=True)
+    markup = KMarkup(keyboard=[[KButton(text="Отмена")]], input_field_placeholder="пн, вт, ср, чт, пт", resize_keyboard=True)
     message_id = (await callback_query.message.answer("Отправьте <b>дни недели</b> работы автоответа через запятую\n"
                                                       "Например: пн, вт, ср, чт, пт", reply_markup=markup)).message_id
 
@@ -437,7 +437,7 @@ async def _edit_auto_answer_weekdays(message: Message, state: FSMContext):
         await message.answer(**await auto_answer_time(account_id, answer_id))
 
     if warning:
-        markup = KMarkup(keyboard=[[KButton(text="Отмена")]], resize_keyboard=True)
+        markup = KMarkup(keyboard=[[KButton(text="Отмена")]], input_field_placeholder="пн, вт, ср, чт, пт", resize_keyboard=True)
         new_message_id = (await message.answer(warning, reply_markup=markup)).message_id
         await state.update_data(message_id=new_message_id)
 

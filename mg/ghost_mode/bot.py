@@ -1,5 +1,7 @@
 import os
 
+from mg.config import CHANNEL
+
 from aiogram import F
 
 from aiogram.fsm.context import FSMContext
@@ -137,7 +139,7 @@ async def _ghost_copy_start(callback_query: CallbackQuery, state: FSMContext):
 
     await state.set_state(UserState.ghost_copy)
 
-    markup = KMarkup(keyboard=[[KButton(text="Отмена")]], resize_keyboard=True)
+    markup = KMarkup(keyboard=[[KButton(text="Отмена")]], input_field_placeholder=f"t.me/{CHANNEL}/394", resize_keyboard=True)
     message_id = (await callback_query.message.answer("Отправьте ссылку на пост, который нужно скачать", reply_markup=markup)).message_id
     await state.update_data(message_id=message_id)
     await callback_query.message.delete()
