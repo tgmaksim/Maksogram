@@ -6,6 +6,8 @@ from mg.client.types import maksogram_clients
 from asyncpg.exceptions import UniqueViolationError
 from mg.core.functions import resources_path, full_name, get_subscription
 
+from telethon.tl.types import PeerUser
+from telethon.utils import get_input_user
 from telethon.tl.types.users import UserFull
 from telethon.tl.types.payments import SavedStarGifts
 from telethon.tl.types import StarGiftUnique, StarGift
@@ -120,13 +122,15 @@ async def get_avatars(account_id: int, user_id: int) -> Optional[dict[int, FullA
         иначе `dict` полученных аватарок (id: `FullAvatar`)
     """
 
+    client = maksogram_clients[account_id].client
+
     request = GetUserPhotosRequest(
-        user_id=user_id,
+        user_id=get_input_user(await client.get_input_entity(PeerUser(user_id=user_id))),
         offset=0,
         max_id=0,
         limit=MAX_COUNT_AVATARS
     )
-    response: Union[Photos, PhotosSlice] = await maksogram_clients[account_id].client(request)
+    response: Union[Photos, PhotosSlice] = await client(request)
 
     if isinstance(response, PhotosSlice):
         return None  # Лимит превышен
@@ -177,12 +181,14 @@ async def get_gifts(account_id: int, user_id: int) -> Optional[dict[int, Gift]]:
         иначе `dict` подарков (id: `Gift`)
     """
 
+    client = maksogram_clients[account_id].client
+
     request = GetSavedStarGiftsRequest(
-        peer=user_id,
+        peer=get_input_user(await client.get_input_entity(PeerUser(user_id=user_id))),
         offset='',
         limit=MAX_COUNT_GIFTS
     )
-    response: SavedStarGifts = await maksogram_clients[account_id].client(request)
+    response: SavedStarGifts = await client(request)
 
     if response.count > MAX_COUNT_GIFTS:
         return None  # Лимит превышен
@@ -228,8 +234,10 @@ async def get_bio(account_id: int, user_id: int) -> Optional[str]:
     :return: Описание
     """
 
-    request = GetFullUserRequest(id=user_id)
-    response: UserFull = await maksogram_clients[account_id].client(request)
+    client = maksogram_clients[account_id].client
+
+    request = GetFullUserRequest(id=get_input_user(await client.get_input_entity(PeerUser(user_id=user_id))))
+    response: UserFull = await client(request)
 
     return response.full_user.about or ''
 

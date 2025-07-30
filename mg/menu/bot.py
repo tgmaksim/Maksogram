@@ -34,8 +34,8 @@ from mg.bot.functions import (
 )
 
 from telethon.tl.types import Channel
-from telethon.utils import get_peer_id
 from telethon.tl.types.messages import ChatFull
+from telethon.utils import get_peer_id, get_input_channel
 from telethon.tl.functions.messages import GetFullChatRequest
 from telethon.tl.functions.channels import GetFullChannelRequest
 
@@ -433,15 +433,13 @@ async def _add_chat(message: Message, state: FSMContext):
             new_message_id = (await message.answer(response.warning, reply_markup=markup)).message_id
             await state.update_data(message_id=new_message_id)
         else:
-            await state.clear()
-
             # chat_id - полный идентификатор чата (-id) или супергруппы (-100id)
             chat_id = get_peer_id(response.chat, add_mark=True)
             maksogram_client = maksogram_clients[account_id]
             telegram_client = maksogram_client.client
 
             if isinstance(response.chat, Channel):  # Канал или супергруппа
-                full_chat: ChatFull = await telegram_client(GetFullChannelRequest(response.chat.id))
+                full_chat: ChatFull = await telegram_client(GetFullChannelRequest(get_input_channel(response.chat)))
                 count = full_chat.full_chat.participants_count
             else:  # Chat (обычная группа)
                 full_chat: ChatFull = await telegram_client(GetFullChatRequest(response.chat.id))
@@ -454,6 +452,8 @@ async def _add_chat(message: Message, state: FSMContext):
                 new_message_id = (await message.answer("Чат слишком большой!", reply_markup=markup)).message_id
                 await state.update_data(message_id=new_message_id)
             else:
+                await state.clear()
+
                 await add_chat(account_id, chat_id, response.chat.title)  # Также полный идентификатор чата или супергруппы
                 await message.answer(**await chats_menu(account_id))
 

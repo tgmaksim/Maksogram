@@ -3,6 +3,7 @@ import re
 from mg.config import WWW_SITE
 
 from telethon.tl.patched import Message
+from telethon.utils import get_input_peer
 from mg.client.types import maksogram_clients
 from telethon.tl.types.stories import PeerStories, Stories
 from telethon.tl.functions.stories import GetPeerStoriesRequest, GetPinnedStoriesRequest
@@ -84,7 +85,9 @@ async def download_peer_stories(account_id: int, user_id: int) -> list[str]:
     """Скачивает активные истории пользователя и возвращает HTML-ссылки на них"""
 
     maksogram_client = maksogram_clients[account_id]
-    peer_stories: PeerStories = await maksogram_client.client(GetPeerStoriesRequest(user_id))
+    peer_stories: PeerStories = await maksogram_client.client(GetPeerStoriesRequest(
+        get_input_peer(await maksogram_client.client.get_input_entity(user_id))
+    ))
 
     return await download_stories(account_id, user_id, peer_stories.stories.stories)
 
@@ -93,7 +96,11 @@ async def download_pinned_stories(account_id: int, user_id: int) -> list[str]:
     """Скачивает COUNT_PINNED_STORIES историй из профиля пользователя и возвращает HTML-ссылки на них"""
 
     maksogram_client = maksogram_clients[account_id]
-    pinned_stories: Stories = await maksogram_client.client(GetPinnedStoriesRequest(user_id, offset_id=0, limit=COUNT_PINNED_STORIES))
+    pinned_stories: Stories = await maksogram_client.client(GetPinnedStoriesRequest(
+        get_input_peer(await maksogram_client.client.get_input_entity(user_id)),
+        offset_id=0,
+        limit=COUNT_PINNED_STORIES
+    ))
 
     return await download_stories(account_id, user_id, pinned_stories.stories)
 

@@ -160,6 +160,10 @@ class Gift:
             slug=self.slug
         )
 
+    def stringify(self) -> str:
+        return "{cls}({params})".format(cls=self.__class__.__name__, params=', '.join(
+            "{key}={value}".format(key=key, value=repr(value)) for key, value in self.__dict__.items()))
+
 
 class ChangedProfileSettings:
     def __init__(self, user_id: int, name: str, avatars: Optional[dict[int, SavedAvatar]], gifts: Optional[dict[int, Gift]], bio: Optional[str]):

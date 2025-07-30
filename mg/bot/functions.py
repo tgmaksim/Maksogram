@@ -6,12 +6,13 @@ from datetime import datetime, timedelta
 from typing import Optional, Literal, Union
 from mg.core.functions import admin_time, time_now, zip_int_data
 
+from telethon.hints import Entity
 from mg.client.types import maksogram_clients
 from mg.client.functions import get_is_started
-from telethon.tl.types import User, Chat, Channel
-from telethon.utils import parse_username, parse_phone
+from telethon.utils import parse_username, parse_phone, get_peer
+from telethon.tl.types import User, Chat, Channel, PeerUser, InputPeerSelf
 from aiogram.types import Message, CallbackQuery, LinkPreviewOptions, InlineQuery, ChosenInlineResult
-from . types import Sleep, bot, Blocked, Subscription, CallbackData, RequestUserResult, RequestChatResult
+from . types import Sleep, bot, Blocked, SubscriptionVariant, CallbackData, RequestUserResult, RequestChatResult
 
 
 cb = CallbackData()
@@ -292,11 +293,17 @@ async def get_referral(account_id: int) -> Optional[int]:
 
 async def request_user(message: Message, can_yourself: bool = True) -> RequestUserResult:
     """
-    Запрашивает entity у Telegram из идентификатора пользователя, username'а, номера телефона или users_shared сообщения
+    Запрашивает entity у Telegram из идентификатора пользователя, username'а, номера телефона или ``users_shared`` сообщения
+
+    * Поиск по номеру телефона производится только по контактам или из сохраненных в кеше сессии
+
+    * Поиск по username производится с помощью метода ``ResolveUsernameRequest`` (самый надежный)
+
+    * Поиск по идентификатору пользователя производится из сохраненных в кеше сессии (или другими менее результативными способами)
 
     :param message: сообщение с данными
     :param can_yourself: можно ли выбрать себя
-    :return: результат обработки сообщения с данные о статусе, User и предупреждении
+    :return: результат обработки сообщения с данные о статусе, ``User`` и предупреждении
     """
 
     account_id = message.chat.id
@@ -308,34 +315,38 @@ async def request_user(message: Message, can_yourself: bool = True) -> RequestUs
             warning="Maksogram выключен"
         )
 
-    entity, user, username, phone = None, None, None, None
-    if message.text and message.text.startswith('@'):
+    user: Optional[Entity] = None
+    entity, username, phone = None, (None, False), None
+    if message.text:
         username = parse_username(message.text)
     if message.text and message.text.startswith('+'):  # Без + будет считаться ID
         phone = parse_phone(message.text)
 
     if message.text == "Себя":
-        entity = account_id
+        entity = InputPeerSelf()
     elif message.users_shared:
-        entity = message.users_shared.user_ids[0]
-    elif username and username[0] is not None and username[1] is False:  # username имеет формат @username, а не ссылка-приглашение
-        entity = username[0]
+        entity = PeerUser(user_id=message.users_shared.user_ids[0])
+    elif username[0] and username[1] is False:  # username имеет формат @username, а не ссылка-приглашение
+        entity = f"@{username[0]}"
     elif phone:
         entity = f"+{phone}"
     elif message.text and message.text.isdigit():  # ID пользователя
-        entity = int(message.text)
+        entity = PeerUser(user_id=int(message.text))
 
-    if entity:
+    if isinstance(entity, InputPeerSelf) or (isinstance(entity, PeerUser) and entity.user_id == account_id):
+        user: User = await maksogram_clients[account_id].client.get_me()
+    elif entity:
         try:
-            user = await maksogram_clients[account_id].client.get_entity(entity)
+            user: Entity = await maksogram_clients[account_id].client.get_entity(entity)
         except ValueError as e:
             maksogram_clients[account_id].logger.warning(f"entity '{entity}' не найден (ошибка {e.__class__.__name__}: {e})")
 
     if not user:  # Пользователь не найден или данные неверные
+        suggestion = "Попробуйте отправить @username пользователя" if not (username[0] and username[1] is False) else None
         return RequestUserResult(
             ok=False,
             user=None,
-            warning="Пользователь не найден"
+            warning='\n'.join(filter(None, ("Пользователь не найден", suggestion)))  # Предложение использовать username
         )
     elif not isinstance(user, User) or user.bot or user.support:
         return RequestUserResult(
@@ -352,17 +363,24 @@ async def request_user(message: Message, can_yourself: bool = True) -> RequestUs
     else:
         return RequestUserResult(
             ok=True,
-            user=user,
+            user=user,  # User
             warning=None
         )
 
 
 async def request_chat(message: Message) -> RequestChatResult:
     """
-    Запрашивает entity у Telegram из идентификатора чата, username'а или chat_shared сообщения
+    Запрашивает entity у Telegram из идентификатора чата, username'а или ``chat_shared`` сообщения
+
+    * Поиск по username производится с помощью метода ``ResolveUsernameRequest`` (самый надежный)
+
+    * Поиск по ссылке-приглашению производится с помощью метода ``CheckChatInviteRequest`` (тоже надежный)
+
+    * Поиск по идентификатору чата или канала производится из сохраненных в кеше сессии (или другими менее результативными способами).
+    Идентификатор должен быть отрицательный ('-' для чата, '-100' для канала)
 
     :param message: сообщение с данными
-    :return: результат обработки сообщения с данные о статусе, Chat или Channel и предупреждении
+    :return: результат обработки сообщения с данные о статусе, ``Chat`` или ``Channel`` и предупреждении
     """
 
     account_id = message.chat.id
@@ -374,16 +392,19 @@ async def request_chat(message: Message) -> RequestChatResult:
             warning="Maksogram выключен"
         )
 
-    entity, chat, username = None, None, None
-    if message.text and message.text.startswith('@'):
+    chat: Optional[Entity] = None
+    entity, username = None, (None, False)
+    if message.text:
         username = parse_username(message.text)
 
     if message.chat_shared:
-        entity = message.chat_shared.chat_id
-    elif username and username[0] is not None and username[1] is False:  # username имеет формат @username, а не ссылка-приглашение
-        entity = username[0]
-    elif message.text and message.text.isdigit():  # ID чата
-        entity = int(message.text)
+        entity = get_peer(message.chat_shared.chat_id)  # Entity (Chat, Channel)
+    elif username[0] and username[1] is False:  # username имеет формат @username, а не ссылка-приглашение
+        entity = f"@{username[0]}"
+    elif username[0] and username[1] is True:  # ссылка-приглашение
+        entity = message.text
+    elif message.text and (message.text[0] == '-' and message.text[1:].isdigit() or message.text.isdigit()):  # ID чата
+        entity = get_peer(int(message.text))  # Entity (User, Chat, Channel)
 
     if entity:
         try:
@@ -392,10 +413,11 @@ async def request_chat(message: Message) -> RequestChatResult:
             maksogram_clients[account_id].logger.warning(f"entity '{entity}' не найден (ошибка {e.__class__.__name__}: {e})")
 
     if not chat:  # Чат не найден или данные неверные
+        suggestion = "Попробуйте отправить @username чата или ссылку приглашение" if not username[0] else None
         return RequestChatResult(
             ok=False,
             chat=None,
-            warning="Групповой чат или канал не найден!"
+            warning='\n'.join(filter(None, ("Групповой чат или канал не найден!", suggestion)))  # Предложение использовать username
         )
     elif not isinstance(chat, (Channel, Chat)):
         return RequestChatResult(
@@ -411,22 +433,22 @@ async def request_chat(message: Message) -> RequestChatResult:
         )
 
 
-async def get_subscriptions() -> list[Subscription]:
+async def get_subscription_variants() -> list[SubscriptionVariant]:
     """Возвращает доступные варианты подписки"""
 
     sql = "SELECT subscription_id, duration, discount, about FROM subscriptions ORDER BY subscription_id"
     data: list[dict] =  await Database.fetch_all(sql)
 
-    return Subscription.list_from_json(data)
+    return SubscriptionVariant.list_from_json(data)
 
 
-async def get_subscription(subscription_id: int) -> Subscription:
+async def get_subscription_variant(subscription_id: int) -> SubscriptionVariant:
     """Возвращает вариант подписки с subscription_id"""
 
     sql = f"SELECT subscription_id, duration, discount, about FROM subscriptions WHERE subscription_id={subscription_id}"
     data: dict = await Database.fetch_row(sql)
 
-    return Subscription.from_json(data)
+    return SubscriptionVariant.from_json(data)
 
 
 async def set_time_subscription_notification(account_id: int, type_notification: Literal["first", "second"]):

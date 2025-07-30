@@ -7,8 +7,6 @@ from mg.bot.types import Blocked
 from mg.core.database import Database
 from mg.core.functions import time_now
 
-from . types import AccountWithStatus
-
 
 GATEWAY_TOKEN_URL = "https://panel.netangels.ru/api/gateway/token/"
 NETANGELS_API_URL = "https://api-ms.netangels.ru/api/v1/hosting"
@@ -27,7 +25,7 @@ async def reload_server():
 
 
 async def reload_maksogram(logging=True):
-    """Перезагружает Maksogram"""
+    """Перезагружает фоновый процесс Maksogram"""
 
     if logging:
         print("Перезапуск Maksogram")
@@ -40,7 +38,7 @@ async def reload_maksogram(logging=True):
 
 
 async def stop_maksogram():
-    """Останавливает Maksogram"""
+    """Останавливает фоновый процесс Maksogram"""
 
     print("Остановка Maksogram")
 
@@ -94,12 +92,3 @@ async def block_user(user_id: int):
 
     sql = "INSERT INTO blocked_users (user_id, blocking_time) VALUES($1, now())"
     await Database.execute(sql, user_id)
-
-
-async def get_accounts_with_status() -> list[AccountWithStatus]:
-    """Возвращает список пользователей с их идентификатором и статусом (включен Maksogram или нет)"""
-
-    sql = "SELECT account_id, is_started FROM settings"
-    data: list[dict] = await Database.fetch_all(sql)
-
-    return [AccountWithStatus(account_data['account_id'], account_data['is_started']) for account_data in data]

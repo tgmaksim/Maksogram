@@ -10,10 +10,10 @@ from . functions import (
     new_message,
     referral_link,
     preview_options,
-    get_subscription,
     get_blocked_users,
-    get_subscriptions,
     new_callback_query,
+    get_subscription_variant,
+    get_subscription_variants,
 )
 
 # from aiogram.types import ReplyKeyboardRemove as KRemove
@@ -231,7 +231,7 @@ async def _payment(callback_query: CallbackQuery):
 
 
 async def payment_menu() -> dict[str, Any]:
-    subscriptions = await get_subscriptions()
+    subscriptions = await get_subscription_variants()
 
     i, buttons = 0, []
     while i < len(subscriptions):
@@ -257,7 +257,7 @@ async def _subscription(callback_query: CallbackQuery):
 
 
 async def subscription_menu(account_id: int, subscription_id: int) -> dict[str, Any]:
-    subscription = await get_subscription(subscription_id)
+    subscription = await get_subscription_variant(subscription_id)
     fee = (await get_payment_data(account_id)).fee  # Цена базовой подписки в месяц в рублях для клиента
 
     without_discount = int(fee * (subscription.duration / 30))
@@ -281,7 +281,7 @@ async def _check_payment(callback_query: CallbackQuery):
     if await new_callback_query(callback_query): return
     account_id = callback_query.from_user.id
     subscription_id = cb.deserialize(callback_query.data)[0]
-    subscription = await get_subscription(subscription_id)
+    subscription = await get_subscription_variant(subscription_id)
 
     if (status := await check_payment(account_id)) == 'succeeded':
         await delete_payment(account_id)

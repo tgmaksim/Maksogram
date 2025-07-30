@@ -18,9 +18,10 @@ from mg.core.functions import (
     resources_path
 )
 
+from telethon.utils import get_input_channel
 from aiogram.exceptions import TelegramBadRequest
-from telethon.tl.types import MessageEntityCustomEmoji
 from telethon.tl.functions.channels import GetAdminLogRequest
+from telethon.tl.types import MessageEntityCustomEmoji, PeerChannel
 
 from mg.changed_profile.types import ChangedProfileSettings
 from mg.changed_profile.functions import (
@@ -99,11 +100,15 @@ class BackgroundMethods:
                 else:  # Неуникальный подарок
                     await MaksogramBot.send_message(self.id, f"🎁 <b>{user_link}</b> получил(а) {gift.type} от {giver}")
 
+                self.logger.info(f"Новый подарок у {user.user_id}: {gift.stringify()}")
+
             else:  # Подарок мог стать уникальным
                 if gift.unique and not user.gifts[gift.gift_id].unique:  # Подарок стал уникальным
                     link = f"t.me/nft/{gift.slug}"
                     await MaksogramBot.send_message(
                         self.id, f"🎁 <b>{user_link}</b> улучшил(а) <a href='{link}'>лимитированный подарок</a>")
+
+                    self.logger.info(f"Подарок у {user.user_id} стал уникальным: {gift.stringify()}")
 
                 user.gifts.pop(gift.gift_id)
 
@@ -111,6 +116,8 @@ class BackgroundMethods:
             gift_str = "подарок" if count_hidden_gifts == 1 else f"{count_hidden_gifts} подарков"
             await MaksogramBot.send_message(
                 self.id, f"🎁 <b>{user_link}</b> скрыл(а) (возможно, продал(а)) {gift_str}")
+
+            self.logger.info(f"{gift_str.capitalize()} у {user.user_id} скрыт(ы): {', '.join(gift.stringify() for gift in user.gifts.values())}")
 
         new_gifts = Database.serialize({str(gift_id): gift.to_dict() for gift_id, gift in gifts.items()})
         await update_changed_profile(self.id, user.user_id, "gifts", new_gifts)
@@ -127,6 +134,7 @@ class BackgroundMethods:
                                                      f"<blockquote>{bio}</blockquote>")
 
             await update_changed_profile(self.id, user.user_id, "bio", bio)
+            self.logger.info(f"Обновлено описание {user.user_id}: {repr(user.bio)} => {bio}")
 
     @error_notify()
     async def reminder_center(self: 'MaksogramClient'):
@@ -149,6 +157,7 @@ class BackgroundMethods:
                     self.id, f"⏰ <b>Напоминалка</b>\nНапоминаю о вашем событии {place}")
 
                 await delete_remind(self.id, remind.chat_id, remind.message_id, remind.time)
+                self.logger.info(f"Сработало напоминание {remind.stringify()}")
 
             await wait_minute()
 
@@ -159,7 +168,15 @@ class BackgroundMethods:
 
         while True:  # Остановка через account_off (async_processes)
             min_id = await get_min_admin_log_id()
-            admin_events = (await self.client(GetAdminLogRequest(CHANNEL_ID, '', max_id=0, min_id=min_id, limit=100))).events
+
+            request = GetAdminLogRequest(
+                channel=get_input_channel(await self.client.get_input_entity(PeerChannel(channel_id=CHANNEL_ID))),
+                q='',
+                max_id=0,
+                min_id=min_id,
+                limit=100,
+            )
+            admin_events = (await self.client(request)).events
 
             if admin_events:
                 events = ""
@@ -183,21 +200,27 @@ class BackgroundMethods:
             for fire in await get_fires(self.id):
                 if time_now() - fire.updating_time < timedelta(hours=1):
                     continue  # Создание огонька или его сброс был недавно
+
                 if fire.reset:
                     await clear_fire(fire.account_id, fire.user_id)
                     fire.account_status = False; fire.user_status = False; fire.reset = False; fire.days = 0; fire.score = 0
+                    self.logger.info(f"Огонек с {fire.user_id} был потерян")
+
                 elif fire.active:
                     await update_fire_status(fire.account_id, fire.user_id, 'reset')
                     fire.account_status = False; fire.user_status = False
+                    self.logger.info(f"Огонек с {fire.user_id} встречает новый день")
+
                 else:  # Огонек продлить не успели
                     await reset_fire(fire.account_id, fire.user_id)
                     fire.account_status = False; fire.user_status = False; fire.reset = True
+                    self.logger.info(f"Огонек с {fire.user_id} продлить не успели")
 
                 try:
                     await edit_fire_message(fire)  # Обновляем сообщение огонька в чате
                 except TelegramBadRequest:
                     await MaksogramBot.send_message(self.id, "Сообщение огонька в чате с другом удалено. Чтобы восстановить его, "
-                                                             "создайте его заново. При этом все данные с серией и счетом не будут потеряны")
+                                                             "создайте его заново. При этом все данные с серией и счетом НЕ будут потеряны")
 
             await asyncio.sleep(55 * 60)  # Ждем 55 минут
 

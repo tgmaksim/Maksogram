@@ -16,6 +16,7 @@ from aiogram.types import ReplyKeyboardRemove as KRemove
 from aiogram.types import InlineKeyboardMarkup as IMarkup
 from aiogram.types import InlineKeyboardButton as IButton
 
+from mg.client.functions import get_accounts
 from mg.core.functions import error_notify, unzip_int_data, human_timedelta
 
 from . functions import (
@@ -26,7 +27,6 @@ from . functions import (
     reload_maksogram,
     get_working_time,
     count_working_accounts,
-    get_accounts_with_status,
 )
 
 
@@ -62,7 +62,6 @@ async def _critical_stop(message: Message):
     os._exit(0)  # Немедленная остановка
 
 
-# Метод для отправки сообщения от имени бота
 @dp.message(F.reply_to_message.__and__(F.chat.id == OWNER).__and__(F.reply_to_message.text.startswith("User: ")))
 @error_notify()
 async def _sender(message: Message):
@@ -179,16 +178,18 @@ async def _mailing(callback_query: CallbackQuery, state: FSMContext):
         mailing_message = bot.copy_message
     await callback_query.message.edit_text(f"{callback_query.message.text}\n{text}")
 
-    for account in await get_accounts_with_status():
-        if account.is_started:
-            result[1] += 1
+    for account_id, is_started in await get_accounts():
+        if not is_started:
+            continue
 
-            try:
-                await mailing_message(account.account_id, callback_query.from_user.id, message_id)
-            except TelegramForbiddenError:
-                result[3] += 1
-            else:
-                result[2] += 1
+        result[1] += 1
+
+        try:
+            await mailing_message(account_id, callback_query.from_user.id, message_id)
+        except TelegramForbiddenError:
+            result[3] += 1
+        else:
+            result[2] += 1
 
     await callback_query.message.edit_text(f"Рассылка завершена!\nКлиентов: {result[0]}\nАктивных клиентов: {result[1]}\n"
                                            f"Доставлено сообщений: {result[2]}\nВозникло ошибок: {result[3]}")

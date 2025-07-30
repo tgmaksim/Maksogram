@@ -96,20 +96,20 @@ class ModulesMethods:
 
         # Генератор QR: команда со ссылкой для генерации
         elif len(entities) == 1 and isinstance(entities[0][0], MessageEntityUrl) and \
-                re.fullmatch(rf'(создай|создать|сгенерируй|сгенерировать|qr)\s*{entities[0][1]}', text):
+                re.fullmatch(rf'(создай|создать|сгенерируй|сгенерировать|qr) *{entities[0][1]}', text):
             return await self.qr_code_module(message)
 
         # Расшифровка голосовых: кружок или голосовое в чате с ботом или команда с ответом на кружок или голосовое
         elif (bot_audio or bot_voice or bot_video_note) or \
-                ((reply_audio or reply_voice or reply_video_note) and re.fullmatch(f'(в\s*текст|расшифруй|расшифровать)', text)):
+                ((reply_audio or reply_voice or reply_video_note) and re.fullmatch(f'(в *текст|расшифруй|расшифровать)', text)):
             return await self.audio_transcription_module(message, reply_message, bot_audio or bot_voice or bot_video_note)
 
         # Погода: команда "Какая погода" или "Какая погода?"
-        elif re.fullmatch(r'какая\s*погода\??', text):
+        elif re.fullmatch(r'какая *погода\??', text):
             return await self.weather_module(message)
 
         # Видео в кружок: видео в чате с ботом или команда с ответом на видео
-        elif bot_video or (reply_video and re.fullmatch('в\s*кружок', text)):
+        elif bot_video or (reply_video and re.fullmatch('в *кружок', text)):
             return await self.round_video_module(message, reply_message, bot_video)
 
         # Напоминалка: команда с ответом на текст напоминания

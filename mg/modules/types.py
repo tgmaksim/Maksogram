@@ -33,3 +33,7 @@ class Remind:
     @classmethod
     def list_from_json(cls, json_data: list[dict[str, Any]]) -> list['Remind']:
         return [cls.from_json(data) for data in json_data]
+
+    def stringify(self) -> str:
+        return "{cls}({params})".format(cls=self.__class__.__name__, params=', '.join(
+            "{key}={value}".format(key=key, value=repr(value)) for key, value in self.__dict__.items()))

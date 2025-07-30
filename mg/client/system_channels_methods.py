@@ -16,7 +16,8 @@ from . create_chats import (
     link_my_messages_to_message_changes,
 )
 
-from telethon.tl.types import ChannelFull, ChannelParticipantLeft, PeerChannel
+from telethon.tl.types import ChannelFull, ChannelParticipantLeft, InputPeerSelf
+from telethon.utils import get_peer_id, get_input_peer, get_peer, get_input_channel
 from telethon.errors.rpcerrorlist import ChannelPrivateError, UserNotParticipantError
 from telethon.tl.functions.channels import GetFullChannelRequest, GetParticipantRequest
 
@@ -56,10 +57,12 @@ class SystemChannelsMethods:
         :return: True, если канал был удален, иначе False
         """
 
+        input_channel = get_input_channel(await self.client.get_input_entity(CHANNEL_ID))
+
         try:
-            participant = (await self.client(GetParticipantRequest(int(f"-100{CHANNEL_ID}"), self.id))).participant
+            participant = (await self.client(GetParticipantRequest(input_channel, InputPeerSelf()))).participant
         except UserNotParticipantError:
-            participant = ChannelParticipantLeft(self.id)
+            participant = ChannelParticipantLeft(get_peer(self.id))
 
         if isinstance(participant, ChannelParticipantLeft):  # Аккаунт не является участником
             await join_admin_channel(self.client)
@@ -80,13 +83,13 @@ class SystemChannelsMethods:
             await self.delete_all_saved_messages()
 
         if SystemChannelUpdate.my_messages_deleted in updates:  # Системный канал удален
-            my_messages_id = await create_my_messages(self.client)  # Создание системного канала
-            self.set_channel_ids(my_messages=int(f"-100{my_messages_id}"))
+            my_messages = await create_my_messages(self.client)  # Создание системного канала
+            self.set_channel_ids(my_messages=get_peer_id(my_messages, add_mark=True))
             await self.update_channel_ids(my_messages=self.my_messages)
 
         if SystemChannelUpdate.message_changes_deleted in updates:  # Супергруппа для комментариев удалена
-            message_changes_id = await create_message_changes(self.client)  # Создание супергруппы для комментариев
-            self.set_channel_ids(message_changes=int(f"{message_changes_id}"))
+            message_changes = await create_message_changes(self.client)  # Создание супергруппы для комментариев
+            self.set_channel_ids(message_changes=get_peer_id(message_changes, add_mark=True))
             await self.update_channel_ids(message_changes=self.message_changes)
 
         if SystemChannelUpdate.unlinked_message_changes in updates:  # Супергруппа для комментариев отвязана

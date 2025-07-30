@@ -145,7 +145,7 @@ class CallbackData:
         return f"{command}#"
 
 
-class Subscription:
+class SubscriptionVariant:
     def __init__(self, subscription_id: int, duration: int, discount: int, about: str):
         self.id = subscription_id
         self.duration = duration
@@ -153,11 +153,11 @@ class Subscription:
         self.about = about
 
     @classmethod
-    def list_from_json(cls, json_data: list[dict]) -> list['Subscription']:
+    def list_from_json(cls, json_data: list[dict]) -> list['SubscriptionVariant']:
         return [cls.from_json(data) for data in json_data]
 
     @classmethod
-    def from_json(cls, json_data: dict) -> 'Subscription':
+    def from_json(cls, json_data: dict) -> 'SubscriptionVariant':
         return cls(
             subscription_id=json_data['subscription_id'],
             duration=json_data['duration'],
