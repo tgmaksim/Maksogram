@@ -138,7 +138,7 @@ def message_hash(message: Message) -> str:
     :return: подсчитанный хеш
     """
 
-    data = message.text.encode('utf-16')
+    data = (message.text or '').encode('utf-16')
 
     return hashlib.md5(data).hexdigest()
 

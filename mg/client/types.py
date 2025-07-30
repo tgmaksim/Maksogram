@@ -17,7 +17,7 @@ class SavedMessage:
     """
     Сохраненное сообщение в базе данных
 
-    :param hash: sha256-хеш текста сообщения с форматированием (message.text)
+    :param hash: md5-хеш текста сообщения с форматированием (message.text)
     :param media: file_id медиа
     """
 
