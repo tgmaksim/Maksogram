@@ -15,6 +15,7 @@ from mg.client.functions import check_edited_message
 from mg.core.functions import resources_path, deserialize_tl_entities, send_email_message, format_error, time_now, get_subscription
 
 from telethon.errors.rpcerrorlist import (
+    MessageIdInvalidError,
     FileReferenceExpiredError,
     ChatForwardsRestrictedError,
 )
@@ -124,7 +125,7 @@ class MessageMethods:
 
         try:
             saved_message: Message = await message.forward_to(self.my_messages)
-        except ChatForwardsRestrictedError as e:
+        except (ChatForwardsRestrictedError, MessageIdInvalidError) as e:
             self.logger.info(f"сообщение не удалось переслать из-за ошибки {e.__class__.__name__} ({e})")
             return
 
