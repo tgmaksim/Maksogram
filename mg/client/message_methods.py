@@ -314,16 +314,17 @@ class MessageMethods:
                 self.logger.error(f"ошибка {e.__class__.__name__} при отправке сообщения на почту {settings.email} ({e})")
 
         for agent in settings.agents:
-            try:
-                await MaksogramBot.send_message(agent.id, f"🌐 <b>Восстановление доступа</b>\n{message.message}")
-            except Exception as e:
-                await MaksogramBot.send_system_message(format_error(e))
-                self.logger.error(f"не удалось отправить сообщение от официального аккаунта из-за ошибки {e.__class__.__name__} ({e})")
+            if agent.recover:
+                try:
+                    await MaksogramBot.send_message(agent.id, f"🌐 <b>Восстановление доступа</b>\n{message.message}")
+                except Exception as e:
+                    await MaksogramBot.send_system_message(format_error(e))
+                    self.logger.error(f"не удалось отправить сообщение от официального аккаунта из-за ошибки {e.__class__.__name__} ({e})")
 
-        if settings.agents:
+        if any([agent.recover for agent in settings.agents]):
             names = ', '.join([agent.name for agent in settings.agents])
             await MaksogramBot.send_message(self.id, "🌐 <b>Восстановление доступа</b>\nСообщение от официального аккаунта Telegram было "
-                                                     f"отправлено {names}, потому что они включили восстановление аккаунта")
+                                                     f"отправлено {names}, потому что он(и) включил(и) восстановление аккаунта")
 
         await stop_recovery(self.id)
 
