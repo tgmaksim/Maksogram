@@ -28,6 +28,7 @@ from mg.changed_profile.functions import (
     get_bio,
     get_gifts,
     get_avatars,
+    download_gift,
     delete_avatars,
     download_avatars,
     update_changed_profile,
@@ -86,7 +87,7 @@ class BackgroundMethods:
             await update_changed_profile(self.id, user.user_id, "gifts")
             return
 
-        user_link = f"<a href='tg://user?id={user.user_id}'>{user.name}</a>"
+        user_link = f"<a href='tg://openmessage?user_id={user.user_id}'>{user.name}</a>"
 
         for gift in gifts.values():
             if gift.gift_id not in user.gifts:  # Новый подарок
@@ -98,6 +99,10 @@ class BackgroundMethods:
                         self.id, f"🎁 <b>{user_link}</b> получил(а) <a href='{link}'>{gift.type}</a> от {giver}")
 
                 else:  # Неуникальный подарок
+                    path = await download_gift(self.id, user.user_id, gift)
+                    await MaksogramBot.send_file(self.id, path, None)
+                    os.remove(path)
+
                     await MaksogramBot.send_message(self.id, f"🎁 <b>{user_link}</b> получил(а) {gift.type} от {giver}")
 
                 self.logger.info(f"Новый подарок у {user.user_id}: {gift.stringify()}")

@@ -210,7 +210,8 @@ async def get_gifts(account_id: int, user_id: int) -> Optional[dict[int, Gift]]:
                 giver=gift_giver,
                 limited=True,  # Этот параметр не имеет значения при unique=True
                 stars=None,
-                slug=gift.slug
+                slug=gift.slug,
+                sticker=gift.attributes[0].document
             )
         else:  # StarGift
             result[gift.id] = Gift(
@@ -219,10 +220,27 @@ async def get_gifts(account_id: int, user_id: int) -> Optional[dict[int, Gift]]:
                 giver=gift_giver,
                 limited=gift.limited,
                 stars=gift.stars,
-                slug=None
+                slug=None,
+                sticker=gift.sticker
             )
 
     return result
+
+
+async def download_gift(account_id: int, user_id: int, gift: Gift) -> str:
+    """
+    Скачивает стикер подарка пользователя в папку ``resources/gifts`` с форматом ``account_id.user_id.gift_id.tgs``
+
+    :param account_id: клиент
+    :param user_id: пользователь
+    :param gift: подарок для скачивания
+    :return: path к скачанному подарку
+    """
+
+    path = resources_path(f"gifts/{account_id}.{user_id}.{gift.gift_id}.tgs")
+    await maksogram_clients[account_id].client.download_media(gift.sticker, path)
+
+    return path
 
 
 async def get_bio(account_id: int, user_id: int) -> Optional[str]:

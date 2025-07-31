@@ -1,7 +1,7 @@
 from enum import StrEnum
 from typing import Literal, Optional
 
-from telethon.tl.types import Photo
+from telethon.tl.types import Photo, Document
 
 
 class AvatarExt(StrEnum):
@@ -77,9 +77,9 @@ class GiftGiver:
         """Ссылка на пользователя: @username или <a href='tg://user?id=user_id'>name</a>"""
 
         if self.username:
-            return f"@{self.username}"
+            return f"<a href='t.me/{self.username}'>{self.name}</a>"
         else:
-            return f"<a href='tg://user?id={self.user_id}'>{self.name}</a>"
+            return f"<a href='tg://openmessage?user_id={self.user_id}'>{self.name}</a>"
 
     @classmethod
     def from_json(cls, json_data: Optional[dict]) -> Optional['GiftGiver']:
@@ -106,13 +106,14 @@ class GiftGiver:
 
 
 class Gift:
-    def __init__(self, gift_id: int, unique: bool, giver: Optional[GiftGiver], limited: bool, stars: Optional[int], slug: Optional[str]):
+    def __init__(self, gift_id: int, unique: bool, giver: Optional[GiftGiver], limited: bool, stars: Optional[int], slug: Optional[str], sticker: Optional[Document]=None):
         self.gift_id = gift_id
         self.unique = unique
         self.giver = giver
         self.limited = limited
         self.stars = stars
         self.slug = slug
+        self.sticker = sticker  # Непустой только после запроса; в БД не сохраняется
 
     @property
     def type(self) -> Literal["подарок", "лимитированный подарок", "уникальный подарок"]:
@@ -135,7 +136,7 @@ class Gift:
             giver=GiftGiver.from_json(json_data['giver']) if json_data['giver'] else None,
             limited=json_data['limited'],
             stars=json_data['stars'],
-            slug=json_data['slug']
+            slug=json_data['slug'],
         )
 
     @classmethod

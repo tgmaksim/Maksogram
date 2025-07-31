@@ -15,6 +15,7 @@ from typing import Optional
 from datetime import datetime
 
 from telethon import TelegramClient
+from telethon.tl.patched import Message
 
 
 morning = 5, 13
@@ -116,7 +117,7 @@ class MaksogramBot:
         await cls.client.sign_in(bot_token=TELEGRAM_BOT_API_TOKEN)
 
     @classmethod
-    async def send_message(cls, chat_id: int, message: str, parse_mode: Optional[str] = "html", **kwargs):
+    async def send_message(cls, chat_id: int, message: str, parse_mode: Optional[str] = "html", **kwargs) -> Message:
         """Отправляет сообщение через TelegramClient"""
 
         if kwargs.get('reply_markup'):
@@ -126,10 +127,10 @@ class MaksogramBot:
         if kwargs.get('formatting_entities'):
             parse_mode = None
 
-        await cls.client.send_message(chat_id, message, parse_mode=parse_mode, **kwargs)
+        return await cls.client.send_message(chat_id, message, parse_mode=parse_mode, **kwargs)
 
     @classmethod
-    async def send_file(cls, chat_id: int, file, message: str, parse_mode: Optional[str] = "html", **kwargs):
+    async def send_file(cls, chat_id: int, file, message: Optional[str], parse_mode: Optional[str] = "html", **kwargs) -> Message:
         """Отправляет сообщение через TelegramClient"""
 
         if kwargs.get('reply_markup'):
@@ -139,7 +140,7 @@ class MaksogramBot:
         if kwargs.get('formatting_entities'):
             parse_mode = None
 
-        await cls.client.send_file(chat_id, file, caption=message, parse_mode=parse_mode, **kwargs)
+        return await cls.client.send_file(chat_id, file, caption=message, parse_mode=parse_mode, **kwargs)
 
     @classmethod
     async def send_system_message(cls, message: str, parse_mode: Optional[str] = "html", **kwargs):
