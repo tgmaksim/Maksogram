@@ -1,6 +1,7 @@
-from typing import Any
 from enum import StrEnum
 from datetime import datetime
+from typing import Any, Optional
+from dataclasses import dataclass
 
 
 class NameModule(StrEnum):
@@ -37,3 +38,9 @@ class Remind:
     def stringify(self) -> str:
         return "{cls}({params})".format(cls=self.__class__.__name__, params=', '.join(
             "{key}={value}".format(key=key, value=repr(value)) for key, value in self.__dict__.items()))
+
+
+@dataclass
+class RemindCommand:
+    time: datetime
+    text: Optional[str]

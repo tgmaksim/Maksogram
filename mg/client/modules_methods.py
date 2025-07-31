@@ -7,8 +7,8 @@ import os
 import re
 import asyncio
 
+from datetime import timedelta
 from typing import Optional, Literal
-from datetime import datetime, timedelta
 from mg.core.types import MaksogramBot, CustomEmoji
 from mg.core.functions import www_path, format_error, time_now, get_subscription
 
@@ -36,7 +36,7 @@ from mg.modules.round_video import round_video
 from mg.modules.audio_transcription import audio_transcription
 from mg.modules.currencies import currency_rate, ResultConvertionCurrencies
 
-from mg.modules.types import NameModule
+from mg.modules.types import NameModule, RemindCommand
 from mg.modules.functions import enabled_module, add_remind
 from . functions import (
     len_text,
@@ -113,8 +113,8 @@ class ModulesMethods:
             return await self.round_video_module(message, reply_message, bot_video)
 
         # Напоминалка: команда с ответом на текст напоминания (или без)
-        elif remind_time := await reminder(self.id, text):
-            return await self.reminder_module(message, reply_message, remind_time)
+        elif remind_command := await reminder(self.id, text):
+            return await self.reminder_module(message, reply_message, remind_command)
 
         # Рандомайзер: команда для выбора числа, да/нет или элемента из списка
         elif choice := randomizer(text):
@@ -279,7 +279,7 @@ class ModulesMethods:
             await MaksogramBot.send_message(
                 self.id, "🔄 <b>Видео в кружок</b>\nЧтобы конвертировать видео в кружок, нужно включить функцию в /menu_chat")
 
-    async def reminder_module(self: 'MaksogramClient', message: Message, reply_message: Optional[Message], remind_time: datetime) -> Optional[Literal[NameModule.reminder]]:
+    async def reminder_module(self: 'MaksogramClient', message: Message, reply_message: Optional[Message], remind_command: RemindCommand) -> Optional[Literal[NameModule.reminder]]:
         if await enabled_module(self.id, NameModule.reminder.name):
             if not await self.check_count_usage_module(NameModule.reminder.name):
                 if await get_subscription(self.id) is None:
@@ -291,9 +291,14 @@ class ModulesMethods:
 
                 return NameModule.reminder
 
+            remind_time = remind_command.time
             time_zone = await self.get_time_zone()
             time = remind_time - timedelta(hours=time_zone)
             chat_name = await self.chat_name(message.chat_id, my_name="Избранное")
+
+            if remind_command.text:
+                reply_message, message = message, await message.reply(message.message, formatting_entities=message.entities)
+                await reply_message.edit(remind_command.text.capitalize())
 
             response = await add_remind(self.id, reply_message or message, time, chat_name)
             if not response:  # Напоминание с такими параметрами уже существует
