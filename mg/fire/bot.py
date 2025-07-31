@@ -14,6 +14,7 @@ from aiogram.types import (
     ChosenInlineResult,
     InputTextMessageContent,
     InlineQueryResultArticle,
+    InlineQueryResultsButton,
     SwitchInlineQueryChosenChat,
 )
 
@@ -66,6 +67,8 @@ async def fires_menu(account_id: int, prev: bool = False) -> dict[str, Any]:
 @error_notify()
 async def _new_fire_start(inline_query: InlineQuery):
     if await new_inline_query(inline_query): return
+    button = InlineQueryResultsButton(text="Открыть меню", start_parameter="menu")
+
     await inline_query.answer([InlineQueryResultArticle(
         id=cb('new_fire'), title="🔥 Создать огонек с другом", thumbnail_url=f"{WWW_SITE}/{fire_levels[1].photo}",
         description = "Создавайте огоньки в чате с друзьями и растите их вместе. Увеличивайте счет и достигайте новых уровней",
@@ -73,7 +76,7 @@ async def _new_fire_start(inline_query: InlineQuery):
             message_text="🔥 Загрузка данных..."
         ),
         reply_markup=IMarkup(inline_keyboard=[[IButton(text="🔥 🔥 🔥", callback_data=cb('inline_fire'))]])
-    )], cache_time=0, is_personal=True)
+    )], button=button, cache_time=0, is_personal=True)
 
 
 @dp.chosen_inline_result(F.result_id.startswith(cb.command('new_fire')))

@@ -1,28 +1,39 @@
+import os
+
+from mg.config import WWW_SITE
+
 from typing import Any
 
 from aiogram import F
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery
+from mg.bot.types import dp, bot, UserState, CallbackData
+from aiogram.types import (
+    Message,
+    InlineQuery,
+    CallbackQuery,
+    ChosenInlineResult,
+    InputTextMessageContent,
+    InlineQueryResultsButton,
+    InlineQueryResultArticle,
+)
+
 from aiogram.types import KeyboardButton as KButton
 from aiogram.types import KeyboardButtonRequestUsers
 from aiogram.types import ReplyKeyboardMarkup as KMarkup
 from aiogram.types import InlineKeyboardMarkup as IMarkup
 from aiogram.types import InlineKeyboardButton as IButton
-from mg.bot.types import (
-    dp,
-    bot,
-    UserState,
-    CallbackData,
-)
+
 from mg.bot.functions import (
     new_message,
     request_user,
     preview_options,
+    new_inline_query,
+    new_inline_result,
     new_callback_query,
 )
 
 from mg.core.database import Database
-from mg.core.functions import error_notify, full_name, get_subscription
+from mg.core.functions import error_notify, full_name, get_subscription, www_path
 
 from . functions import (
     get_bio,
@@ -216,6 +227,34 @@ async def _changed_profile_del(callback_query: CallbackQuery):
     user_id = cb.deserialize(callback_query.data)[0]
     await delete_changed_profile(account_id, user_id)
     await callback_query.message.edit_text(**await changed_profiles_menu(account_id))
+
+
+@dp.inline_query(F.query.startswith('avatar '))
+@error_notify()
+async def _share_avatar(inline_query: InlineQuery):
+    if await new_inline_query(inline_query): return
+    path = inline_query.query.split()[1]
+    _, _, avatar_id, _ = path.split('.')
+    button = InlineQueryResultsButton(text="Открыть меню", start_parameter="menu")
+
+    if not os.path.exists(www_path(f"avatars/{path}")):
+        await inline_query.answer(results=[], button=button)
+        return
+
+    await inline_query.answer([InlineQueryResultArticle(
+        id=cb('share_avatar', int(avatar_id)), title="📸 Поделиться аватаркой", thumbnail_url=f"{WWW_SITE}/avatars/{path}",
+        description="Делитесь новой аватаркой друга с другими, чтобы обсудить ее или отреагировать на нее",
+        input_message_content=InputTextMessageContent(
+            message_text="Крутая новая аватарка 🔥 🔥 🔥",
+            link_preview_options=preview_options(f"avatars/{path}", site=WWW_SITE, show_above_text=True)
+        )
+    )], button=button, cache_time=0, is_personal=True)
+
+
+@dp.chosen_inline_result(F.result_id.startswith(cb.command('share_avatar')))
+@error_notify()
+async def _share_avatar_result(inline_result: ChosenInlineResult):
+    if await new_inline_result(inline_result): return
 
 
 def changed_profile_initial():

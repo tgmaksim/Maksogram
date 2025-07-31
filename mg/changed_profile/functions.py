@@ -4,7 +4,7 @@ from typing import Union, Optional
 from mg.core.database import Database
 from mg.client.types import maksogram_clients
 from asyncpg.exceptions import UniqueViolationError
-from mg.core.functions import resources_path, full_name, get_subscription
+from mg.core.functions import resources_path, full_name, get_subscription, www_path
 
 from telethon.tl.types import PeerUser
 from telethon.utils import get_input_user
@@ -150,7 +150,7 @@ async def download_avatars(account_id: int, user_id: int, *, avatars: dict[int, 
 
     paths = []
     for avatar_id, avatar in avatars.items():
-        paths.append(path := resources_path(f"avatars/{account_id}.{user_id}.{avatar_id}.{avatar.ext}"))
+        paths.append(path := www_path(f"avatars/{account_id}.{user_id}.{avatar_id}.{avatar.ext}"))
         await maksogram_clients[account_id].client.download_media(avatar.photo, path)
 
     return paths
@@ -164,11 +164,11 @@ def delete_avatars(account_id: int, user_id: int):
     :param user_id: пользователь
     """
 
-    dir_path = resources_path("avatars")
+    dir_path = www_path("avatars")
 
     for file_name in os.listdir(dir_path):
         if file_name.startswith(f"{account_id}.{user_id}"):
-            os.remove(resources_path(f"avatars/{file_name}"))
+            os.remove(www_path(f"avatars/{file_name}"))
 
 
 async def get_gifts(account_id: int, user_id: int) -> Optional[dict[int, Gift]]:

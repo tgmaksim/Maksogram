@@ -14,14 +14,18 @@ from mg.core.database import Database
 from mg.core.types import MaksogramBot, CustomEmoji
 from mg.core.functions import (
     time_now,
+    www_path,
     error_notify,
-    resources_path
 )
 
 from telethon.utils import get_input_channel
 from aiogram.exceptions import TelegramBadRequest
 from telethon.tl.functions.channels import GetAdminLogRequest
 from telethon.tl.types import MessageEntityCustomEmoji, PeerChannel
+
+from telethon.tl.types import KeyboardButtonRow as BRow
+from telethon.tl.types import ReplyInlineMarkup as IMarkup
+from telethon.tl.types import KeyboardButtonSwitchInline as IButton
 
 from mg.changed_profile.types import ChangedProfileSettings
 from mg.changed_profile.functions import (
@@ -63,19 +67,21 @@ class BackgroundMethods:
             await update_changed_profile(self.id, user.user_id, "avatars")
             return
 
+        user_link = f"<a href='tg://openmessage?user_id={user.user_id}'>{user.name}</a>"
+
         for avatar in avatars.values():
             if avatar.avatar_id not in user.avatars:  # Новая аватарка
                 path = (await download_avatars(self.id, user.user_id, avatars={avatar.avatar_id: avatar}))[0]
                 await MaksogramBot.send_message(
-                    self.id, f"📸 <b><a href='tg://user?id={user.user_id}'>{user.name}</a></b> добавил(а) аватарку", file=path)
+                    self.id, f"📸 <b>{user_link}</b> добавил(а) аватарку", file=path,
+                    reply_markup=IMarkup(rows=[BRow([IButton(text="Поделиться аватаркой", query=f"avatar {path.split('/')[-1]}")])]))
 
             else:
                 user.avatars.pop(avatar.avatar_id)
 
         for avatar_id, saved_avatar in user.avatars.items():  # Удаленные аватарки
-            path = resources_path(f"avatars/{self.id}.{user.user_id}.{avatar_id}.{saved_avatar.ext}")
-            await MaksogramBot.send_message(
-                self.id, f"📸 <b><a href='tg://user?id={user.user_id}'>{user.name}</a></b> удалил(а) аватарку", file=path)
+            path = www_path(f"avatars/{self.id}.{user.user_id}.{avatar_id}.{saved_avatar.ext}")
+            await MaksogramBot.send_message(self.id, f"📸 <b>{user_link}</b> удалил(а) аватарку", file=path)
             os.remove(path)
 
         new_avatars = Database.serialize({str(avatar_id): avatar.to_dict() for avatar_id, avatar in avatars.items()})
