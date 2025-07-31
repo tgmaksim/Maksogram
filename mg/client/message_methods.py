@@ -181,8 +181,8 @@ class MessageMethods:
     async def speed_answers(self: 'MaksogramClient', event: NewMessage.Event) -> bool:
         message: Message = event.message
 
-        if not message.out:
-            return False  # Быстрый ответы работают только у клиента
+        if not message.out or message.media:
+            return False  # Быстрый ответы работают только у клиента с текстовыми сообщениями
 
         answer = await get_speed_answer_by_text(self.id, message.message.lower())
         if not answer:
