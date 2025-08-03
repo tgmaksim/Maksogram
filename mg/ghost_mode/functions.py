@@ -3,9 +3,9 @@ import re
 from mg.config import WWW_SITE
 
 from telethon.tl.patched import Message
-from telethon.utils import get_input_peer
 from mg.client.types import maksogram_clients
 from telethon.tl.types.stories import PeerStories, Stories
+from telethon.utils import get_input_peer, get_input_channel
 from telethon.tl.functions.stories import GetPeerStoriesRequest, GetPinnedStoriesRequest
 from telethon.tl.types import StoryItem, MessageMediaPhoto, MessageMediaDocument, PeerChannel, Channel
 
@@ -36,17 +36,16 @@ async def check_count_usage_ghost_mode(account_id: int, function: str) -> bool:
     if subscription == 'admin':
         return True
 
-    sql = f"SELECT ghost_{function} FROM limits WHERE account_id={account_id}"
-    data: int = await Database.fetch_row_for_one(sql)
+    count: int = await maksogram_clients[account_id].get_limit(f"ghost_{function}")  # Проверка лимита и его сброс при необходимости
 
     if function == 'stories':
         if subscription == 'premium':
-            return data < MAX_COUNT_USAGE_GHOST_STORIES_PER_DAY_FOR_PREMIUM
-        return data < MAX_COUNT_USAGE_GHOST_STORIES_PER_DAY
+            return count < MAX_COUNT_USAGE_GHOST_STORIES_PER_DAY_FOR_PREMIUM
+        return count < MAX_COUNT_USAGE_GHOST_STORIES_PER_DAY
     else:
         if subscription == 'premium':
-            return data < MAX_COUNT_USAGE_GHOST_COPY_PER_DAY_FOR_PREMIUM
-        return data < MAX_COUNT_USAGE_GHOST_COPY_PER_DAY
+            return count < MAX_COUNT_USAGE_GHOST_COPY_PER_DAY_FOR_PREMIUM
+        return count < MAX_COUNT_USAGE_GHOST_COPY_PER_DAY
 
 
 async def update_limit(account_id: int, function: str):
@@ -131,9 +130,13 @@ async def download_post(account_id: int, entity: Union[str, int], post_id: int) 
             posts=None,
             warning="Канал не найден"
         )
+    else:
+        input_channel = get_input_channel(channel)
+        maksogram_client.logger.info(f"копирование поста из {input_channel}")
 
     post: Optional[Message] = await maksogram_client.client.get_messages(channel, ids=post_id)
     if not post:
+        maksogram_client.logger.info(f"пост {post_id} на канале {input_channel} не найден")
         return CopyPostResult(
             ok=False,
             posts=None,
@@ -144,8 +147,10 @@ async def download_post(account_id: int, entity: Union[str, int], post_id: int) 
     if post.grouped_id:
         async for grouped_post in maksogram_client.client.iter_messages(channel, min_id=max(post_id-10, 0), max_id=post_id+10):
             if grouped_post.grouped_id != post.grouped_id:
-                break
+                continue  # Перебор всех возможных постов альбома
             posts.append(grouped_post)
+
+        maksogram_client.logger.info(f"найдено {len(posts)} постов в альбоме сообщения {post_id} на канале {input_channel}")
     else:
         posts.append(post)
 
@@ -153,6 +158,8 @@ async def download_post(account_id: int, entity: Union[str, int], post_id: int) 
     for grouped_post in posts:
         if not grouped_post.media or grouped_post.web_preview:
             if not grouped_post.message:
+                maksogram_client.logger.info(f"пост {grouped_post.id} на канале {input_channel} не имеет медиа и текста "
+                                             f"(web_preview: {bool(grouped_post.web_preview)})")
                 continue  # Нет текста и медиа
             path = None
         elif isinstance(grouped_post.media, MessageMediaPhoto):
@@ -162,6 +169,8 @@ async def download_post(account_id: int, entity: Union[str, int], post_id: int) 
         elif grouped_post.voice or grouped_post.audio:
             path = resources_path(f"{BASE_PATH_POSTS}/{account_id}.{channel.id}.{grouped_post.id}.{ts}.mp3")
         else:
+            media = grouped_post.media.document if isinstance(grouped_post.media, MessageMediaDocument) else grouped_post.media.__class__.__name__
+            maksogram_client.logger.info(f"пост {grouped_post.id} на канале {input_channel} содержит необрабатываемое медиа {media}")
             continue
 
         await maksogram_client.client.download_media(grouped_post, path)
