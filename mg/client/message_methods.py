@@ -30,6 +30,7 @@ from telethon.tl.types import (
 
     MessageService,
     StarGiftUnique,
+    UserStatusOffline,
     MessageReplyHeader,
     MessageActionStarGift,
     MessageActionStarGiftUnique,
@@ -213,8 +214,10 @@ class MessageMethods:
         if not answer:
             return False
 
-        if answer.offline and not self.offline:
-            return False  # Автоответ не работает, когда клиент в сети
+        if answer.offline:
+            my_status = (await self.client.get_me()).status
+            if not (isinstance(my_status, UserStatusOffline) and time_now() - my_status.was_online < timedelta(minutes=1)):
+                return False  # Автоответ не работает, когда клиент в сети или был недавно (1 минуту назад)
 
         contact: bool = (await message.get_chat()).contact
 
