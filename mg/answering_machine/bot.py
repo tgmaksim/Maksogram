@@ -93,7 +93,7 @@ async def _new_auto_answer_start(callback_query: CallbackQuery, state: FSMContex
             await callback_query.answer("Достигнут лимит количество автоответов!", True)
         return
 
-    markup = KMarkup(keyboard=[[KButton(text="Отмена")]], resize_keyboard=True)
+    markup = KMarkup(keyboard=[[KButton(text="🤖 Использовать нейро-ответ 🧠")], [KButton(text="Отмена")]], resize_keyboard=True)
     message_id = (await callback_query.message.answer("Отправьте содержание (текст, фото или видео) автоответа", reply_markup=markup)).message_id
 
     await state.set_state(UserState.auto_answer)
@@ -108,6 +108,7 @@ async def _auto_answer(message: Message, state: FSMContext):
     account_id = message.chat.id
     data = await state.get_data()
     message_id = data['message_id']
+    ai = data.get('ai') is True
     answer_id = data.get('answer_id')
 
     warning = None
@@ -121,6 +122,19 @@ async def _auto_answer(message: Message, state: FSMContext):
             await message.answer(**await auto_answer_menu(account_id, answer_id))
         else:
             await message.answer(**await answering_machine_menu(account_id))
+    elif message.text == "🤖 Использовать нейро-ответ 🧠":
+        if await get_subscription(account_id) is None:
+            warning = "Нейро-ответ в автоответчике Maksogram доступен только с Maksogram Premium"
+        else:
+            await state.update_data(ai=True)
+            markup = KMarkup(keyboard=[[KButton(text="Использовать обычный ответ")], [KButton(text="Отмена")]], resize_keyboard=True)
+            new_message_id = (await message.answer("Отправьте промт (запрос) для нейросети: как ответить и необязательное медиа", reply_markup=markup)).message_id
+            await state.update_data(message_id=new_message_id)
+    elif message.text == "Использовать обычный ответ":
+        await state.update_data(ai=False)
+        markup = KMarkup(keyboard=[[KButton(text="🤖 Использовать нейро-ответ 🧠")], [KButton(text="Отмена")]], resize_keyboard=True)
+        new_message_id = (await message.answer("Отправьте содержание (текст, фото или видео) автоответа", reply_markup=markup)).message_id
+        await state.update_data(message_id=new_message_id)
     elif message.content_type not in ('text', 'photo', 'video', 'animation'):
         warning = "Содержание автоответа должно быть текстом, фото или видео"
     elif not text:
@@ -140,17 +154,20 @@ async def _auto_answer(message: Message, state: FSMContext):
             ext = 'png' if message.photo else 'mp4'
 
         if answer_id:  # Необходимо изменить текст автоответа
-            if await edit_auto_answer(account_id, answer_id, text, json_entities, media_id, ext):  # Быстрый ответ изменен
+            if await edit_auto_answer(account_id, answer_id, text, json_entities, ai, media_id, ext):  # Быстрый ответ изменен
                 await message.answer(**await auto_answer_menu(account_id, answer_id))
             else:  # Быстрый ответ не найден
                 await message.answer(**await answering_machine_menu(account_id))
 
         else:  # Необходимо создать новый автоответ
-            answer_id = await add_auto_answer(account_id, text, json_entities, media_id, ext)
+            answer_id = await add_auto_answer(account_id, text, json_entities, ai, media_id, ext)
             await message.answer(**await auto_answer_menu(account_id, answer_id))
 
     if warning:
-        markup = KMarkup(keyboard=[[KButton(text="Отмена")]], resize_keyboard=True)
+        if ai:
+            markup = KMarkup(keyboard=[[KButton(text="Использовать обычный ответ")], [KButton(text="Отмена")]], resize_keyboard=True)
+        else:
+            markup = KMarkup(keyboard=[[KButton(text="🤖 Использовать нейро-ответ 🧠")], [KButton(text="Отмена")]], resize_keyboard=True)
         new_message_id = (await message.answer(warning, reply_markup=markup)).message_id
         await state.update_data(message_id=new_message_id)
 
@@ -260,7 +277,7 @@ async def _edit_auto_answer(callback_query: CallbackQuery, state: FSMContext):
     if await new_callback_query(callback_query): return
     answer_id = cb.deserialize(callback_query.data)[0]
 
-    markup = KMarkup(keyboard=[[KButton(text="Отмена")]], resize_keyboard=True)
+    markup = KMarkup(keyboard=[[KButton(text="🤖 Использовать нейро-ответ 🧠")], [KButton(text="Отмена")]], resize_keyboard=True)
     message_id = (await callback_query.message.answer("Отправьте содержание (текст, фото или видео) автоответа", reply_markup=markup)).message_id
 
     await state.set_state(UserState.auto_answer)

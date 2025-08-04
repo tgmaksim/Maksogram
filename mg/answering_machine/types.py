@@ -22,7 +22,7 @@ class AutoAnswerMedia:
 class AutoAnswer:
     def __init__(self, answer_id: int, status: bool, text: str, entities: list[dict], media: Optional[AutoAnswerMedia], start_time: Optional[time],
                  end_time: Optional[time], weekdays: list[int], triggers: Optional[dict[str, str]], offline: bool, chats: Optional[dict[str, str]],
-                 contacts: Optional[bool], blacklist_chats: Optional[bool], triggering: dict[int, datetime], time_zone: int):
+                 contacts: Optional[bool], blacklist_chats: Optional[bool], ai: bool, triggering: dict[int, datetime], time_zone: int):
         self.id = answer_id
         self.status = status
         self.text = text
@@ -38,6 +38,7 @@ class AutoAnswer:
         self.blacklist_chats = blacklist_chats
         self.triggering = triggering
         self.time_zone = time_zone
+        self.ai = ai
 
         self.short_text = f"{text[:LENGTH_SHORT_TEXT]}..." if len(text) > MAX_LENGTH_TEXT else text
 
@@ -118,6 +119,7 @@ class AutoAnswer:
             chats=json_data['chats'],
             contacts=json_data['contacts'],
             blacklist_chats=json_data['blacklist_chats'],
+            ai=json_data['ai'],
             time_zone=time_zone,
             triggering=triggering,
         )

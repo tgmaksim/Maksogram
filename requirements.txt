@@ -14,3 +14,4 @@ httpx
 deepgram-sdk
 moviepy
 yookassa
+gigachat

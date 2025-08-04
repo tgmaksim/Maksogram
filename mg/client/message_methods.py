@@ -8,7 +8,9 @@ import os
 import asyncio
 
 from datetime import timedelta
+from mg.core.types import CustomEmoji
 from mg.core.types import MaksogramBot
+from mg.client.functions import len_text
 from mg.bot.types import CallbackData, support
 from mg.admin.functions import reload_maksogram
 from mg.client.functions import check_edited_message
@@ -38,6 +40,7 @@ from telethon.tl.types import (
     MessageMediaDocument,
     MessageMediaUnsupported,
     InputStickerSetShortName,
+    MessageEntityCustomEmoji,
 )
 from telethon.events import (
     NewMessage,
@@ -54,7 +57,7 @@ from . functions import (
 from mg.security.functions import enabled_security_hack, get_security_settings, stop_recovery
 from mg.speed_answers.functions import get_speed_answer_by_text, get_path_speed_answer_media
 from mg.status_users.functions import update_last_message, get_user_settings, update_status_user, update_reading_statistics
-from mg.answering_machine.functions import get_enabled_auto_answer, get_path_auto_answer_media, update_auto_answer_triggering
+from mg.answering_machine.functions import get_enabled_auto_answer, get_path_auto_answer_media, update_auto_answer_triggering, use_ai
 from mg.fire.functions import add_fire, get_fire, edit_fire_message, set_fire_inline_message_id, update_fire_status, update_score_fire
 
 
@@ -231,10 +234,16 @@ class MessageMethods:
 
         await update_auto_answer_triggering(self.id, answer.id, message.chat_id)
 
+        text = answer.text
         entities = deserialize_tl_entities(answer.entities)
         file = get_path_auto_answer_media(self.id, answer.id, answer.media.access_hash, answer.media.ext) if answer.media else None
 
-        await message.respond(answer.text, formatting_entities=entities, file=file)
+        if answer.ai:
+            response = await use_ai(self.id, message, answer)
+            text = f"{response}\n\n🤖 Нейро-ответ @MaksogramBot"
+            entities = [MessageEntityCustomEmoji(len_text(response) + 2, 2, CustomEmoji.maksogram)]
+
+        await message.respond(text, formatting_entities=entities, file=file)
         return True
 
     async def fire(self: 'MaksogramClient', event: NewMessage.Event):

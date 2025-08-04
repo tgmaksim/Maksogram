@@ -7,7 +7,6 @@ import os
 import random
 
 from typing import Optional
-from . types import AutoAnswer
 from mg.core.types import morning
 from datetime import time, timedelta
 from mg.core.database import Database
@@ -15,6 +14,11 @@ from asyncpg.exceptions import UniqueViolationError
 from mg.core.functions import get_time_zone, time_now, www_path, get_subscription
 
 from mg.bot.types import bot
+from telethon.tl.patched import Message
+from mg.client.types import maksogram_clients
+
+from . ai import request
+from . types import AutoAnswer
 
 
 MAX_COUNT_AUTO_ANSWERS = 1
@@ -34,7 +38,7 @@ async def get_auto_answers(account_id: int) -> list[AutoAnswer]:
     """Возвращает список автоответов клиента, если status выбран, то только с определенным статусом"""
 
     sql = ("SELECT answer_id, status, text, entities, media, start_time, end_time, weekdays, triggers, offline, "
-           f"chats, contacts, blacklist_chats FROM answering_machine WHERE account_id={account_id} ORDER BY answer_id")
+           f"chats, contacts, blacklist_chats, ai FROM answering_machine WHERE account_id={account_id} ORDER BY answer_id")
     data: list[dict] = await Database.fetch_all(sql)
 
     sql = f"SELECT answer_id, user_id, time FROM answering_machine_triggering WHERE account_id={account_id}"
@@ -66,11 +70,11 @@ async def check_count_auto_answers(account_id: int) -> bool:
     return data < MAX_COUNT_AUTO_ANSWERS
 
 
-async def add_auto_answer(account_id: int, text: str, entities: list[dict], media_id: Optional[str] = None, media_ext: Optional[str] = None) -> int:
+async def add_auto_answer(account_id: int, text: str, entities: list[dict], ai: bool, media_id: Optional[str] = None, media_ext: Optional[str] = None) -> int:
     """Создает автоответ и возвращает его идентификатор"""
 
-    answer_id = int(time_now().timestamp() * 1000000 % 100000000000)
-    entities = Database.serialize(entities)
+    answer_id = int(time_now().timestamp() * 1000000 % 2000000000)  # Для генерации сессии в .ai answer_id должен быть в пределах int32
+    entities = Database.serialize(entities if not ai else [])
     media = None
 
     if media_id:
@@ -78,8 +82,8 @@ async def add_auto_answer(account_id: int, text: str, entities: list[dict], medi
         media = Database.serialize(dict(access_hash=access_hash, ext=media_ext))
         await download_auto_answer_media(account_id, answer_id, media_id, access_hash, media_ext)
 
-    sql = "INSERT INTO answering_machine (account_id, answer_id, text, entities, media) VALUES ($1, $2, $3, $4, $5)"
-    await Database.execute(sql, account_id, answer_id, text, entities, media)
+    sql = "INSERT INTO answering_machine (account_id, answer_id, text, entities, media, ai) VALUES ($1, $2, $3, $4, $5, $6)"
+    await Database.execute(sql, account_id, answer_id, text, entities, media, ai)
 
     return answer_id
 
@@ -107,7 +111,7 @@ async def get_auto_answer(account_id: int, answer_id: int) -> Optional[AutoAnswe
     """Возвращает автоответ клиента"""
 
     sql = ("SELECT answer_id, status, text, entities, media, start_time, end_time, weekdays, triggers, offline, "
-           f"chats, contacts, blacklist_chats FROM answering_machine WHERE account_id={account_id} AND answer_id={answer_id}")
+           f"chats, contacts, blacklist_chats, ai FROM answering_machine WHERE account_id={account_id} AND answer_id={answer_id}")
     data: dict = await Database.fetch_row(sql)
     if not data:
         return None
@@ -228,7 +232,7 @@ async def set_status_auto_answer(account_id: int, answer_id: int, status: bool):
     await delete_auto_answer_triggering(account_id, answer_id)
 
 
-async def edit_auto_answer(account_id: int, answer_id: int, text: str, entities: list[dict], media_id: Optional[str] = None, media_ext: Optional[str] = None) -> bool:
+async def edit_auto_answer(account_id: int, answer_id: int, text: str, entities: list[dict], ai: bool, media_id: Optional[str] = None, media_ext: Optional[str] = None) -> bool:
     """
     Изменяет текст и медиа автоответа
 
@@ -242,7 +246,7 @@ async def edit_auto_answer(account_id: int, answer_id: int, text: str, entities:
     if answer.media:
         delete_auto_answer_media(account_id, answer_id, answer.media.access_hash, answer.media.ext)  # Удаляем прошлое медиа
 
-    entities = Database.serialize(entities)
+    entities = Database.serialize(entities if not ai else [])
     media = None
 
     if media_id:
@@ -250,8 +254,8 @@ async def edit_auto_answer(account_id: int, answer_id: int, text: str, entities:
         media = Database.serialize(dict(access_hash=access_hash, ext=media_ext))
         await download_auto_answer_media(account_id, answer_id, media_id, access_hash, media_ext)
 
-    sql = f"UPDATE answering_machine SET text=$1, entities=$2, media=$3 WHERE account_id={account_id} AND answer_id={answer_id}"
-    await Database.execute(sql, text, entities, media)
+    sql = f"UPDATE answering_machine SET text=$1, entities=$2, media=$3, ai=$4 WHERE account_id={account_id} AND answer_id={answer_id}"
+    await Database.execute(sql, text, entities, media, ai)
 
     return True
 
@@ -488,3 +492,17 @@ async def get_enabled_auto_answer(maksogram_client: 'MaksogramClient', text: str
 
         else:
             return answer
+
+
+async def use_ai(account_id: int, message: Message, answer: AutoAnswer) -> str:
+    """
+    Отправляет промт нейросети для сообщения (с html разметкой) и возвращает текст ответа
+
+    :param account_id: клиент
+    :param message: сообщение, на которое нужно ответить
+    :param answer: автоответ с ai=true
+    :return: текст ответа (без html разметки)
+    """
+
+    return await request(message.message, answer.text, account_id, answer.id, maksogram_clients[account_id].logger)
+

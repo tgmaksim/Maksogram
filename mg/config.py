@@ -3,8 +3,8 @@ import sys
 
 
 VERSION_GROUP = "3"
-VERSION_ID = "3.0"
-VERSION = "3.1.0 (163)"
+VERSION_ID = "3.1"
+VERSION = "3.1.1 (164)"
 
 release = sys.argv[1] == "release"
 testing = len(sys.argv) > 2 and sys.argv[2] == "testing"
@@ -27,6 +27,7 @@ YOOMONEY_API_ID = int(os.environ['YOOMONEY_API_ID'])
 YOOMONEY_API_KEY = os.environ['YOOMONEY_API_KEY']
 CRYPTO_API_KEY = os.environ['CRYPTO_API_KEY']
 OPENWEATHERMAP_API_KEY = os.environ['OPENWEATHERMAP_API_KEY']
+GIGACHAT_API_TOKEN = os.environ['GIGACHAT_API_TOKEN']
 
 NETANGELS_API_KEY = os.environ['NETANGELS_API_KEY']
 MAKSOGRAM_PROCESS_ID = int(os.environ['MAKSOGRAM_PROCESS_ID'])

@@ -224,6 +224,10 @@ async def reset_subscription(account_id: int):
     sql = f"UPDATE modules SET auto_audio_transcription=false WHERE account_id={account_id}"
     await Database.execute(sql)
 
+    # Удаляет все автоответы с нейро-ответами
+    sql = f"DELETE FROM answering_machine WHERE account_id={account_id} AND ai=true"
+    await Database.execute(sql)
+
     # Удаляет все автоответы клиента кроме самого старого
     sql = (f"DELETE FROM answering_machine WHERE answer_id!="
            f"(SELECT MIN(answer_id) FROM answering_machine WHERE account_id={account_id}) AND account_id={account_id}")
