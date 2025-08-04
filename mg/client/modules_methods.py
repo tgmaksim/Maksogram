@@ -7,8 +7,10 @@ import os
 import re
 import asyncio
 
+from mg.bot.types import dp
 from datetime import timedelta
 from typing import Optional, Literal
+from aiogram.fsm.storage.base import StorageKey
 from mg.core.types import MaksogramBot, CustomEmoji
 from mg.core.functions import www_path, format_error, time_now, get_subscription
 
@@ -68,7 +70,11 @@ class ModulesMethods:
 
         text = (message.message or '').lower()
         bot = message.chat_id == MaksogramBot.id
+        bot_state = await dp.fsm.storage.get_state(StorageKey(bot_id=MaksogramBot.id, chat_id=self.id, user_id=self.id))
         bot_audio, bot_voice, bot_video, bot_video_note, reply_audio, reply_voice, reply_video, reply_video_note = (None,) * 8
+
+        if bot and bot_state:
+            return  # Бот ожидает данные от пользователя
 
         if bot and not message.web_preview:  # Медиа в чате с ботом обрабатываются сразу, без команды
             bot_audio = message.audio

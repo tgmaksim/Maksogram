@@ -66,6 +66,7 @@ class MaksogramBaseClient:
 
         self._last_event = LastEvent()
         self._status = None
+        self._was_online = None
         self.recovery_system_channels = False
 
         # Логирование некоторых данных для выявления причин ошибок и их исправления
@@ -308,12 +309,16 @@ class MaksogramBaseClient:
     async def set_init_data(self: 'MaksogramClient', name: str, my_messages: int, message_changes: int, status_users: list[int], awake_time: datetime):
         """Изменяет основные данные клиента"""
 
+        me = await self.client.get_me()
+
         self._name = name
-        self._is_premium = (await self.client.get_me()).premium
+        self._is_premium = me.premium
         self._my_messages = my_messages
         self._message_changes = message_changes
         self._status_users = {user_id: False for user_id in status_users if user_id != self.id}
         self._awake_time = awake_time
+        self._status = isinstance(me.status, UserStatusOnline)
+        self._was_online = time_now() if self._status else me.status.was_online.replace(tzinfo=None)
 
     @property
     def id(self: 'MaksogramClient') -> int:
@@ -332,7 +337,13 @@ class MaksogramBaseClient:
         return self._status
 
     def set_status(self: 'MaksogramClient', value: bool):
+        if value is False:
+            self._was_online = time_now()
         self._status = value
+
+    @property
+    def was_online(self) -> datetime:
+        return self._was_online
 
     @property
     def logger(self: 'MaksogramClient') -> logging.Logger:

@@ -113,7 +113,7 @@ async def _auto_answer(message: Message, state: FSMContext):
     warning = None
     text = message.text or message.caption
     entities = message.entities or message.caption_entities or []
-    file = (message.photo and message.photo[-1]) or message.video
+    file = (message.photo and message.photo[-1]) or message.video or message.animation
 
     if message.text == "Отмена":
         await state.clear()
@@ -121,7 +121,7 @@ async def _auto_answer(message: Message, state: FSMContext):
             await message.answer(**await auto_answer_menu(account_id, answer_id))
         else:
             await message.answer(**await answering_machine_menu(account_id))
-    elif message.content_type not in ('text', 'photo', 'video'):
+    elif message.content_type not in ('text', 'photo', 'video', 'animation'):
         warning = "Содержание автоответа должно быть текстом, фото или видео"
     elif not text:
         warning = "Текст автоответа не может быть пустым"
@@ -137,7 +137,7 @@ async def _auto_answer(message: Message, state: FSMContext):
 
         if file:
             media_id = file.file_id
-            ext = 'mp4' if message.video else 'png'
+            ext = 'png' if message.photo else 'mp4'
 
         if answer_id:  # Необходимо изменить текст автоответа
             if await edit_auto_answer(account_id, answer_id, text, json_entities, media_id, ext):  # Быстрый ответ изменен

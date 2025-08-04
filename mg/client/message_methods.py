@@ -30,7 +30,6 @@ from telethon.tl.types import (
 
     MessageService,
     StarGiftUnique,
-    UserStatusOffline,
     MessageReplyHeader,
     MessageActionStarGift,
     MessageActionStarGiftUnique,
@@ -214,9 +213,11 @@ class MessageMethods:
         if not answer:
             return False
 
+        if answer.triggering.get(message.chat_id) and time_now() - answer.triggering[message.chat_id] < timedelta(hours=1):
+            return False  # Автоответ для этого чата недавно срабатывал
+
         if answer.offline:
-            my_status = (await self.client.get_me()).status
-            if not (isinstance(my_status, UserStatusOffline) and time_now() - my_status.was_online < timedelta(minutes=1)):
+            if not (self.offline and time_now() - self.was_online >= timedelta(minutes=1)):
                 return False  # Автоответ не работает, когда клиент в сети или был недавно (1 минуту назад)
 
         contact: bool = (await message.get_chat()).contact
@@ -227,9 +228,6 @@ class MessageMethods:
         else:  # answer.blacklist_chats is False:  # Только
             if answer.contacts != contact and message.chat_id not in answer.chats:
                 return False  # Чат не попадает под исключения
-
-        if answer.triggering.get(message.chat_id) and time_now() - answer.triggering[message.chat_id] < timedelta(hours=1):
-            return False  # Автоответ для этого чата недавно срабатывал
 
         await update_auto_answer_triggering(self.id, answer.id, message.chat_id)
 
