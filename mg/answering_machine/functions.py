@@ -11,11 +11,23 @@ from mg.core.types import morning
 from datetime import time, timedelta
 from mg.core.database import Database
 from asyncpg.exceptions import UniqueViolationError
-from mg.core.functions import get_time_zone, time_now, www_path, get_subscription
+from mg.core.functions import get_time_zone, time_now, www_path, get_subscription, full_name
 
 from mg.bot.types import bot
 from telethon.tl.patched import Message
 from mg.client.types import maksogram_clients
+from telethon.tl.types import (
+    MessageMediaGeo,
+    MessageMediaPoll,
+    MessageMediaGame,
+    MessageMediaPhoto,
+    MessageMediaVenue,
+    MessageMediaInvoice,
+    MessageMediaGeoLive,
+    MessageMediaContact,
+    MessageMediaWebPage,
+    MessageMediaDocument,
+)
 
 from . ai import request
 from . types import AutoAnswer
@@ -504,5 +516,33 @@ async def use_ai(account_id: int, message: Message, answer: AutoAnswer) -> str:
     :return: текст ответа (без html разметки)
     """
 
-    return await request(message.message, answer.text, account_id, answer.id, maksogram_clients[account_id].logger)
+    media = "unsupported_media" if message.media else None
+    if isinstance(message.media, MessageMediaPhoto):
+        media = "photo"
+    elif isinstance(message.media, (MessageMediaGeo, MessageMediaGeoLive, MessageMediaVenue)):
+        media = "geolocation"
+    elif isinstance(message.media, MessageMediaContact):
+        media = f"contact ({message.media.first_name} {message.media.last_name})"
+    elif isinstance(message.media, MessageMediaWebPage):
+        media = f"web_page ({message.media.webpage.display_url})"
+    elif isinstance(message.media, MessageMediaGame):
+        media = "game"
+    elif isinstance(message.media, MessageMediaInvoice):
+        media = "invoice"
+    elif isinstance(message.media, MessageMediaPoll):
+        media = "poll"
+    elif isinstance(message.media, MessageMediaDocument):
+        if message.voice or message.audio:
+            media = "audio"
+        elif message.video or message.video_note:
+            media = "video"
+        else:
+            media = f"file {message.file.name}"
+
+    meta_data = {
+        'message_media': media,
+        'sender': full_name(await message.get_chat())
+    }
+
+    return await request(message.message, answer.text, meta_data, account_id, answer.id, maksogram_clients[account_id].logger)
 
