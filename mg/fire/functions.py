@@ -139,7 +139,7 @@ async def reset_fire(account_id: int, user_id: int):
 async def clear_fire(account_id: int, user_id: int):
     """Обнуляет все достижения огонька"""
 
-    sql = (f"UPDATE fires SET reset=false, days=0, score=0, account_status=false, user_status=false, updating_time=now() "
+    sql = (f"UPDATE fires SET reset=false, days=0, account_status=false, user_status=false, updating_time=now() "
            f"WHERE account_id={account_id} AND user_id={user_id}")
     await Database.execute(sql)
 
