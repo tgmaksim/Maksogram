@@ -357,9 +357,7 @@ async def start_maksogram_client(account_id: int, username: str, phone_number: i
     await Database.execute(
         "INSERT INTO accounts (account_id, name, phone_number, my_messages, message_changes, registration_date, awake_time) "
         "VALUES($1, $2, $3, $4, $5, now(), now())", account_id, name, phone_number, response.my_messages, response.message_changes)
-    await Database.execute(
-        "INSERT INTO settings (account_id, is_started, added_chats, removed_chats, time_zone, city, gender, saving_messages, notify_changes) "
-        "VALUES($1, true, '{}', '{}', 6, 'Омск', NULL, true, false)", account_id)
+    await Database.execute("INSERT INTO settings (account_id, is_started, time_zone, city) VALUES($1, true, 6, 'Омск')", account_id)
     await Database.execute(
         "INSERT INTO payment (account_id, subscription, fee, ending, first_notification, second_notification) "
         "VALUES($1, 'premium', $2, $3, now(), now())", account_id, FEE, end)
